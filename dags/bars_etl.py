@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 HOME_DIR = pathlib.Path(os.environ["AIRFLOW_HOME"]) / "trading"
 START_DATE = "2018-01-01 00:00:00+00:00"
-PROVIDER = "yfinance"
 ARCTIC = adb.Arctic(ARCTIC_URL)
 
 

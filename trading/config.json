@@ -1,6 +1,5 @@
 {
   "name": "etft",
-  "provider": "yfinance",
   "universe": {
     "sp500": {
       "html": "https://gist.github.com/ZeccaLehn/f6a2613b24c393821f81c0c1d23d4192#file-sp500-csv",
