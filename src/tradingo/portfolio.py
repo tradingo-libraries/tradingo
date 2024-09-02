@@ -32,22 +32,23 @@ def portfolio_construction(
     close: pd.DataFrame,
     ivol: pd.DataFrame,
     vol: pd.DataFrame,
-    config: dict,
     instruments: pd.DataFrame,
     provider: str,
     universe: str,
+    signal_weights: dict,
+    multiplier: float,
+    default_weight: float,
+    constraints: dict,
+    instrument_weights: dict,
+    vol_scale: bool,
+    aum: float,
     **kwargs,
 ):
 
     ivol = ivol.iloc[-1].sort_values(ascending=False)
 
-    strategy = config["portfolio"][name]
-    signal_weights = strategy["signal_weights"]
-    multiplier = strategy["multiplier"]
-    default_weight = strategy["default_weight"]
     weights = pd.Series(multiplier, index=instruments.index)
-    constraints = strategy["constraints"]
-    for key, weights_config in strategy["instrument_weights"].items():
+    for key, weights_config in instrument_weights.items():
 
         if key not in instruments.columns:
             continue
@@ -89,7 +90,7 @@ def portfolio_construction(
             columns=close.columns,
         )
 
-    if strategy["vol_scale"]:
+    if vol_scale:
 
         weights = weights.div(10 * vol)
 
@@ -106,7 +107,7 @@ def portfolio_construction(
             pct_position.index == pct_position.first_valid_index(), col
         ] = 0.0
 
-    share_position = (pct_position * strategy["aum"]) / close
+    share_position = (pct_position * aum) / close
 
     return (pct_position, share_position, signal_value)
 
@@ -172,8 +173,8 @@ def position_from_trades(
         .cumsum()
         .reindex_like(
             close,
-            method="ffill",
         )
+        .ffill()
         .fillna(0.0)
     )
 

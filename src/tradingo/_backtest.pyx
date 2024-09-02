@@ -19,6 +19,7 @@ cpdef compute_backtest(
     float opening_avg_price,
     float[:] trades,
     float[:] prices,
+    float[:] dividends,
 ):
 
     cdef size_t num_days = trades.shape[0]
@@ -33,6 +34,10 @@ cpdef compute_backtest(
 
     unrealised_pnl[0] = 0
     realised_pnl[0] = 0
+    total_pnl[0] = 0
+    net_investment[0] = 0
+    net_position[0] = 0
+    avg_open_price[0] = 0
 
     net_position[0] = opening_position
     avg_open_price[0] = opening_avg_price
@@ -54,6 +59,7 @@ cpdef compute_backtest(
         idx_prev = idx - 1
 
         trade_quantity = trades[idx]
+        dividend = dividends[idx]
         price = prices[idx]
         m_unrealised_pnl = (price - avg_open_price[idx_prev]) * net_position[idx_prev]
 
@@ -82,6 +88,9 @@ cpdef compute_backtest(
                 # Check if it is close-and-open
                 if trade_quantity > abs(m_net_position):
                     m_avg_open_price = price
+
+        if dividend != 0 and not isnan(dividend):
+            m_realised_pnl += m_net_position * dividend
 
         # total pnl
         m_total_pnl = m_realised_pnl + m_unrealised_pnl

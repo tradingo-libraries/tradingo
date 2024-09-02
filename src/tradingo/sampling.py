@@ -95,6 +95,8 @@ def download_instruments(
     "prices/close",
     "prices/adj_close",
     "prices/volume",
+    "prices/dividend",
+    "prices/split_ratio",
     symbol_prefix="{provider}.{universe}.",
 )
 def sample_equity(
@@ -125,6 +127,8 @@ def sample_equity(
         close,
         100 * (1 + close.pct_change()).cumprod(),
         data.pivot(columns=["symbol"], values="volume"),
+        data.pivot(columns=["symbol"], values="dividend"),
+        data.pivot(columns=["symbol"], values="split_ratio"),
     )
 
 

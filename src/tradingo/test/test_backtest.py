@@ -1,3 +1,4 @@
+from numpy import divide
 import pytest
 import pandas as pd
 
@@ -43,6 +44,7 @@ def test_backtest_integration(benchmark, tradingo):
         backtest.backtest,
         prices="close",
         portfolio="model",
+        dividends="dividend",
         start_date=pd.Timestamp("2018-01-01 00:00:00+00:00"),
         end_date=pd.Timestamp.now("utc"),
         name="model",
@@ -127,9 +129,12 @@ def test_backtest_integration_old(benchmark, tradingo):
 )
 def test_backtest_smoke(tradingo, prices_, portfolio_, unrealised_pnl, realised_pnl):
 
+    dividends = pd.DataFrame(0, columns=prices_.columns, index=prices_.index)
+
     bt = backtest.backtest(
         portfolio=portfolio_,
         prices=prices_,
+        dividends=dividends,
         name="test",
         config_name="test",
         dry_run=True,

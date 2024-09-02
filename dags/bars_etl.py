@@ -69,7 +69,7 @@ def get_or_create_signal(
     name, universe, provider, signal, function, config, depends_on, dag: DAG, prices
 ) -> Operator:
     signal = signal.copy()
-    task_id = make_task_id("signal", name)
+    task_id = make_task_id("signal", ".".join((universe, provider, name)))
     try:
         signal = PythonOperator(
             task_id=task_id,
@@ -95,8 +95,8 @@ def get_or_create_signal(
         _ = (
             get_or_create_signal(
                 sig,
-                signal_config["universe"],
-                signal_config["provider"],
+                universe,
+                provider,
                 signal_config["kwargs"],
                 signal_config["function"],
                 config,
@@ -116,7 +116,7 @@ DAG_DEFAULT_ARGS = {
 
 def get_or_create_universe(universe, provider, dag, vol_speeds, **kwargs):
     insts = _get_or_create_task(
-        task_id=universe,
+        task_id=f"{universe}.instruments",
         callable=sampling.download_instruments,
         dag=dag,
         universe=universe,
@@ -240,7 +240,6 @@ def trading_dag(
                         "config_name": config["name"],
                         "provider": strategy["provider"],
                         "universe": strategy["universe"],
-                        "config": config,
                         "trade_file": trades_file,
                         "aum": strategy["aum"],
                     },
@@ -258,6 +257,13 @@ def trading_dag(
                         "provider": strategy["provider"],
                         "universe": strategy["universe"],
                         "config": config,
+                        "signal_weights": strategy["signal_weights"],
+                        "multiplier": strategy["multiplier"],
+                        "default_weight": strategy["default_weight"],
+                        "constraints": strategy["constraints"],
+                        "instrument_weights": strategy["instrument_weights"],
+                        "vol_scale": strategy["vol_scale"],
+                        "aum": strategy["aum"],
                     },
                 )
                 buffered_pos = PythonOperator(
@@ -327,8 +333,8 @@ def trading_dag(
                     prices
                     >> get_or_create_signal(
                         signal,
-                        signal_config["universe"],
-                        signal_config["provider"],
+                        strategy["universe"],
+                        strategy["provider"],
                         signal_config["kwargs"],
                         function=signal_config["function"],
                         config=config,

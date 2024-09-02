@@ -74,9 +74,7 @@
         "speed1": 64,
         "speed2": 32,
         "model_name": "trend"
-      },
-      "universe": "etfs",
-      "provider": "yfinance"
+      }
     },
     "trend.ewmac_64_32.scaled": {
       "depends_on": [
@@ -87,9 +85,7 @@
         "scale": 20,
         "signal": "ewmac_64_32",
         "model_name": "trend"
-      },
-      "universe": "etfs",
-      "provider": "yfinance"
+      }
     },
     "trend.ewmac_64_32.scaled.capped": {
       "depends_on": [
@@ -100,9 +96,7 @@
         "cap": 15,
         "signal": "ewmac_64_32.scaled",
         "model_name": "trend"
-      },
-      "universe": "etfs",
-      "provider": "yfinance"
+      }
     },
     "trend.ewmac_128_64": {
       "function": "ewmac_signal",
@@ -111,9 +105,7 @@
         "speed1": 128,
         "speed2": 64,
         "model_name": "trend"
-      },
-      "universe": "etfs",
-      "provider": "yfinance"
+      }
     },
     "trend.ewmac_128_64.scaled": {
       "depends_on": [
@@ -124,9 +116,7 @@
         "scale": 1,
         "signal": "ewmac_128_64",
         "model_name": "trend"
-      },
-      "universe": "etfs",
-      "provider": "yfinance"
+      }
     },
     "trend.ewmac_128_64.scaled.capped": {
       "depends_on": [
@@ -137,9 +127,7 @@
         "cap": 0.75,
         "signal": "ewmac_128_64.scaled",
         "model_name": "trend"
-      },
-      "universe": "etfs",
-      "provider": "yfinance"
+      }
     }
   },
   "portfolio": {

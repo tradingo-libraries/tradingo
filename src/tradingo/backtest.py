@@ -99,6 +99,7 @@ BACKTEST_FIELDS = (
 @symbol_provider(
     portfolio="portfolio/{provider}.{universe}.{name}.{stage}",
     prices="prices/{provider}.{universe}.close",
+    dividends="prices/{provider}.{universe}.dividend",
     symbol_prefix="",
 )
 @symbol_publisher(
@@ -111,6 +112,7 @@ def backtest(
     *,
     portfolio: pd.DataFrame,
     prices: pd.DataFrame,
+    dividends: pd.DataFrame,
     name: str,
     stage: str = "raw",
     **kwargs,
@@ -124,6 +126,7 @@ def backtest(
 
         logger.info("Computing backtest for ticker=%s", inst_trades.name)
         inst_prices = prices[inst_trades.name].ffill()
+        inst_dividends = dividends[inst_trades.name].fillna(0.0)
         opening_position = portfolio.loc[
             portfolio.first_valid_index(), inst_trades.name
         ]
@@ -140,6 +143,7 @@ def backtest(
                 opening_avg_price,
                 inst_trades.fillna(0.0).to_numpy().astype("float32"),
                 inst_prices.to_numpy().astype("float32"),
+                inst_dividends.to_numpy().astype("float32"),
             ),
             index=inst_trades.index,
             columns=BACKTEST_FIELDS,

@@ -1,6 +1,7 @@
 import string
 import numpy as np
 import pandas as pd
+from pendulum.constants import US_PER_SECOND
 import pytest
 
 from tradingo.api import Tradingo
@@ -42,5 +43,9 @@ def tradingo(prices: pd.DataFrame, position: pd.DataFrame) -> Tradingo:
         t.create_library(library)
     t.instruments.etfs.update(null_instruments(prices.columns), upsert=True)
     t.prices.close.update(prices, upsert=True)
+    t.prices.dividend.update(
+        pd.DataFrame(0, index=prices.index, columns=prices.columns),
+        upsert=True,
+    )
     t.portfolio.model.raw.shares.update(position, upsert=True)
     return t
