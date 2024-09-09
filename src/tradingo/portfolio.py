@@ -48,6 +48,9 @@ def portfolio_construction(
     ivol = ivol.iloc[-1].sort_values(ascending=False)
 
     weights = pd.Series(multiplier, index=instruments.index)
+
+    instruments["Symbol"] = instruments.index
+
     for key, weights_config in instrument_weights.items():
 
         if key not in instruments.columns:

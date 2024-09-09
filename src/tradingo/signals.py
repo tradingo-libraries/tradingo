@@ -122,6 +122,8 @@ def _linear_buffer(signal: np.ndarray, thresholds: np.ndarray):
 )
 def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
 
+    signal = signal.ffill().fillna(0.0)
+
     thresholds = signal.mul(buffer_width)
 
     buffered = _linear_buffer(signal.to_numpy(), thresholds.to_numpy())

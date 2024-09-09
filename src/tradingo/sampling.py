@@ -104,6 +104,7 @@ def sample_equity(
     start_date: str,
     end_date: str,
     provider: Provider,
+    interval: str = "1d",
     **kwargs,
 ):
     from openbb import obb
@@ -113,6 +114,7 @@ def sample_equity(
         start_date=start_date,
         end_date=end_date,
         provider=provider,
+        interval=interval,
     ).to_dataframe()
 
     data.index = pd.to_datetime(data.index)

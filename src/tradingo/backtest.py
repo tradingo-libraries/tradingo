@@ -128,11 +128,11 @@ def backtest(
         inst_prices = prices[inst_trades.name].ffill()
         inst_dividends = dividends[inst_trades.name].fillna(0.0)
         opening_position = portfolio.loc[
-            portfolio.first_valid_index(), inst_trades.name
+            portfolio[inst_trades.name].first_valid_index(), inst_trades.name
         ]
         if opening_position != 0:
             opening_avg_price = prices.loc[
-                portfolio.first_valid_index(), inst_trades.name
+                portfolio[inst_trades.name].first_valid_index(), inst_trades.name
             ]
         else:
             opening_avg_price = 0
