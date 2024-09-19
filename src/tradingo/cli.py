@@ -1,4 +1,5 @@
 from __future__ import annotations
+from enum import Enum
 import importlib
 import functools
 import argparse
@@ -8,6 +9,7 @@ import json
 from typing import Iterable
 
 import pandas as pd
+from tradingo.sampling import Provider
 
 
 SIGNAL_KEY = "{0}.{1}".format
@@ -30,6 +32,7 @@ def cli_app():
     app.add_argument("--with-deps", action="store_true")
     app.add_argument("--start-date", type=pd.Timestamp)
     app.add_argument("--end-date", type=pd.Timestamp)
+    app.add_argument("--force-rerun", action="store_true")
     return app
 
 
@@ -50,6 +53,13 @@ def task_resolver(func):
     return wrapper
 
 
+class TaskState(Enum):
+
+    PENDING = "PENDING"
+    FAILED = "FAILED"
+    SUCCESS = "SUCCESS"
+
+
 class Task:
 
     def __init__(
@@ -64,6 +74,7 @@ class Task:
         self.task_kwargs = task_kwargs
         self._dependencies = list(dependencies)
         self._resolved_dependencies = []
+        self.state = TaskState.PENDING
 
     def __repr__(self):
         return (
@@ -74,20 +85,29 @@ class Task:
             ")"
         )
 
-    def run(self, run_dependencies):
-
-        print(f"Running {self}")
+    def run(self, run_dependencies, force_rerun=False):
 
         if run_dependencies:
 
             for dependency in self.dependencies:
 
-                dependency.run(run_dependencies=run_dependencies)
+                dependency.run(
+                    run_dependencies=run_dependencies,
+                    force_rerun=force_rerun,
+                )
 
         module, function_name = self.function.rsplit(".", maxsplit=1)
         function = getattr(importlib.import_module(module), function_name)
 
-        function(*self.task_args, **self.task_kwargs)
+        state = self.state
+        try:
+            if self.state == TaskState.PENDING or force_rerun:
+                state = TaskState.FAILED
+                print(f"Running {self}")
+                function(*self.task_args, **self.task_kwargs)
+                self.state = state = TaskState.SUCCESS
+        finally:
+            self.state = state
 
     def add_dependencies(self, *dependency):
         self._dependencies.extend(dependency)
@@ -250,7 +270,51 @@ def build_graph(config, start_date, end_date) -> dict[str, Task]:
 
         global_tasks[portfolio_name] = portfolio_task
 
+        global_tasks[f"{portfolio_name}.backtest"] = Task(
+            "tradingo.backtest.backtest",
+            task_args=[],
+            task_kwargs={
+                "start_date": start_date,
+                "end_date": end_date,
+                "name": portfolio_name,
+                "provider": portfolio_config["kwargs"]["provider"],
+                "universe": portfolio_config["kwargs"]["universe"],
+                "stage": "raw.shares",
+            },
+            dependencies=[portfolio_name],
+        )
+
     return global_tasks
+
+
+def serialise_dag(graph: dict[str, Task]):
+
+    dag_state = pathlib.Path.home() / ".tradingo/dag-state.json"
+
+    dag_state.parent.mkdir(parents=True, exist_ok=True)
+    dag_state.write_text(
+        json.dumps({k: v.state.value for k, v in graph.items()}, indent=2)
+    )
+
+
+def update_dag(graph: dict[str, Task]):
+
+    dag_state = pathlib.Path.home() / ".tradingo/dag-state.json"
+
+    if not dag_state.exists():
+
+        return
+
+    else:
+        dag_state = json.loads(dag_state.read_text())
+
+        for k, v in dag_state.items():
+
+            if k not in graph:
+                continue
+            state = TaskState[v]
+
+            graph[k].state = state if state == TaskState.SUCCESS else TaskState.PENDING
 
 
 def main():
@@ -259,8 +323,14 @@ def main():
 
     graph = build_graph(args.config, args.start_date, args.end_date)
 
+    update_dag(graph)
+
     task = graph[args.task]
-    task.run(args.with_deps)
+
+    try:
+        task.run(args.with_deps, force_rerun=args.force_rerun)
+    finally:
+        serialise_dag(graph)
 
 
 if __name__ == "__main__":
