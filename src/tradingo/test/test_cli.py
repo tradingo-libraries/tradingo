@@ -1,3 +1,4 @@
+import pandas as pd
 from tradingo.cli import build_graph
 
 
@@ -13,6 +14,9 @@ def test_build_graph():
             UNIVERSE: {
                 "provider": PROVIDER,
                 "index_col": None,
+                "volatility": {
+                    "speeds": [32, 64],
+                },
             }
         },
         "volatility": {"speeds": []},
@@ -29,13 +33,32 @@ def test_build_graph():
             PORTFOLIO: {
                 "function": "module.portfolio_function",
                 "args": [],
-                "kwargs": {},
+                "kwargs": {
+                    "provider": PROVIDER,
+                    "universe": UNIVERSE,
+                },
                 "signal_weights": {"signal1.capped": 1},
                 "universe": UNIVERSE,
             }
         },
     }
 
-    tasks = build_graph(config)
+    tasks = build_graph(config, pd.Timestamp("2018-01-01"), pd.Timestamp("2024-09-18"))
 
-    print(tasks)
+    assert tasks[PORTFOLIO].dependencies == [
+        tasks[f"{UNIVERSE}.sample"],
+        tasks[f"{UNIVERSE}.vol"],
+        tasks[f"{UNIVERSE}.ivol"],
+        tasks[f"{UNIVERSE}.signal1.capped"],
+    ]
+
+    assert tasks[f"{PORTFOLIO}.backtest"].dependencies == [tasks[PORTFOLIO]]
+
+    assert tasks[f"{UNIVERSE}.sample"].dependencies == [
+        tasks[f"{UNIVERSE}.instruments"]
+    ]
+    assert tasks[f"{UNIVERSE}.signal1"].dependencies == [
+        tasks[f"{UNIVERSE}.sample"],
+        tasks[f"{UNIVERSE}.vol"],
+        tasks[f"{UNIVERSE}.ivol"],
+    ]

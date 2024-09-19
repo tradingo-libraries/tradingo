@@ -270,7 +270,7 @@ def build_graph(config, start_date, end_date) -> dict[str, Task]:
 
         global_tasks[portfolio_name] = portfolio_task
 
-        global_tasks[f"{portfolio_name}.backtest"] = Task(
+        backtest = Task(
             "tradingo.backtest.backtest",
             task_args=[],
             task_kwargs={
@@ -283,6 +283,9 @@ def build_graph(config, start_date, end_date) -> dict[str, Task]:
             },
             dependencies=[portfolio_name],
         )
+
+        global_tasks[f"{portfolio_name}.backtest"] = backtest
+        backtest.resolve_dependencies(global_tasks)
 
     return global_tasks
 
