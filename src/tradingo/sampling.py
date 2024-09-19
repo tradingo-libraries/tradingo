@@ -87,7 +87,7 @@ def download_instruments(
     raise ValueError(file)
 
 
-@symbol_provider(instruments="instruments/{name}", no_date=True)
+@symbol_provider(instruments="instruments/{universe}", no_date=True)
 @symbol_publisher(
     "prices/open",
     "prices/high",
@@ -97,6 +97,7 @@ def download_instruments(
     "prices/volume",
     "prices/dividend",
     "prices/split_ratio",
+    astype=float,
     symbol_prefix="{provider}.{universe}.",
 )
 def sample_equity(
