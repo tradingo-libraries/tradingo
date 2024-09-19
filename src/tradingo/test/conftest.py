@@ -1,7 +1,6 @@
 import string
 import numpy as np
 import pandas as pd
-from pendulum.constants import US_PER_SECOND
 import pytest
 
 from tradingo.api import Tradingo
