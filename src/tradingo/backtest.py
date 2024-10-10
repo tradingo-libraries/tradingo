@@ -98,7 +98,8 @@ BACKTEST_FIELDS = (
 
 @symbol_provider(
     portfolio="portfolio/{provider}.{universe}.{name}.{stage}",
-    prices="prices/{provider}.{universe}.close",
+    bid="prices/{provider}.{universe}.close",
+    ask="prices/{provider}.{universe}.close",
     dividends="prices/{provider}.{universe}.dividend",
     symbol_prefix="",
 )
@@ -111,27 +112,29 @@ BACKTEST_FIELDS = (
 def backtest(
     *,
     portfolio: pd.DataFrame,
-    prices: pd.DataFrame,
+    bid: pd.DataFrame,
+    ask: pd.DataFrame,
     dividends: pd.DataFrame,
     name: str,
     stage: str = "raw",
     **kwargs,
 ):
     trades = portfolio.ffill().fillna(0.0).diff()
-    prices = prices.ffill()
+    bid, ask = bid.ffill(), ask.ffill()
 
     logger.info("running backtest for %s on stage %s with %s", name, stage, kwargs)
 
     def compute_backtest(inst_trades: pd.Series):
 
         logger.info("Computing backtest for ticker=%s", inst_trades.name)
-        inst_prices = prices[inst_trades.name].ffill()
+        inst_asks = ask[inst_trades.name].ffill()
+        inst_bids = bid[inst_trades.name].ffill()
         inst_dividends = dividends[inst_trades.name].fillna(0.0)
         opening_position = portfolio.loc[
             portfolio[inst_trades.name].first_valid_index(), inst_trades.name
         ]
         if opening_position != 0:
-            opening_avg_price = prices.loc[
+            opening_avg_price = ask.loc[
                 portfolio[inst_trades.name].first_valid_index(), inst_trades.name
             ]
         else:
@@ -142,7 +145,8 @@ def backtest(
                 opening_position,
                 opening_avg_price,
                 inst_trades.fillna(0.0).to_numpy().astype("float32"),
-                inst_prices.to_numpy().astype("float32"),
+                inst_bids.to_numpy().astype("float32"),
+                inst_asks.to_numpy().astype("float32"),
                 inst_dividends.to_numpy().astype("float32"),
             ),
             index=inst_trades.index,
@@ -150,12 +154,17 @@ def backtest(
         )
 
     backtest = pd.concat(
-        (compute_backtest(data) for _, data in trades.items()), keys=trades, axis=1
+        (compute_backtest(data) for _, data in trades.items()),
+        keys=trades.columns,
+        axis=1,
     ).reorder_levels([1, 0], axis=1)
 
     backtest_fields = (backtest.loc[:, f] for f in BACKTEST_FIELDS if f != "date")
 
+    prices = (ask + bid) / 2
+
     net_exposure = (backtest["net_position"] * prices.ffill()).sum(axis=1)
+    gross_exposure = (backtest["net_position"].abs() * prices.ffill()).sum(axis=1)
 
     summary = (
         backtest[
@@ -166,10 +175,13 @@ def backtest(
                 "total_pnl",
             ]
         ]
-        .groupby(level=0, axis=1)
+        .transpose()
+        .groupby(level=0)
         .sum()
+        .transpose()
     )
     summary["net_exposure"] = net_exposure
+    summary["gross_exposure"] = gross_exposure
 
     return (summary, *backtest_fields)
 

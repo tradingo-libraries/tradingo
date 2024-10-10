@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from pandas.core.window.rolling import window_aggregations
 
 
 def omega_ratio(returns: pd.Series, required_return=0.0):
@@ -27,3 +28,11 @@ def omega_ratio(returns: pd.Series, required_return=0.0):
         return numer / denom
     else:
         return np.nan
+
+
+def sharpe_ratio(returns: pd.Series, required_return=0.0):
+    """
+    Calculate the Sharpe ratio of a strategy.
+    """
+    return_threshold = (1 + required_return) ** (1 / 252) - 1
+    return (returns.mean() * 252 - return_threshold) / (returns.std() * np.sqrt(252))

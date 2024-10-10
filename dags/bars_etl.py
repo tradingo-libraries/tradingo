@@ -13,6 +13,7 @@ from airflow.models import Operator
 import arcticdb as adb
 import pandas as pd
 from sqlalchemy.orm import strategy_options
+from tradingo.cli import make_airflow_dag
 
 from tradingo.symbols import ARCTIC_URL, symbol_provider, symbol_publisher
 from tradingo import signals
@@ -336,4 +337,19 @@ def trading_dag(
     return dag
 
 
-trading_dag("etft", start_date=pd.Timestamp("2024-08-29 00:00:00+00:00"))
+# trading_dag("etft", start_date=pd.Timestamp("2024-08-29 00:00:00+00:00"))
+etft = make_airflow_dag(
+    name="etft",
+    config=HOME_DIR / "config.json",
+    dag_start_date=pd.Timestamp("2024-10-08 00:00:00+00:00"),
+    start_date=pd.Timestamp("2023-11-07 00:00:00+00"),
+    end_date="{{ data_interval_end }}",
+)
+
+igtrading = make_airflow_dag(
+    name="igtrading",
+    config=HOME_DIR / "ig-trading.json",
+    dag_start_date=pd.Timestamp("2024-10-08 00:00:00+00:00"),
+    start_date=pd.Timestamp("2023-11-07 00:00:00+00"),
+    end_date="{{ data_interval_end }}",
+)

@@ -1,0 +1,58 @@
+{
+  "name": "etft",
+  "universe": {
+    "igtrading": {
+      "provider": "ig-trading",
+      "index_col": null,
+      "epics": [
+        "IX.D.SPTRD.IFS.IP"
+      ],
+      "function": "tradingo.sampling.sample_ig_instruments",
+      "volatility": {
+        "speeds": [
+          128,
+          64
+        ]
+      },
+      "periods": 96,
+      "interval": "15MIN"
+    }
+  },
+  "signal_configs": {
+    "intraday_momentum": {
+      "function": "tradingo.signals.intraday_momentum",
+      "args": [],
+      "kwargs": {
+        "calendar": "NYSE",
+        "frequency": "15m",
+        "long_vol": 64,
+        "short_vol": 6,
+        "threshold": 1,
+        "cap": 2
+      }
+    }
+  },
+  "portfolio": {
+    "intraday": {
+      "function": "tradingo.portfolio.portfolio_construction",
+      "args": [],
+      "universe": "igtrading",
+      "kwargs": {
+        "aum": 10000,
+        "universe": "igtrading",
+        "provider": "igtrading",
+        "min_periods": 100,
+        "multiplier": 1,
+        "default_weight": 1,
+        "constraints": {
+          "long_only": false
+        },
+        "buffer_width": 0,
+        "signal_weights": {
+          "intraday_momentum": 1
+        },
+        "vol_scale": false
+      }
+    }
+  }
+}

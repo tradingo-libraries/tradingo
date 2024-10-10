@@ -61,7 +61,11 @@ def symbol_provider(
 
         @functools.wraps(func)
         def wrapper(
-            *args, start_date, end_date, arctic: Optional[adb.Arctic] = None, **kwargs
+            *args,
+            start_date=pd.NaT,
+            end_date=pd.NaT,
+            arctic: Optional[adb.Arctic] = None,
+            **kwargs,
         ):
 
             arctic = arctic or adb.Arctic(ARCTIC_URL)

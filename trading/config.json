@@ -78,7 +78,9 @@
         "V3EL.L",
         "V3NM.L",
         "V3MM.L",
-        "V3PM.L"
+        "V3PM.L",
+        "VUTY.L",
+        "VGOV.L"
       ],
       "volatility": {
         "speeds": [

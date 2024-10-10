@@ -6,11 +6,14 @@ import argparse
 from json.decoder import JSONDecodeError
 import pathlib
 import json
-from typing import Iterable
+from typing import Callable, Iterable
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from arcticdb import Arctic
 
 import pandas as pd
-from tradingo.sampling import Provider
 
+from tradingo.symbols import ARCTIC_URL
 
 SIGNAL_KEY = "{0}.{1}".format
 
@@ -20,7 +23,7 @@ def resolve_config(
 ):
     try:
         return json.loads(config)
-    except JSONDecodeError as _:
+    except (JSONDecodeError, TypeError) as _:
         return json.loads(pathlib.Path(config).read_text())
 
 
@@ -33,6 +36,7 @@ def cli_app():
     app.add_argument("--start-date", type=pd.Timestamp)
     app.add_argument("--end-date", type=pd.Timestamp)
     app.add_argument("--force-rerun", action="store_true")
+    app.add_argument("--arctic-uri", default=ARCTIC_URL)
     return app
 
 
@@ -69,7 +73,7 @@ class Task:
         task_kwargs,
         dependencies: Iterable[str] = (),
     ):
-        self.function = function
+        self._function = function
         self.task_args = task_args
         self.task_kwargs = task_kwargs
         self._dependencies = list(dependencies)
@@ -78,14 +82,19 @@ class Task:
 
     def __repr__(self):
         return (
-            f"Task(function='{self.function}',"
+            f"Task(function='{self._function}',"
             f" task_args={self.task_args},"
             f" task_kwargs={self.task_kwargs},"
             f" dependcies={self._dependencies}, "
             ")"
         )
 
-    def run(self, run_dependencies, force_rerun=False):
+    @property
+    def function(self) -> Callable:
+        module, function_name = self._function.rsplit(".", maxsplit=1)
+        return getattr(importlib.import_module(module), function_name)
+
+    def run(self, *args, run_dependencies=False, force_rerun=False, **kwargs):
 
         if run_dependencies:
 
@@ -96,15 +105,12 @@ class Task:
                     force_rerun=force_rerun,
                 )
 
-        module, function_name = self.function.rsplit(".", maxsplit=1)
-        function = getattr(importlib.import_module(module), function_name)
-
         state = self.state
         try:
             if self.state == TaskState.PENDING or force_rerun:
                 state = TaskState.FAILED
                 print(f"Running {self}")
-                function(*self.task_args, **self.task_kwargs)
+                self.function(*self.task_args, *args, **self.task_kwargs, **kwargs)
                 self.state = state = TaskState.SUCCESS
         finally:
             self.state = state
@@ -179,12 +185,13 @@ def collect_sample_tasks(
                 "html": config.get("html"),
                 "file": config.get("file"),
                 "tickers": config.get("tickers"),
+                "epics": config.get("epics"),
                 "index_col": config["index_col"],
                 "universe": universe,
             },
         )
         tasks[f"{universe}.sample"] = Task(
-            "tradingo.sampling.sample_equity",
+            config.get("function", "tradingo.sampling.sample_equity"),
             [],
             {
                 "start_date": start_date,
@@ -192,6 +199,7 @@ def collect_sample_tasks(
                 "provider": provider,
                 "interval": config.get("interval", "1d"),
                 "universe": universe,
+                "periods": config.get("periods"),
             },
             [f"{universe}.instruments"],
         )
@@ -253,7 +261,7 @@ def build_graph(config, start_date, end_date) -> dict[str, Task]:
                 f"{universe}.ivol",
                 *(
                     SIGNAL_KEY(universe, sig)
-                    for sig in portfolio_config.get("signal_weights", {})
+                    for sig in portfolio_config["kwargs"].get("signal_weights", {})
                 ),
             ],
         )
@@ -288,6 +296,39 @@ def build_graph(config, start_date, end_date) -> dict[str, Task]:
         backtest.resolve_dependencies(global_tasks)
 
     return global_tasks
+
+
+def to_airflow_dag(graph: dict[str, Task], **kwargs) -> DAG:
+
+    with DAG(**kwargs) as dag:
+
+        tasks = {
+            name: PythonOperator(
+                task_id=name,
+                python_callable=task.function,
+                op_args=task.task_args,
+                op_kwargs=task.task_kwargs,
+            )
+            for name, task in graph.items()
+        }
+
+        for (name, task), operator in zip(graph.items(), tasks.values()):
+
+            for task_id in task.dependency_names:
+
+                tasks[task_id] >> operator
+
+    return dag
+
+
+def make_airflow_dag(name, start_date, dag_start_date, end_date, config):
+    graph = build_graph(resolve_config(config), start_date, end_date)
+
+    return to_airflow_dag(
+        graph,
+        dag_id=name,
+        start_date=dag_start_date,
+    )
 
 
 def serialise_dag(graph: dict[str, Task]):
@@ -325,13 +366,16 @@ def main():
     args = cli_app().parse_args()
 
     graph = build_graph(args.config, args.start_date, args.end_date)
+    arctic = Arctic(args.arctic_uri)
 
     update_dag(graph)
 
     task = graph[args.task]
 
     try:
-        task.run(args.with_deps, force_rerun=args.force_rerun)
+        task.run(
+            run_dependencies=args.with_deps, force_rerun=args.force_rerun, arctic=arctic
+        )
     finally:
         serialise_dag(graph)
 

@@ -55,6 +55,30 @@ Provider = Literal[
 ]
 
 
+def get_ig_service():
+    from trading_ig.rest import IGService, ApiExceededException
+    from trading_ig.config import config
+
+    from tenacity import Retrying, wait_exponential, retry_if_exception_type
+
+    retryer = Retrying(
+        wait=wait_exponential(),
+        retry=retry_if_exception_type(ApiExceededException),
+    )
+
+    service = IGService(
+        username=config.username,
+        password=config.password,
+        api_key=config.api_key,
+        acc_type=config.acc_type,
+        use_rate_limiter=True,
+        retryer=retryer,
+    )
+
+    service.create_session()
+    return service
+
+
 @symbol_publisher("instruments/{universe}", write_pickle=True)
 def download_instruments(
     index_col: str,
@@ -62,6 +86,7 @@ def download_instruments(
     html: Optional[str] = None,
     file: Optional[str] = None,
     tickers: Optional[list[str]] = None,
+    epics: Optional[list[str]] = None,
     **kwargs,
 ):
 
@@ -84,7 +109,62 @@ def download_instruments(
                 .rename_axis("Symbol")
             ),
         )
+
+    if epics:
+
+        service = get_ig_service()
+
+        return (
+            pd.DataFrame(
+                [i["instrument"] for i in service.fetch_markets_by_epics(epics)]
+            )
+            .set_index("epic")
+            .rename_axis("Symbol", axis=0),
+        )
     raise ValueError(file)
+
+
+@symbol_provider(instruments="instruments/{universe}", no_date=True)
+@symbol_publisher(
+    template="prices/{0}.{1}",
+    symbol_prefix="{provider}.{universe}.",
+)
+def sample_ig_instruments(
+    instruments: pd.DataFrame,
+    end_date: pd.Timestamp,
+    start_date: pd.Timestamp,
+    interval: str,
+    **kwargs,
+):
+    service = get_ig_service()
+    result = pd.concat(
+        (
+            service.fetch_historical_prices_by_epic(
+                symbol,
+                end_date=end_date.isoformat(),
+                start_date=start_date.isoformat(),
+                resolution=interval,
+            )["prices"]
+            for symbol in instruments.index.to_list()
+        ),
+        axis=1,
+        keys=instruments.index.to_list(),
+    ).reorder_levels([1, 2, 0], axis=1)
+    return (
+        (result["bid"]["Open"], ("bid", "open")),
+        (result["bid"]["High"], ("bid", "high")),
+        (result["bid"]["Low"], ("bid", "low")),
+        (result["bid"]["Close"], ("bid", "close")),
+        (result["ask"]["Open"], ("ask", "open")),
+        (result["ask"]["High"], ("ask", "high")),
+        (result["ask"]["Low"], ("ask", "low")),
+        (result["ask"]["Close"], ("ask", "close")),
+        # (result["last"]["Open"], ("last", "open")),
+        # (result["last"]["High"], ("last", "high")),
+        # (result["last"]["Low"], ("last", "low")),
+        # (result["last"]["Close"], ("last", "close")),
+        # (result["last"]["Volume"], ("last", "volume")),
+    )
 
 
 @symbol_provider(instruments="instruments/{universe}", no_date=True)
