@@ -137,6 +137,7 @@ def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
 
 @symbol_publisher(
     "signals/intraday_momentum",
+    symbol_prefix="{provider}.{universe}.",
 )
 @symbol_provider(
     ask_close="prices/ask.close",
@@ -189,4 +190,6 @@ def intraday_momentum(
     signal = signal.ffill()
     stop = 0.01
     signal = signal.abs().groupby(signal.index.date).cummax() * np.sign(z_score)
+    # signal closes position at close time
+    signal[signal.index.isin(schedule.market_close)] = 0.0
     return (signal,)

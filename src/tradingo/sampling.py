@@ -1,3 +1,4 @@
+import dateutil.tz
 from tradingo.symbols import symbol_provider, symbol_publisher
 from typing import Literal, Optional
 from arcticdb import LibraryOptions
@@ -141,8 +142,8 @@ def sample_ig_instruments(
         (
             service.fetch_historical_prices_by_epic(
                 symbol,
-                end_date=end_date.isoformat(),
-                start_date=start_date.isoformat(),
+                end_date=pd.Timestamp(end_date).tz_convert(None).isoformat(),
+                start_date=pd.Timestamp(start_date).tz_convert(None).isoformat(),
                 resolution=interval,
             )["prices"]
             for symbol in instruments.index.to_list()
@@ -150,6 +151,7 @@ def sample_ig_instruments(
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
+    result.index = result.index.tz_localize(dateutil.tz.tzlocal()).tz_convert("utc")
     return (
         (result["bid"]["Open"], ("bid", "open")),
         (result["bid"]["High"], ("bid", "high")),
@@ -159,6 +161,10 @@ def sample_ig_instruments(
         (result["ask"]["High"], ("ask", "high")),
         (result["ask"]["Low"], ("ask", "low")),
         (result["ask"]["Close"], ("ask", "close")),
+        (((result["ask"]["Open"] + result["bid"]["Open"]) / 2), ("mid", "open")),
+        (((result["ask"]["High"] + result["bid"]["High"]) / 2), ("mid", "high")),
+        (((result["ask"]["Low"] + result["bid"]["Low"]) / 2), ("mid", "low")),
+        (((result["ask"]["Close"] + result["bid"]["Close"]) / 2), ("mid", "close")),
         # (result["last"]["Open"], ("last", "open")),
         # (result["last"]["High"], ("last", "high")),
         # (result["last"]["Low"], ("last", "low")),

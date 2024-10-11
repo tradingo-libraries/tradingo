@@ -166,10 +166,9 @@
       "function": "tradingo.portfolio.portfolio_optimization",
       "args": [],
       "universe": "vanguard",
+      "provider": "yfinance",
       "kwargs": {
         "aum": 70865.23,
-        "universe": "vanguard",
-        "provider": "yfinance",
         "factor_provider": "yfinance",
         "factor_universe": "factors",
         "rebalance_freq": "D",
@@ -194,10 +193,9 @@
     "trend_isa": {
       "function": "tradingo.portfolio.portfolio_construction",
       "universe": "vanguard",
+      "provider": "yfinance",
       "kwargs": {
         "aum": 70865.23,
-        "universe": "vanguard",
-        "provider": "yfinance",
         "instrument_weights": {
           "Symbol": {
             "VUAG.L": 1,
@@ -228,10 +226,9 @@
     "null": {
       "function": "tradingo.portfolio.portfolio_construction",
       "universe": "sp500",
+      "provider": "yfinance",
       "kwargs": {
         "aum": 70000,
-        "universe": "sp500",
-        "provider": "yfinance",
         "signal_weights": {
           "trend.ewmac_128_64.scaled.capped": 1,
           "trend.ewmac_64_32.scaled.capped": 1
@@ -249,11 +246,10 @@
     "trend": {
       "function": "tradingo.portfolio.portfolio_construction",
       "universe": "etfs",
+      "provider": "yfinance",
       "kwargs": {
         "aum": 70000,
         "vol_scale": true,
-        "universe": "etfs",
-        "provider": "yfinance",
         "signal_weights": {
           "trend.ewmac_128_64.scaled.capped": 1,
           "trend.ewmac_64_32.scaled.capped": 1

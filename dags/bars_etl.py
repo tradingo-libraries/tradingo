@@ -26,6 +26,7 @@ from tradingo.portfolio import (
 )
 from tradingo import sampling
 from tradingo.utils import get_config
+from airflow.models import Variable
 
 logger = logging.getLogger(__name__)
 
@@ -47,33 +48,6 @@ def get_function(function):
     module, name = function.rsplit(".", maxsplit=1)
 
     return getattr(importlib.import_module(module), name)
-
-
-@symbol_provider(
-    positions="portfolio/{name}.{stage}?as_of=-1",
-    previous_positions="portfolio/{name}.{stage}?as_of=-2",
-)
-@symbol_publisher("trades/{stage}.{name}")
-def calculate_trades(
-    name: str,
-    stage: str,
-    positions: pd.DataFrame,
-    previous_positions: pd.DataFrame,
-    previous_refdate: pd.Timestamp,
-    **kwargs,
-):
-
-    logger.info(
-        "Calculating %s trades for %s previous_refdate=%s",
-        stage,
-        name,
-        previous_refdate,
-    )
-
-    return (
-        positions
-        - previous_positions.reindex_like(positions, method="ffill").fillna(0.0),
-    )
 
 
 def get_or_create_signal(
@@ -337,19 +311,24 @@ def trading_dag(
     return dag
 
 
+os.environ["IG_SERVICE_ACC_TYPE"] = Variable.get("IG_SERVICE_ACC_TYPE")
+os.environ["IG_SERVICE_PASSWORD"] = Variable.get("IG_SERVICE_PASSWORD")
+os.environ["IG_SERVICE_USERNAME"] = Variable.get("IG_SERVICE_USERNAME")
+os.environ["IG_SERVICE_API_KEY"] = Variable.get("IG_SERVICE_API_KEY")
+
+
 # trading_dag("etft", start_date=pd.Timestamp("2024-08-29 00:00:00+00:00"))
 etft = make_airflow_dag(
     name="etft",
     config=HOME_DIR / "config.json",
     dag_start_date=pd.Timestamp("2024-10-08 00:00:00+00:00"),
     start_date=pd.Timestamp("2023-11-07 00:00:00+00"),
-    end_date="{{ data_interval_end }}",
 )
 
 igtrading = make_airflow_dag(
     name="igtrading",
     config=HOME_DIR / "ig-trading.json",
-    dag_start_date=pd.Timestamp("2024-10-08 00:00:00+00:00"),
-    start_date=pd.Timestamp("2023-11-07 00:00:00+00"),
-    end_date="{{ data_interval_end }}",
+    dag_start_date=pd.Timestamp("2024-10-10 00:00:00+00:00"),
+    start_date=pd.Timestamp("2017-01-01 00:00:00+00"),
+    schedule="*/15 5-22 * * MON-FRI",
 )

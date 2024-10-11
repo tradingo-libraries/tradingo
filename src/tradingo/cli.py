@@ -17,6 +17,8 @@ from tradingo.symbols import ARCTIC_URL
 
 SIGNAL_KEY = "{0}.{1}".format
 
+DEFAULT_STAGE = "raw.shares"
+
 
 def resolve_config(
     config: str,
@@ -136,6 +138,7 @@ class Task:
 def collect_signal_tasks(
     signals: dict[str, dict],
     universe: str,
+    provider: str,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
 ):
@@ -148,11 +151,13 @@ def collect_signal_tasks(
                 **config.get("kwargs", {}),
                 "start_date": start_date,
                 "end_date": end_date,
+                "universe": universe,
+                "provider": provider,
             },
             [
                 f"{universe}.sample",
                 f"{universe}.vol",
-                f"{universe}.ivol",
+                # f"{universe}.ivol",
                 *(SIGNAL_KEY(universe, k) for k in config.get("depends_on", [])),
             ],
         )
@@ -166,6 +171,7 @@ def collect_signal_tasks(
 def collect_sample_tasks(
     universes: dict[str, dict],
     start_date: pd.Timestamp,
+    sample_start_date: pd.Timestamp,
     end_date: pd.Timestamp,
 ):
 
@@ -194,7 +200,7 @@ def collect_sample_tasks(
             config.get("function", "tradingo.sampling.sample_equity"),
             [],
             {
-                "start_date": start_date,
+                "start_date": sample_start_date,
                 "end_date": end_date,
                 "provider": provider,
                 "interval": config.get("interval", "1d"),
@@ -213,26 +219,39 @@ def collect_sample_tasks(
                 # TODO: speeds
                 "speeds": config["volatility"]["speeds"],
                 "universe": universe,
+                "close": config["volatility"].get("field", "adj_close"),
             },
             [f"{universe}.sample"],
         )
-        tasks[f"{universe}.ivol"] = Task(
-            "tradingo.portfolio.instrument_ivol",
-            [],
-            {
-                "start_date": None,
-                "end_date": None,
-                "provider": config["provider"],
-                "interval": config.get("interval"),
-                "universe": universe,
-            },
-            [f"{universe}.sample"],
-        )
+
+        if config["volatility"].get("ivol", True):
+
+            tasks[f"{universe}.ivol"] = Task(
+                "tradingo.portfolio.instrument_ivol",
+                [],
+                {
+                    "start_date": None,
+                    "end_date": None,
+                    "provider": config["provider"],
+                    "interval": config.get("interval"),
+                    "universe": universe,
+                    "close": config["volatility"].get("field", "adj_close"),
+                },
+                [f"{universe}.sample"],
+            )
 
     return tasks
 
 
-def build_graph(config, start_date, end_date) -> dict[str, Task]:
+def build_graph(
+    config,
+    start_date,
+    end_date,
+    sample_start_date=None,
+    snapshot_template=None,
+) -> dict[str, Task]:
+
+    sample_start_date = sample_start_date or start_date
 
     global_tasks = {}
 
@@ -240,16 +259,21 @@ def build_graph(config, start_date, end_date) -> dict[str, Task]:
         config["universe"],
         global_tasks=global_tasks,
         start_date=start_date,
+        sample_start_date=sample_start_date,
         end_date=end_date,
     )
 
     for portfolio_name, portfolio_config in config["portfolio"].items():
 
         universe = portfolio_config["universe"]
+        provider = portfolio_config["provider"]
 
         portfolio_config["kwargs"].setdefault("start_date", start_date)
         portfolio_config["kwargs"].setdefault("end_date", end_date)
         portfolio_config["kwargs"].setdefault("name", portfolio_name)
+        portfolio_config["kwargs"].setdefault("provider", provider)
+        portfolio_config["kwargs"].setdefault("universe", universe)
+        portfolio_config["kwargs"].setdefault("snapshot", snapshot_template)
 
         portfolio_task = Task(
             portfolio_config["function"],
@@ -258,7 +282,7 @@ def build_graph(config, start_date, end_date) -> dict[str, Task]:
             dependencies=[
                 f"{universe}.sample",
                 f"{universe}.vol",
-                f"{universe}.ivol",
+                # f"{universe}.ivol",
                 *(
                     SIGNAL_KEY(universe, sig)
                     for sig in portfolio_config["kwargs"].get("signal_weights", {})
@@ -269,6 +293,7 @@ def build_graph(config, start_date, end_date) -> dict[str, Task]:
         signals = collect_signal_tasks(
             config["signal_configs"],
             portfolio_config["universe"],
+            portfolio_config["provider"],
             global_tasks=global_tasks,
             start_date=start_date,
             end_date=end_date,
@@ -277,6 +302,9 @@ def build_graph(config, start_date, end_date) -> dict[str, Task]:
         portfolio_task.resolve_dependencies(global_tasks)
 
         global_tasks[portfolio_name] = portfolio_task
+
+        backtest_kwargs = portfolio_config.get("backtest", {"stage": DEFAULT_STAGE})
+        trade_kwargs = portfolio_config.get("trades", {"stage": DEFAULT_STAGE})
 
         backtest = Task(
             "tradingo.backtest.backtest",
@@ -287,13 +315,29 @@ def build_graph(config, start_date, end_date) -> dict[str, Task]:
                 "name": portfolio_name,
                 "provider": portfolio_config["kwargs"]["provider"],
                 "universe": portfolio_config["kwargs"]["universe"],
-                "stage": "raw.shares",
+                **backtest_kwargs,
+            },
+            dependencies=[portfolio_name],
+        )
+
+        trades = Task(
+            "tradingo.portfolio.calculate_trades",
+            task_args=[],
+            task_kwargs={
+                "start_date": start_date,
+                "end_date": end_date,
+                "name": portfolio_name,
+                "provider": portfolio_config["kwargs"]["provider"],
+                "universe": portfolio_config["kwargs"]["universe"],
+                **trade_kwargs,
             },
             dependencies=[portfolio_name],
         )
 
         global_tasks[f"{portfolio_name}.backtest"] = backtest
+        global_tasks[f"{portfolio_name}.trades"] = trades
         backtest.resolve_dependencies(global_tasks)
+        trades.resolve_dependencies(global_tasks)
 
     return global_tasks
 
@@ -316,18 +360,31 @@ def to_airflow_dag(graph: dict[str, Task], **kwargs) -> DAG:
 
             for task_id in task.dependency_names:
 
-                tasks[task_id] >> operator
+                _ = tasks[task_id] >> operator
 
     return dag
 
 
-def make_airflow_dag(name, start_date, dag_start_date, end_date, config):
-    graph = build_graph(resolve_config(config), start_date, end_date)
+def make_airflow_dag(
+    name,
+    start_date,
+    dag_start_date,
+    config,
+    **kwargs,
+):
+    graph = build_graph(
+        resolve_config(config),
+        start_date=start_date,
+        end_date="{{ data_interval_end }}",
+        sample_start_date="{{ data_interval_start }}",
+        snapshot_template=f"{name}_{{{{ run_id }}}}_{{{{ task_instance.task_id }}}}",
+    )
 
     return to_airflow_dag(
         graph,
         dag_id=name,
         start_date=dag_start_date,
+        **kwargs,
     )
 
 

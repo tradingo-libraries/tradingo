@@ -1,5 +1,6 @@
 import logging
 import re
+from typing import Optional
 
 import pandas as pd
 import numpy as np
@@ -16,22 +17,18 @@ logger = logging.getLogger(__name__)
 @lib_provider(model_signals="signals")
 @symbol_provider(
     close="prices/close",
-    ivol="prices/ivol",
     vol="signals/vol_128",
     symbol_prefix="{provider}.{universe}.",
 )
 @symbol_provider(instruments="instruments/{universe}", no_date=True)
 @symbol_publisher(
-    "portfolio/raw.percent",
-    "portfolio/raw.shares",
-    "signals/raw.signal",
+    template="{0}/{1}.{2}",
     symbol_prefix="{provider}.{universe}.{name}.",
 )
 def portfolio_construction(
     name: str,
     model_signals: adb.library.Library,
     close: pd.DataFrame,
-    ivol: pd.DataFrame,
     vol: pd.DataFrame,
     instruments: pd.DataFrame,
     provider: str,
@@ -40,13 +37,13 @@ def portfolio_construction(
     multiplier: float,
     default_weight: float,
     constraints: dict,
-    instrument_weights: dict,
     vol_scale: bool,
     aum: float,
+    instrument_weights: Optional[dict] = None,
     **kwargs,
 ):
 
-    ivol = ivol.iloc[-1].sort_values(ascending=False)
+    instrument_weights = instrument_weights or {}
 
     weights = pd.Series(multiplier, index=instruments.index)
 
@@ -69,8 +66,8 @@ def portfolio_construction(
             pd.concat(
                 (
                     model_signals.read(
-                        f"{provider}.{universe}.{signal}"
-                        # , columns=symbols
+                        f"{provider}.{universe}.{signal}",
+                        date_range=(close.index[0], close.index[-1]),
                     ).data
                     * weights
                     * signal_weight
@@ -113,7 +110,15 @@ def portfolio_construction(
 
     share_position = (pct_position * aum) / close
 
-    return (pct_position, share_position, signal_value)
+    return (
+        (pct_position, ("portfolio", "raw", "percent")),
+        (share_position, ("portfolio", "raw", "shares")),
+        (positions, ("portfolio", "raw", "position")),
+        (pct_position.round(decimals=2), ("portfolio", "rounded", "percent")),
+        (share_position.round(), ("portfolio", "rounded", "shares")),
+        (positions.round(), ("portfolio", "rounded", "position")),
+        (signal_value, ("signals", "raw", "signal")),
+    )
 
 
 @symbol_provider(
@@ -257,4 +262,38 @@ def position_from_trades(
     return (
         position_pct,
         position_shares,
+    )
+
+
+# FIXME: Not idempotent
+@symbol_provider(
+    positions="portfolio/{stage}?as_of=-1",
+    previous_positions="portfolio/{stage}?as_of=-2",
+    symbol_prefix="{provider}.{universe}.{name}.",
+)
+@symbol_publisher(
+    "trades/{stage}",
+    symbol_prefix="{provider}.{universe}.{name}.",
+)
+def calculate_trades(
+    name: str,
+    stage: str,
+    positions: pd.DataFrame,
+    previous_positions: pd.DataFrame,
+    **kwargs,
+):
+
+    logger.info(
+        "Calculating %s trades for %s",
+        stage,
+        name,
+    )
+
+    return (
+        (
+            positions
+            - previous_positions.reindex_like(positions, method="ffill").fillna(0.0)
+        ).iloc[
+            -1:,
+        ],
     )

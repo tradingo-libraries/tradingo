@@ -13,6 +13,11 @@ import pandas as pd
 from tradingo.signals import symbol_provider, symbol_publisher
 
 
+ASSET_MAPPING = {
+    "USA500.IDXUSD": "IX.D.SPTRD.IFS.IP",
+}
+
+
 def cli_app():
 
     app = argparse.ArgumentParser("load-historical-data")
@@ -86,7 +91,7 @@ def read_backfill(
             out.index = out.index.tz_localize("GMT").tz_convert("utc")
         else:
             raise ValueError(out.index.name)
-        return out.rename_axis("Datetime")
+        return out.rename_axis("DateTime")
 
     result = pd.concat(
         (
@@ -97,6 +102,8 @@ def read_backfill(
         keys=data_files.keys(),
     ).reorder_levels([0, 2, 1], axis=1)
 
+    result.rename(columns=ASSET_MAPPING, inplace=True)
+
     return (
         (result["bid"]["Open"], ("bid", "open")),
         (result["bid"]["High"], ("bid", "high")),
@@ -106,11 +113,10 @@ def read_backfill(
         (result["ask"]["High"], ("ask", "high")),
         (result["ask"]["Low"], ("ask", "low")),
         (result["ask"]["Close"], ("ask", "close")),
-        # (result["last"]["Open"], ("last", "open")),
-        # (result["last"]["High"], ("last", "high")),
-        # (result["last"]["Low"], ("last", "low")),
-        # (result["last"]["Close"], ("last", "close")),
-        # (result["last"]["Volume"], ("last", "volume")),
+        (((result["ask"]["Open"] + result["bid"]["Open"]) / 2), ("mid", "open")),
+        (((result["ask"]["High"] + result["bid"]["High"]) / 2), ("mid", "high")),
+        (((result["ask"]["Low"] + result["bid"]["Low"]) / 2), ("mid", "low")),
+        (((result["ask"]["Close"] + result["bid"]["Close"]) / 2), ("mid", "close")),
     )
 
 
@@ -126,7 +132,7 @@ if __name__ == "__main__":
             str(Path.home() / "Downloads/"),
             # "--dry-run",
             "--provider",
-            "dukascopy",
+            "ig-trading",
             "--universe",
             "igtrading",
         ]

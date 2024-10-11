@@ -114,13 +114,16 @@ def backtest(
     portfolio: pd.DataFrame,
     bid: pd.DataFrame,
     ask: pd.DataFrame,
-    dividends: pd.DataFrame,
+    dividends: Optional[pd.DataFrame],
     name: str,
     stage: str = "raw",
     **kwargs,
 ):
     trades = portfolio.ffill().fillna(0.0).diff()
     bid, ask = bid.ffill(), ask.ffill()
+
+    if dividends is None:
+        dividends = pd.DataFrame(0, index=bid.index, columns=bid.columns)
 
     logger.info("running backtest for %s on stage %s with %s", name, stage, kwargs)
 
