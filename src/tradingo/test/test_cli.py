@@ -34,11 +34,10 @@ def test_build_graph():
                 "function": "module.portfolio_function",
                 "args": [],
                 "kwargs": {
-                    "provider": PROVIDER,
-                    "universe": UNIVERSE,
+                    "signal_weights": {"signal1.capped": 1},
                 },
-                "signal_weights": {"signal1.capped": 1},
                 "universe": UNIVERSE,
+                "provider": PROVIDER,
             }
         },
     }
@@ -48,7 +47,6 @@ def test_build_graph():
     assert tasks[PORTFOLIO].dependencies == [
         tasks[f"{UNIVERSE}.sample"],
         tasks[f"{UNIVERSE}.vol"],
-        tasks[f"{UNIVERSE}.ivol"],
         tasks[f"{UNIVERSE}.signal1.capped"],
     ]
 
@@ -60,5 +58,4 @@ def test_build_graph():
     assert tasks[f"{UNIVERSE}.signal1"].dependencies == [
         tasks[f"{UNIVERSE}.sample"],
         tasks[f"{UNIVERSE}.vol"],
-        tasks[f"{UNIVERSE}.ivol"],
     ]

@@ -342,52 +342,6 @@ def build_graph(
     return global_tasks
 
 
-def to_airflow_dag(graph: dict[str, Task], **kwargs) -> DAG:
-
-    with DAG(**kwargs) as dag:
-
-        tasks = {
-            name: PythonOperator(
-                task_id=name,
-                python_callable=task.function,
-                op_args=task.task_args,
-                op_kwargs=task.task_kwargs,
-            )
-            for name, task in graph.items()
-        }
-
-        for (name, task), operator in zip(graph.items(), tasks.values()):
-
-            for task_id in task.dependency_names:
-
-                _ = tasks[task_id] >> operator
-
-    return dag
-
-
-def make_airflow_dag(
-    name,
-    start_date,
-    dag_start_date,
-    config,
-    **kwargs,
-):
-    graph = build_graph(
-        resolve_config(config),
-        start_date=start_date,
-        end_date="{{ data_interval_end }}",
-        sample_start_date="{{ data_interval_start }}",
-        snapshot_template=f"{name}_{{{{ run_id }}}}_{{{{ task_instance.task_id }}}}",
-    )
-
-    return to_airflow_dag(
-        graph,
-        dag_id=name,
-        start_date=dag_start_date,
-        **kwargs,
-    )
-
-
 def serialise_dag(graph: dict[str, Task]):
 
     dag_state = pathlib.Path.home() / ".tradingo/dag-state.json"

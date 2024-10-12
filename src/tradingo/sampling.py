@@ -1,6 +1,12 @@
 import dateutil.tz
 from tradingo.symbols import symbol_provider, symbol_publisher
 from typing import Literal, Optional
+
+from trading_ig.rest import IGService, ApiExceededException
+from trading_ig.config import config
+
+from tenacity import Retrying, wait_exponential, retry_if_exception_type
+
 from arcticdb import LibraryOptions
 from yfinance import Ticker
 
@@ -56,11 +62,7 @@ Provider = Literal[
 ]
 
 
-def get_ig_service():
-    from trading_ig.rest import IGService, ApiExceededException
-    from trading_ig.config import config
-
-    from tenacity import Retrying, wait_exponential, retry_if_exception_type
+def get_ig_service() -> IGService:
 
     retryer = Retrying(
         wait=wait_exponential(),

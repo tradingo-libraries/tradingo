@@ -17,6 +17,8 @@ dependencies = [
   "arcticdb",
   "PyYAML",
   "yfinance",
+  "pandas_market_calendars",
+  "trading_ig",
 ]
 [project.optional-dependencies]
 dev = [

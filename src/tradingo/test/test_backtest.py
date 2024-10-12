@@ -3,48 +3,17 @@ import pytest
 import pandas as pd
 
 from tradingo import backtest
-from tradingo.backtest import PnlSnapshot
 
 from tradingo.test.utils import close_position
-
-
-def test_pnl_snapshot():
-    pnl = PnlSnapshot(pd.Timestamp("2024-04-26 00:00:00+00:00"))
-
-    pnl_1 = pnl.on_trade(100, 1, pd.Timestamp("2024-04-29 00:00:00+00:00")).on_trade(
-        100, 1, pd.Timestamp("2024-04-29 00:00:00+00:00")
-    )
-
-    assert pnl_1.net_investment == 100
-    assert pnl_1.net_position == 2
-    assert pnl_1.realised_pnl == 0
-    assert pnl_1.unrealised_pnl == 0
-    assert pnl_1.avg_open_price == 100
-
-    pnl_2 = pnl_1.on_trade(101, -1, pd.Timestamp("2024-04-30 00:00:00+00:00"))
-    assert pnl_2.net_investment == 200
-    assert pnl_2.net_position == 1
-    assert pnl_2.realised_pnl == 1
-    assert pnl_2.unrealised_pnl == 0
-    assert pnl_1.avg_open_price == 100
-    assert pnl_1.avg_open_price == 100
-
-    pnl_2 = pnl_2.on_trade(101, -1, pd.Timestamp("2024-05-01 00:00:00+00:00"))
-    assert pnl_2.net_investment == 200
-    assert pnl_2.net_position == 0
-    assert pnl_2.realised_pnl == 2
-    assert pnl_2.unrealised_pnl == 0
-    pnl_2 = pnl_2.on_trade(101, 2, pd.Timestamp("2024-05-01 00:00:00+00:00"))
-    assert pnl_2.net_investment == 200
 
 
 def test_backtest_integration(benchmark, tradingo):
 
     bt = benchmark(
         backtest.backtest,
-        prices="close",
-        portfolio="model",
-        dividends="dividend",
+        bid="prices/close",
+        ask="prices/close",
+        dividends="prices/dividend",
         start_date=pd.Timestamp("2018-01-01 00:00:00+00:00"),
         end_date=pd.Timestamp.now("utc"),
         name="model",
@@ -55,27 +24,6 @@ def test_backtest_integration(benchmark, tradingo):
         dry_run=True,
         arctic=tradingo,
     )
-
-
-def test_backtest_integration_old(benchmark, tradingo):
-
-    bt = benchmark(
-        backtest.backtest_old,
-        prices="close",
-        portfolio="model",
-        start_date=pd.Timestamp("2018-01-01 00:00:00+00:00"),
-        end_date=pd.Timestamp.now("utc"),
-        name="model",
-        stage="raw.shares",
-        config_name="test",
-        provider="yfinance",
-        universe="etfs",
-        dry_run=True,
-        arctic=tradingo,
-    )
-
-    assert isinstance(bt, pd.DataFrame)
-    assert bt.columns.to_list()
 
 
 @pytest.mark.parametrize(
@@ -133,7 +81,8 @@ def test_backtest_smoke(tradingo, prices_, portfolio_, unrealised_pnl, realised_
 
     bt = backtest.backtest(
         portfolio=portfolio_,
-        prices=prices_,
+        bid=prices_,
+        ask=prices_,
         dividends=dividends,
         name="test",
         config_name="test",
