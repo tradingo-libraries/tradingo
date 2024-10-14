@@ -127,6 +127,7 @@ def adjust_position_sizes(
 
         # changing sides, close existing
         if current_position and np.sign(current_position) != np.sign(latest_target):
+            logger.info("Closing open position of %s for %s", current_position, epic)
 
             close_all_open_position(current_positions.loc[epic], service)
             current_position = 0.0
@@ -138,10 +139,11 @@ def adjust_position_sizes(
             side = "BUY" if latest_target > 0 else "SELL"
 
             logger.info(
-                "Increasing target position from %s to %s - %s",
+                "Increasing target position from %s to %s - %s for %s",
                 current_position,
                 target_positions,
                 side,
+                epic,
             )
 
             result = service.create_open_position(
@@ -170,10 +172,11 @@ def adjust_position_sizes(
             reduce_by = abs(current_position - latest_target)
 
             logger.info(
-                "Reducing open positions by %s from %s to %s",
+                "Reducing open positions by %s from %s to %s for %s",
                 reduce_by,
                 current_position,
                 latest_target,
+                epic,
             )
 
             reduce_open_positions(
@@ -182,7 +185,11 @@ def adjust_position_sizes(
                 quantity=reduce_by,
             )
         else:
-            logger.info("%s matches target, nothing to do.", current_position)
+            logger.info(
+                "%s matches target, nothing to do for %s.",
+                current_position,
+                epic,
+            )
 
 
 def main():
