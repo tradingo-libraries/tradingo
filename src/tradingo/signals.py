@@ -137,6 +137,7 @@ def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
 
 @symbol_publisher(
     "signals/intraday_momentum",
+    "signals/intraday_momentum.z_score",
     symbol_prefix="{provider}.{universe}.",
 )
 @symbol_provider(
@@ -160,8 +161,9 @@ def intraday_momentum(
 
     cal = pmc.get_calendar(calendar)
     schedule = cal.schedule(start_date=close.index[0], end_date=close.index[-1])
-    trading_index = pmc.date_range(schedule, frequency=frequency)
-
+    trading_index = pmc.date_range(schedule, frequency=frequency).intersection(
+        close.index
+    )
     close = close.reindex(trading_index)
 
     open_px = close.groupby(close.index.date).first()
@@ -192,4 +194,4 @@ def intraday_momentum(
     signal = signal.abs().groupby(signal.index.date).cummax() * np.sign(z_score)
     # signal closes position at close time
     signal[signal.index.isin(schedule.market_close)] = 0.0
-    return (signal,)
+    return (signal, z_score)

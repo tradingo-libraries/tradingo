@@ -306,36 +306,49 @@ def build_graph(
         backtest_kwargs = portfolio_config.get("backtest", {"stage": DEFAULT_STAGE})
         trade_kwargs = portfolio_config.get("trades", {"stage": DEFAULT_STAGE})
 
-        backtest = Task(
+        backtest = global_tasks[f"{portfolio_name}.backtest"] = Task(
             "tradingo.backtest.backtest",
             task_args=[],
             task_kwargs={
                 "start_date": start_date,
                 "end_date": end_date,
                 "name": portfolio_name,
-                "provider": portfolio_config["kwargs"]["provider"],
-                "universe": portfolio_config["kwargs"]["universe"],
+                "provider": provider,
+                "universe": universe,
                 **backtest_kwargs,
             },
             dependencies=[portfolio_name],
         )
 
-        trades = Task(
+        trades = global_tasks[f"{portfolio_name}.trades"] = Task(
             "tradingo.portfolio.calculate_trades",
             task_args=[],
             task_kwargs={
                 "start_date": start_date,
                 "end_date": end_date,
                 "name": portfolio_name,
-                "provider": portfolio_config["kwargs"]["provider"],
-                "universe": portfolio_config["kwargs"]["universe"],
+                "provider": provider,
+                "universe": universe,
                 **trade_kwargs,
             },
             dependencies=[portfolio_name],
         )
 
-        global_tasks[f"{portfolio_name}.backtest"] = backtest
-        global_tasks[f"{portfolio_name}.trades"] = trades
+        downstream = global_tasks[f"{portfolio_name}.downstream"] = Task(
+            "tradingo.engine.adjust_position_sizes",
+            task_args=[],
+            task_kwargs={
+                "portfolio_name": portfolio_name,
+                "name": config["name"],
+                "provider": provider,
+                "universe": universe,
+                "stage": backtest_kwargs["stage"],
+                "arctic_uri": ARCTIC_URL,
+            },
+            dependencies=[portfolio_name],
+        )
+
+        downstream.resolve_dependencies(global_tasks)
         backtest.resolve_dependencies(global_tasks)
         trades.resolve_dependencies(global_tasks)
 

@@ -153,7 +153,7 @@ def sample_ig_instruments(
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
-    result.index = result.index.tz_localize(dateutil.tz.tzlocal()).tz_convert("utc")
+    result.index = result.index.tz_localize("utc")
     return (
         (result["bid"]["Open"], ("bid", "open")),
         (result["bid"]["High"], ("bid", "high")),

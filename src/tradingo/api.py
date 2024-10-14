@@ -50,6 +50,9 @@ class _Read:
             root=self.root,
         )
 
+    def __getitem__(self, symbol):
+        return self.__getattr__(symbol)
+
     def __call__(self, *args, **kwargs) -> pd.DataFrame:
         operations = ["merge", "transpose", "concat", "with_instrument_details"]
         operation, index = next(
