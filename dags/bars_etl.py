@@ -5,7 +5,6 @@ import pathlib
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
-import arcticdb as adb
 import pandas as pd
 from tradingo.cli import (
     build_graph,
@@ -21,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 HOME_DIR = pathlib.Path(os.environ["AIRFLOW_HOME"]) / "trading"
 START_DATE = "2018-01-01 00:00:00+00:00"
-ARCTIC = adb.Arctic(ARCTIC_URL)
 
 
 def to_airflow_dag(graph: dict[str, Task], **kwargs) -> DAG:
@@ -86,7 +84,7 @@ etft = make_airflow_dag(
 igtrading = make_airflow_dag(
     name="igtrading",
     config=HOME_DIR / "ig-trading.json",
-    dag_start_date=pd.Timestamp("2024-10-10 00:00:00+00:00"),
+    dag_start_date=pd.Timestamp("2024-10-13 00:00:00+00:00"),
     start_date=pd.Timestamp("2017-01-01 00:00:00+00"),
     schedule="*/15 5-21 * * MON-FRI",
 )

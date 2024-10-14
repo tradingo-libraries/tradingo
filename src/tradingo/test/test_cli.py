@@ -5,11 +5,13 @@ from tradingo.cli import build_graph
 PROVIDER = "test-provider"
 UNIVERSE = "test-universe"
 PORTFOLIO = "test-portfolio"
+NAME = "test-name"
 
 
 def test_build_graph():
 
     config = {
+        "name": NAME,
         "universe": {
             UNIVERSE: {
                 "provider": PROVIDER,

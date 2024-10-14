@@ -1,3 +1,4 @@
+import os
 from collections import defaultdict
 from typing import Optional
 import functools
@@ -12,8 +13,11 @@ import arcticdb as adb
 
 logger = logging.getLogger(__name__)
 
-ENVIRONMENT = "test"
-ARCTIC_URL = f"lmdb:///home/rory/dev/airflow/{ENVIRONMENT}/arctic.db"
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "test")
+ARCTIC_URL = os.environ.get(
+    "TRADINGO_ARCTIC_URL",
+    f"lmdb:///home/rory/dev/airflow/{ENVIRONMENT}/arctic.db",
+)
 
 
 class Symbol(NamedTuple):
