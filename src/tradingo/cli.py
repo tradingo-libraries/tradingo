@@ -7,8 +7,6 @@ from json.decoder import JSONDecodeError
 import pathlib
 import json
 from typing import Callable, Iterable
-from airflow import DAG
-from airflow.operators.python import PythonOperator
 from arcticdb import Arctic
 
 import pandas as pd

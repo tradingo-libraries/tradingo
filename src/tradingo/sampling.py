@@ -144,16 +144,23 @@ def sample_ig_instruments(
         (
             service.fetch_historical_prices_by_epic(
                 symbol,
-                end_date=pd.Timestamp(end_date).tz_convert(None).isoformat(),
-                start_date=pd.Timestamp(start_date).tz_convert(None).isoformat(),
+                end_date=pd.Timestamp(end_date)
+                .tz_convert(dateutil.tz.tzlocal())
+                .tz_localize(None)
+                .isoformat(),
+                start_date=(pd.Timestamp(start_date) + pd.Timedelta(seconds=1))
+                .tz_convert(dateutil.tz.tzlocal())
+                .tz_localize(None)
+                .isoformat(),
                 resolution=interval,
+                wait=0,
             )["prices"]
             for symbol in instruments.index.to_list()
         ),
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
-    result.index = result.index.tz_localize("utc")
+    result.index = result.index.tz_localize(dateutil.tz.tzlocal()).tz_convert("utc")
     return (
         (result["bid"]["Open"], ("bid", "open")),
         (result["bid"]["High"], ("bid", "high")),

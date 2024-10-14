@@ -2,15 +2,21 @@
 # https://www.dukascopy.com/swiss/english/marketwatch/historical/
 #
 import argparse
+import logging
 import dateutil.tz
 from collections import defaultdict
 import re
 import os
 from pathlib import Path
 
+from arcticdb import Arctic
+
 import pandas as pd
 
 from tradingo.signals import symbol_provider, symbol_publisher
+
+
+logger = logging.getLogger(__name__)
 
 
 ASSET_MAPPING = {
@@ -79,6 +85,7 @@ def read_backfill(
     #
     #
     def read_file(f):
+        logger.warning("Reading %s", f)
         out = pd.read_csv(
             path / f,
             index_col=0,
@@ -124,6 +131,8 @@ if __name__ == "__main__":
 
     import sys
 
+    logging.getLogger(__name__).setLevel(logging.INFO)
+
     sys.argv.extend(
         [
             "--arctic-uri",
@@ -137,7 +146,5 @@ if __name__ == "__main__":
             "igtrading",
         ]
     )
-
-    from arcticdb import Arctic
 
     main()

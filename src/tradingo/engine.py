@@ -22,21 +22,18 @@ def close_position(deal_id, position, svc, size=None):
         expiry=None,
         level=None,
         order_type="MARKET",
-        size=size or abs(position.size),
+        size=size or abs(position["size"]),
         quote_id=None,
     )
 
     logger.info(result)
 
 
-def close_all_open_position(epic, positions, svc):
+def close_all_open_position(positions, svc):
 
-    if "epic" in positions.index.name:
-        epic_positions = positions.loc[epic]
-    else:
-        epic_positions = positions
+    epic_positions = positions
 
-    for deal_id, position in epic_positions:
+    for deal_id, position in epic_positions.iterrows():
 
         close_position(deal_id=deal_id, position=position, svc=svc)
 
@@ -65,7 +62,7 @@ def reduce_open_positions(
 
     for deal_id, position in positions.sort_values("size").iterrows():
 
-        to_cancel = min(position.size, quantity - quantity_cxd)
+        to_cancel = min(position["size"], quantity - quantity_cxd)
 
         close_position(
             deal_id=deal_id,
@@ -128,13 +125,10 @@ def adjust_position_sizes(
         latest_target = target_positions[epic].iloc[-1]
         current_position = current_sizes.loc[epic]
 
-        if current_position == latest_target:
-            logger.info("%s matches target, nothing to do.", current_position)
-            continue
+        # changing sides, close existing
+        if current_position and np.sign(current_position) != np.sign(latest_target):
 
-        if np.sign(current_position) != np.sign(latest_target):
-
-            close_all_open_position(epic, current_positions, service)
+            close_all_open_position(current_positions.loc[epic], service)
             current_position = 0.0
 
         # increasing position
@@ -170,6 +164,25 @@ def adjust_position_sizes(
             )
 
             logger.info(result)
+
+        elif abs(current_position) > abs(latest_target):
+
+            reduce_by = abs(current_position - latest_target)
+
+            logger.info(
+                "Reducing open positions by %s from %s to %s",
+                reduce_by,
+                current_position,
+                latest_target,
+            )
+
+            reduce_open_positions(
+                service,
+                epic=epic,
+                quantity=reduce_by,
+            )
+        else:
+            logger.info("%s matches target, nothing to do.", current_position)
 
 
 def main():
