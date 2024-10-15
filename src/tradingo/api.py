@@ -95,7 +95,7 @@ class _Read:
                 (
                     self.assets
                     if all(i in path for i in ("backtest", "portfolio"))
-                    else []
+                    else None
                 ),
             )
 
