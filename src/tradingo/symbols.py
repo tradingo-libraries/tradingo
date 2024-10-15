@@ -1,3 +1,5 @@
+import os
+from collections import defaultdict
 from typing import Optional
 import functools
 import logging
@@ -11,8 +13,11 @@ import arcticdb as adb
 
 logger = logging.getLogger(__name__)
 
-ENVIRONMENT = "test"
-ARCTIC_URL = f"lmdb:///home/rory/dev/airflow/{ENVIRONMENT}/arctic.db"
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "test")
+ARCTIC_URL = os.environ.get(
+    "TRADINGO_ARCTIC_URL",
+    f"lmdb:///home/rory/dev/airflow/{ENVIRONMENT}/arctic.db",
+)
 
 
 class Symbol(NamedTuple):
@@ -48,6 +53,12 @@ def parse_symbol(symbol, kwargs, symbol_prefix="", symbol_postfix=""):
     kwargs = dict(parse_qsl(parsed_symbol.query))
     symbol_prefix = symbol_prefix.format(**string_kwargs)
     symbol_postfix = symbol_postfix.format(**string_kwargs)
+    for key, value in kwargs.items():
+        if key == "as_of":
+            try:
+                kwargs[key] = int(value)
+            except TypeError:
+                continue
     return Symbol(lib, symbol_prefix + sym + symbol_postfix, kwargs)
 
 
@@ -61,17 +72,26 @@ def symbol_provider(
 
         @functools.wraps(func)
         def wrapper(
-            *args, start_date, end_date, arctic: Optional[adb.Arctic] = None, **kwargs
+            *args,
+            start_date=pd.NaT,
+            end_date=pd.NaT,
+            arctic: Optional[adb.Arctic] = None,
+            **kwargs,
         ):
 
             arctic = arctic or adb.Arctic(ARCTIC_URL)
             orig_symbol_data = {}
+            requested_symbols = symbols.copy()
 
             for symbol in symbols:
                 if symbol in kwargs and isinstance(
                     kwargs[symbol], (pd.DataFrame, pd.Series)
                 ):
                     orig_symbol_data[symbol] = kwargs.pop(symbol)
+                if symbol in kwargs and isinstance(kwargs[symbol], str):
+                    requested_symbols[symbol] = kwargs[symbol]
+                if symbol in kwargs and kwargs[symbol] is None:
+                    requested_symbols.pop(symbol)
 
             symbols_data = {
                 k: (
@@ -90,7 +110,7 @@ def symbol_provider(
                     )
                     .data
                 )
-                for k, v in symbols.items()
+                for k, v in requested_symbols.items()
                 if k not in orig_symbol_data
             }
             kwargs.update(symbols_data)
@@ -121,7 +141,11 @@ def symbol_publisher(
 
         @functools.wraps(func)
         def wrapper(
-            *args, dry_run=False, arctic: Optional[adb.Arctic] = None, **kwargs
+            *args,
+            dry_run=False,
+            arctic: Optional[adb.Arctic] = None,
+            snapshot: Optional[str] = None,
+            **kwargs,
         ):
 
             arctic = arctic or adb.Arctic(ARCTIC_URL)
@@ -136,6 +160,8 @@ def symbol_publisher(
                 symbols_ = [template.format(*s) for s in symbols_]
             else:
                 symbols_ = symbols
+
+            libraries = defaultdict(dict)
 
             for data, symbol in zip(out, symbols_):
 
@@ -164,12 +190,30 @@ def symbol_publisher(
                         lib, create_if_missing=True, library_options=library_options
                     )
                     if isinstance(data.index, pd.DatetimeIndex):
-                        lib.update(sym, data, upsert=True, **params)
+                        result = lib.update(
+                            sym,
+                            data,
+                            upsert=True,
+                            date_range=(data.index[0], data.index[-1]),
+                            **params,
+                        )
                     elif write_pickle:
-                        lib.write_pickle(sym, data, **params)
+                        result = lib.write_pickle(sym, data, **params)
 
                     else:
-                        lib.write(sym, data, **params)
+                        result = lib.write(sym, data, **params)
+
+                    libraries[lib.name][result.symbol] = result.version
+
+            if not dry_run and snapshot:
+                for lib_name, versions in libraries.items():
+                    logging.info(
+                        "Snapshotting %s for %s %s", lib_name, snapshot, versions
+                    )
+                    lib = arctic.get_library(lib_name)
+                    if snapshot in lib.list_snapshots():
+                        lib.delete_snapshot(snapshot)
+                    lib.snapshot(snapshot_name=snapshot, versions=versions)
 
             if dry_run:
                 return pd.concat(out, keys=symbols_, axis=1)

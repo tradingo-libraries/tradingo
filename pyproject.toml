@@ -17,6 +17,9 @@ dependencies = [
   "arcticdb",
   "PyYAML",
   "yfinance",
+  "pandas_market_calendars",
+  "trading_ig",
+  "riskfolio-lib",
 ]
 [project.optional-dependencies]
 dev = [
@@ -24,6 +27,10 @@ dev = [
   "pytest-benchmark",
   "black",
   "nb-clean",
+]
+research = [
+  "dtale",
+  "jupyter",
 ]
 
 

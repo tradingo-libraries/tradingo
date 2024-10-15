@@ -18,7 +18,9 @@ cpdef compute_backtest(
     float opening_position,
     float opening_avg_price,
     float[:] trades,
-    float[:] prices,
+    float[:] bid,
+    float[:] ask,
+    float[:] dividends,
 ):
 
     cdef size_t num_days = trades.shape[0]
@@ -33,6 +35,10 @@ cpdef compute_backtest(
 
     unrealised_pnl[0] = 0
     realised_pnl[0] = 0
+    total_pnl[0] = 0
+    net_investment[0] = 0
+    net_position[0] = 0
+    avg_open_price[0] = 0
 
     net_position[0] = opening_position
     avg_open_price[0] = opening_avg_price
@@ -48,13 +54,15 @@ cpdef compute_backtest(
     # loop variables
     cdef float price
     cdef float trade_quantity
+    cdef float trade_price
 
     for idx in range(1, num_days):
 
         idx_prev = idx - 1
 
         trade_quantity = trades[idx]
-        price = prices[idx]
+        dividend = dividends[idx]
+        price = (bid[idx] + ask[idx])/2
         m_unrealised_pnl = (price - avg_open_price[idx_prev]) * net_position[idx_prev]
 
         m_net_position = net_position[idx_prev]
@@ -63,6 +71,8 @@ cpdef compute_backtest(
 
         if trade_quantity != 0 and not isnan(trade_quantity):
 
+            trade_price = ask[idx] if trade_price > 0 else bid[idx]
+
             # net investment
             m_net_investment = max(
                 m_net_investment, abs(m_net_position * m_avg_open_price)
@@ -70,18 +80,21 @@ cpdef compute_backtest(
             # realized pnl
             if abs(m_net_position + trade_quantity) < abs(m_net_position):
                 m_realised_pnl += (
-                    (price - m_avg_open_price) * abs(trade_quantity) * sign(m_net_position)
+                    (trade_price - m_avg_open_price) * abs(trade_quantity) * sign(m_net_position)
                 )
 
             # avg open price
             if abs(m_net_position + trade_quantity) > abs(m_net_position):
                 m_avg_open_price = (
-                    (m_avg_open_price * m_net_position) + (price * trade_quantity)
+                    (m_avg_open_price * m_net_position) + (trade_price * trade_quantity)
                 ) / (m_net_position + trade_quantity)
             else:
                 # Check if it is close-and-open
                 if trade_quantity > abs(m_net_position):
-                    m_avg_open_price = price
+                    m_avg_open_price = trade_price
+
+        if dividend != 0 and not isnan(dividend):
+            m_realised_pnl += m_net_position * dividend
 
         # total pnl
         m_total_pnl = m_realised_pnl + m_unrealised_pnl
