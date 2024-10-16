@@ -72,20 +72,24 @@ def ewmac_signal(
 
 
 @symbol_publisher(
-    "signals/{signal}.scaled", symbol_prefix="{provider}.{universe}.{model_name}."
+    "signals/{signal}.scaled",
+    symbol_prefix="{provider}.{universe}.{model_name}.",
 )
 @symbol_provider(
-    signal="signals/{signal}", symbol_prefix="{provider}.{universe}.{model_name}."
+    signal="signals/{signal}",
+    symbol_prefix="{provider}.{universe}.{model_name}.",
 )
 def scaled(signal, scale: float, **kwargs):
     return ((signal / signal.abs().max()) * scale,)
 
 
 @symbol_publisher(
-    "signals/{signal}.capped", symbol_prefix="{provider}.{universe}.{model_name}."
+    "signals/{signal}.capped",
+    symbol_prefix="{provider}.{universe}.{model_name}.",
 )
 @symbol_provider(
-    signal="signals/{signal}", symbol_prefix="{provider}.{universe}.{model_name}."
+    signal="signals/{signal}",
+    symbol_prefix="{provider}.{universe}.{model_name}.",
 )
 def capped(signal: pd.Series, cap: float, **kwargs):
     signal[signal.abs() >= cap] = np.sign(signal) * cap
@@ -183,7 +187,10 @@ def intraday_momentum(
     long_vol = close_px.pct_change().ewm(long_vol, min_periods=long_vol).std()
     short_vol = close_px.pct_change().ewm(short_vol, min_periods=short_vol).std()
 
-    previous_close_px = previous_close_px.reindex(close.index, method="ffill")
+    previous_close_px = previous_close_px.reindex(
+        close.index,
+        method="ffill",
+    )
     long_vol = long_vol.reindex(close.index, method="ffill")
     short_vol = short_vol.reindex(close.index, method="ffill")
     close_px = close_px.reindex(close.index, method="ffill")
@@ -192,35 +199,53 @@ def intraday_momentum(
 
     signal = z_score.copy()
 
+    # apply caps and threshold
     signal.loc[signal.squeeze().abs() < threshold] = 0
     signal.loc[signal.squeeze().abs() > cap] = np.sign(signal) * cap
-    signal = signal.ffill()
-    # direction = z_score.copy()
-    # direction[(np.sign(direction.shift()) != np.sign(direction))] = np.nan
+    signal = signal.fillna(0.0).ffill()
+
+    # determine where sign has changed in a given day.
     signal = signal.replace(0, np.nan).groupby(signal.index.date).ffill().fillna(0)
     direction = (
         np.sign(signal).replace(0, np.nan).groupby(signal.index.date).ffill().fillna(0)
     )
 
-    direction.loc[
+    signal.loc[
         (np.sign(direction.squeeze()) != np.sign(direction.squeeze().shift()))
         & (np.sign(direction.squeeze()) != 0)
         & (np.sign(direction.shift().squeeze()) != 0)
-    ] = np.nan
+    ] = direction
     direction = direction.groupby(direction.index.date).ffill()
+
+    def dynamic_floor(series, shift=0):
+        return series.groupby(series.index.date).transform(
+            lambda i: i.where(
+                ~(
+                    (np.sign(i.shift(shift)) != 0)
+                    & (np.sign(i.shift(shift)) != np.sign(i))
+                ),
+                0,
+            )
+        )
+
+    for i in range(1, 5):
+
+        signal = dynamic_floor(signal, i)
 
     # direction = direction.ffill()
     if monotonic:
 
         signal_cumabsmax = signal.abs().groupby(signal.index.date).cummax()
-        signal = signal_cumabsmax * np.sign(direction)
+        signal = signal_cumabsmax * np.sign(signal)
 
     # ensure
-    signal[(signal.shift().abs() >= threshold) & (np.sign(signal.shift()))]
+    # signal[(signal.shift().abs() >= threshold) & (np.sign(signal.shift()))]
     gearing = 1  # 0.05
     signal = (gearing * signal) / (short_vol * np.sqrt(252))
     # signal = signal.abs().groupby(signal.index.date).cummax() * np.sign(z_score)
     # signal closes position at close time
+    #
+
     close_at = functools.reduce(
         pd.DatetimeIndex.union,
         (
@@ -229,7 +254,11 @@ def intraday_momentum(
         ),
         pd.DatetimeIndex(schedule.market_close),
     )
-    signal.loc[signal.index.isin(close_at)] = 0.0
+
+    signal.loc[signal.index.isin(close_at)] = (
+        0.0  # pd.DataFrame(0.0, index=close_at, columns=signal.columns)
+    )
+
     return (
         signal,
         z_score,
