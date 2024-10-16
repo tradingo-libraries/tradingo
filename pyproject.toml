@@ -1,6 +1,6 @@
 [project]
 name = "tradingo"
-version = "0.0.1"
+dynamic = ["version"]
 authors = [
   { name="Rory McStay", email="rory@rorymcstay.com" },
 ]
@@ -38,8 +38,16 @@ research = [
 where = ["src"]
 
 [build-system]
-requires = ["cython", "numpy", "setuptools"]
+requires = [
+  "cython",
+  "numpy",
+  "setuptools>=64",
+  "setuptools_scm>=8",
+]
 
 [tool.black]
 line-length = 88
 target-version = ['py311']
+
+
+[tool.setuptools_scm]
