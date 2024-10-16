@@ -39,9 +39,11 @@ cpdef compute_backtest(
     total_pnl[0] = 0
     net_investment[0] = 0
     net_position[0] = trades[0]
-    avg_open_price[0] = bid[0] if trades[0] < 0 else ask[0]
+    if trades[0] != 0.0:
+        avg_open_price[0] = bid[0] if trades[0] < 0 else ask[0]
+    else:
+        avg_open_price[0] = 0.0
     stop_trade[0] = 0
-    net_position[0] = trades[0]
 
     # transient output variables
     cdef float m_net_position = 0
@@ -50,6 +52,7 @@ cpdef compute_backtest(
     cdef float m_total_pnl = 0
     cdef float m_realised_pnl = 0
     cdef float m_net_investment = 0
+    cdef float m_loss_trade = 0
 
     # loop variables
     cdef float price
@@ -57,7 +60,6 @@ cpdef compute_backtest(
     cdef float trade_price
     cdef float c_stop_limit
     cdef float c_stop_loss
-    cdef float m_loss_trade
 
     for idx in range(1, num_days):
 
@@ -67,6 +69,9 @@ cpdef compute_backtest(
         trade_quantity = trades[idx]
         c_stop_limit = stop_limit[idx]
         c_stop_loss = stop_loss[idx]
+        m_loss_trade = 0
+        price = (bid[idx] + ask[idx])/2
+
         if (
             (not isnan(c_stop_loss)) and (
                 (m_net_position < 0.0 and price > c_stop_loss)
@@ -78,12 +83,10 @@ cpdef compute_backtest(
                 or (m_net_position > 0.0 and price > c_stop_limit)
             )
         ):
-            print(c_stop_limit)
             m_loss_trade = -1 * m_net_position
             trade_quantity += m_loss_trade
 
         dividend = dividends[idx]
-        price = (bid[idx] + ask[idx])/2
         m_unrealised_pnl = (price - avg_open_price[idx_prev]) * m_net_position 
 
         m_realised_pnl = realised_pnl[idx_prev]

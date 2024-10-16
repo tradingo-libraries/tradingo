@@ -113,7 +113,7 @@ def test_backtest_smoke(tradingo, prices_, portfolio_, unrealised_pnl, realised_
     expected_realised = (
         eval(realised_pnl) if isinstance(realised_pnl, str) else realised_pnl
     )
-    pd.testing.assert_series_equal(
+    pd.testing.assert_series_equal(test_b
         actual_realised,
         expected_realised.astype("float32"),
         check_names=False,

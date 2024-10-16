@@ -47,27 +47,35 @@ def backtest(
     stage: str = "raw",
     **kwargs,
 ):
-    trades = portfolio.ffill().fillna(0.0).diff()
+
+    mid_close = ((bid_close + ask_close) / 2).dropna()
+    bid_close, ask_close = bid_close.reindex(mid_close.index), ask_close.reindex(
+        mid_close.index
+    )
+
+    portfolio = portfolio.reindex(mid_close.index, method="ffill").fillna(0.0)
+    trades = portfolio.diff()
     trades.iloc[0] = portfolio.iloc[0]
-    bid_close, ask_close = bid_close.ffill(), ask_close.ffill()
+    # TODO refind handling
+    #
 
     if dividends is None:
         dividends = pd.DataFrame(
             0,
-            index=bid_close.index,
-            columns=bid_close.columns,
+            index=mid_close.index,
+            columns=mid_close.columns,
         )
     if stop_limit is None:
         stop_limit = pd.DataFrame(
             np.nan,
-            index=bid_close.index,
-            columns=bid_close.columns,
+            index=mid_close.index,
+            columns=mid_close.columns,
         )
     if stop_loss is None:
         stop_loss = pd.DataFrame(
             np.nan,
-            index=bid_close.index,
-            columns=bid_close.columns,
+            index=mid_close.index,
+            columns=mid_close.columns,
         )
 
     logger.info("running backtest for %s on stage %s with %s", name, stage, kwargs)
@@ -103,10 +111,8 @@ def backtest(
 
     backtest_fields = (backtest.loc[:, f] for f in BACKTEST_FIELDS if f != "date")
 
-    prices = (ask_close + bid_close) / 2
-
-    net_exposure = (backtest["net_position"] * prices.ffill()).sum(axis=1)
-    gross_exposure = (backtest["net_position"].abs() * prices.ffill()).sum(axis=1)
+    net_exposure = (backtest["net_position"] * mid_close).sum(axis=1)
+    gross_exposure = (backtest["net_position"].abs() * mid_close).sum(axis=1)
 
     summary = (
         backtest[
