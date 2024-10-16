@@ -73,8 +73,8 @@ def symbol_provider(
         @functools.wraps(func)
         def wrapper(
             *args,
-            start_date=pd.NaT,
-            end_date=pd.NaT,
+            start_date=None,
+            end_date=None,
             arctic: Optional[adb.Arctic] = None,
             **kwargs,
         ):
@@ -104,7 +104,10 @@ def symbol_provider(
                         date_range=(
                             None
                             if no_date
-                            else (pd.Timestamp(start_date), pd.Timestamp(end_date))
+                            else (
+                                pd.Timestamp(start_date) if start_date else None,
+                                pd.Timestamp(end_date) if end_date else None,
+                            )
                         ),
                         **parse_symbol(v, kwargs, symbol_prefix=symbol_prefix).kwargs,
                     )

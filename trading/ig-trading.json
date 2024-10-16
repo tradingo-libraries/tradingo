@@ -29,8 +29,8 @@
         "frequency": "15m",
         "long_vol": 64,
         "short_vol": 6,
-        "threshold": 1,
-        "cap": 2
+        "threshold": 0.3,
+        "cap": 0.75
       }
     }
   },
@@ -57,8 +57,8 @@
         "instrument_weights": {}
       },
       "backtest": {
-        "bid": "prices/bid.close",
-        "ask": "prices/ask.close",
+        "bid_close": "prices/bid.close",
+        "ask_close": "prices/ask.close",
         "stage": "rounded.position",
         "dividends": null
       },

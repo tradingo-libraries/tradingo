@@ -81,8 +81,8 @@ def test_backtest_smoke(tradingo, prices_, portfolio_, unrealised_pnl, realised_
 
     bt = backtest.backtest(
         portfolio=portfolio_,
-        bid=prices_,
-        ask=prices_,
+        bid_close=prices_,
+        ask_close=prices_,
         dividends=dividends,
         name="test",
         config_name="test",

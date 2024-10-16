@@ -15,11 +15,11 @@ cdef sign(float x):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cpdef compute_backtest(
-    float opening_position,
-    float opening_avg_price,
     float[:] trades,
     float[:] bid,
     float[:] ask,
+    float[:] stop_limit,
+    float[:] stop_loss,
     float[:] dividends,
 ):
 
@@ -32,6 +32,7 @@ cpdef compute_backtest(
     cdef float[:] net_investment = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
     cdef float[:] net_position = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
     cdef float[:] avg_open_price = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
+    cdef float[:] stop_trade = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
 
     unrealised_pnl[0] = 0
     realised_pnl[0] = 0
@@ -39,13 +40,14 @@ cpdef compute_backtest(
     net_investment[0] = 0
     net_position[0] = 0
     avg_open_price[0] = 0
+    stop_trade[0] = 0
 
-    net_position[0] = opening_position
-    avg_open_price[0] = opening_avg_price
+    net_position[0] = 0
+    avg_open_price[0] = 0
 
     # transient output variables
-    cdef float m_net_position = opening_position
-    cdef float m_avg_open_price = opening_avg_price
+    cdef float m_net_position = 0
+    cdef float m_avg_open_price = 0
     cdef float m_unrealised_pnl = 0
     cdef float m_total_pnl = 0
     cdef float m_realised_pnl = 0
@@ -55,17 +57,37 @@ cpdef compute_backtest(
     cdef float price
     cdef float trade_quantity
     cdef float trade_price
+    cdef float c_stop_limit
+    cdef float c_stop_loss
+    cdef float m_loss_trade
 
     for idx in range(1, num_days):
 
         idx_prev = idx - 1
 
+        m_net_position = net_position[idx_prev]
         trade_quantity = trades[idx]
+        c_stop_limit = stop_limit[idx]
+        c_stop_loss = stop_loss[idx]
+        if (
+            (not isnan(c_stop_loss)) and (
+                (m_net_position < 0.0 and price > c_stop_loss)
+                or (m_net_position > 0.0 and price < c_stop_loss)
+            )
+        ) or (
+            (not isnan(c_stop_limit)) and (
+                (m_net_position < 0.0 and price < c_stop_limit)
+                or (m_net_position > 0.0 and price > c_stop_limit)
+            )
+        ):
+            print(c_stop_limit)
+            m_loss_trade = -1 * m_net_position
+            trade_quantity += m_loss_trade
+
         dividend = dividends[idx]
         price = (bid[idx] + ask[idx])/2
-        m_unrealised_pnl = (price - avg_open_price[idx_prev]) * net_position[idx_prev]
+        m_unrealised_pnl = (price - avg_open_price[idx_prev]) * m_net_position 
 
-        m_net_position = net_position[idx_prev]
         m_realised_pnl = realised_pnl[idx_prev]
         m_avg_open_price = avg_open_price[idx_prev]
 
@@ -106,6 +128,7 @@ cpdef compute_backtest(
         net_investment[idx] = m_net_investment
         net_position[idx] = m_net_position
         avg_open_price[idx] = m_avg_open_price
+        stop_trade[idx] = m_loss_trade
 
     return np.column_stack(
         (
@@ -115,5 +138,6 @@ cpdef compute_backtest(
             np.asarray(net_investment),
             np.asarray(net_position),
             np.asarray(avg_open_price),
+            np.asarray(stop_trade),
         )
     )
