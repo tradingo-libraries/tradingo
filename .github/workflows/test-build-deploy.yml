@@ -2,8 +2,8 @@ name: Tradingo Test build deploy
 
 on:
   push:
-    branches:
-      - "feature/*"
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   id-token: write
