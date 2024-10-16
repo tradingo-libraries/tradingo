@@ -2,6 +2,7 @@ import logging
 import numba
 import numpy as np
 import math
+import functools
 
 import pandas as pd
 
@@ -138,6 +139,9 @@ def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
 @symbol_publisher(
     "signals/intraday_momentum",
     "signals/intraday_momentum.z_score",
+    "signals/intraday_momentum.short_vol",
+    "signals/intraday_momentum.long_vol",
+    "signals/intraday_momentum.previous_close_px",
     symbol_prefix="{provider}.{universe}.",
 )
 @symbol_provider(
@@ -149,11 +153,15 @@ def intraday_momentum(
     ask_close,
     bid_close,
     calendar="NYSE",
-    frequency="15m",
+    frequency="15min",
     long_vol=64,
     short_vol=6,
     cap=2,
     threshold=1,
+    close_offset_periods: int = 0,
+    monotonic: bool = True,
+    trading_stop_periods: int = 0,
+    trade_once: bool = True,
     **kwargs,
 ):
 
@@ -166,11 +174,9 @@ def intraday_momentum(
     )
     close = close.reindex(trading_index)
 
-    open_px = close.groupby(close.index.date).first()
     close_px = close.groupby(close.index.date).last()
 
     close_px.index = pd.to_datetime(close_px.index).tz_localize("utc")
-    open_px.index = pd.to_datetime(open_px.index).tz_localize("utc")
 
     previous_close_px = close_px.shift()
 
@@ -185,13 +191,49 @@ def intraday_momentum(
     z_score = ((close - previous_close_px) / previous_close_px) / long_vol
 
     signal = z_score.copy()
-    signal[signal.abs() < threshold] = 0
-    signal[signal.abs() > cap] = cap
-    signal = signal / (short_vol * np.sqrt(252))
-    signal.loc[(signal.squeeze() != 0) & (signal.squeeze().shift() != 0)] = np.nan
+
+    signal.loc[signal.squeeze().abs() < threshold] = 0
+    signal.loc[signal.squeeze().abs() > cap] = np.sign(signal) * cap
     signal = signal.ffill()
-    stop = 0.01
-    signal = signal.abs().groupby(signal.index.date).cummax() * np.sign(z_score)
+    # direction = z_score.copy()
+    # direction[(np.sign(direction.shift()) != np.sign(direction))] = np.nan
+    signal = signal.replace(0, np.nan).groupby(signal.index.date).ffill().fillna(0)
+    direction = (
+        np.sign(signal).replace(0, np.nan).groupby(signal.index.date).ffill().fillna(0)
+    )
+
+    direction.loc[
+        (np.sign(direction.squeeze()) != np.sign(direction.squeeze().shift()))
+        & (np.sign(direction.squeeze()) != 0)
+        & (np.sign(direction.shift().squeeze()) != 0)
+    ] = np.nan
+    direction = direction.groupby(direction.index.date).ffill()
+
+    # direction = direction.ffill()
+    if monotonic:
+
+        signal_cumabsmax = signal.abs().groupby(signal.index.date).cummax()
+        signal = signal_cumabsmax * np.sign(direction)
+
+    # ensure
+    signal[(signal.shift().abs() >= threshold) & (np.sign(signal.shift()))]
+    gearing = 1  # 0.05
+    signal = (gearing * signal) / (short_vol * np.sqrt(252))
+    # signal = signal.abs().groupby(signal.index.date).cummax() * np.sign(z_score)
     # signal closes position at close time
-    signal[signal.index.isin(schedule.market_close)] = 0.0
-    return (signal, z_score)
+    close_at = functools.reduce(
+        pd.DatetimeIndex.union,
+        (
+            schedule.market_close - (i * pd.tseries.frequencies.to_offset(frequency))
+            for i in range(1, close_offset_periods + 1)
+        ),
+        pd.DatetimeIndex(schedule.market_close),
+    )
+    signal.loc[signal.index.isin(close_at)] = 0.0
+    return (
+        signal,
+        z_score,
+        short_vol,
+        long_vol,
+        previous_close_px,
+    )
