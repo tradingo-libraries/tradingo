@@ -76,7 +76,7 @@ cpdef compute_backtest(
             )
         ) or (
             (not isnan(c_stop_limit)) and (
-                (m_net_position < 0.0 and price < c_stop_limit)
+                (m_net_position < 0.0 and price < c_stop_limit))
                 or (m_net_position > 0.0 and price > c_stop_limit)
             )
         ):

@@ -30,7 +30,9 @@
         "long_vol": 64,
         "short_vol": 6,
         "threshold": 0.3,
-        "cap": 0.75
+        "cap": 0.75,
+        "close_offset_periods": 5,
+        "monotonic": true
       }
     }
   },
