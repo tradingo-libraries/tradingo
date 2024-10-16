@@ -80,6 +80,7 @@ def test_intraday_momentum(
     ask_close,
     bid_close,
     close_offset_periods,
+    tradingo,
 ):
 
     result = signals.intraday_momentum(
@@ -90,6 +91,7 @@ def test_intraday_momentum(
         dry_run=True,
         close_offset_periods=close_offset_periods,
         calendar="NYSE",
+        arctic=tradingo,
     )
 
     cal = pmc.get_calendar("NYSE")

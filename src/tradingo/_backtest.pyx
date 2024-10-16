@@ -38,12 +38,10 @@ cpdef compute_backtest(
     realised_pnl[0] = 0
     total_pnl[0] = 0
     net_investment[0] = 0
-    net_position[0] = 0
-    avg_open_price[0] = 0
+    net_position[0] = trades[0]
+    avg_open_price[0] = bid[0] if trades[0] < 0 else ask[0]
     stop_trade[0] = 0
-
-    net_position[0] = 0
-    avg_open_price[0] = 0
+    net_position[0] = trades[0]
 
     # transient output variables
     cdef float m_net_position = 0
