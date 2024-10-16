@@ -141,7 +141,7 @@ def adjust_position_sizes(
             logger.info(
                 "Increasing target position from %s to %s - %s for %s",
                 current_position,
-                target_positions,
+                latest_target,
                 side,
                 epic,
             )
