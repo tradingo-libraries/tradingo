@@ -3,7 +3,7 @@ name: Tradingo CICD
 on:
   push:
     branches:
-      - "master"
+      - "feature/*"
 
 jobs:
   build:
