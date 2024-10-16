@@ -4,15 +4,6 @@ import pathlib
 import pandas as pd
 
 
-HOME_DIR = pathlib.Path("/home/rory/dev/airflow/") / "trading"
-
-
-def get_config(config_path):
-    return json.loads(
-        (pathlib.Path(config_path) or (HOME_DIR / "config.json")).read_text()
-    )
-
-
 def get_instruments(config, key="equity") -> pd.DataFrame:
     if "file" in config[key]:
         return pd.read_csv(
