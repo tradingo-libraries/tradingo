@@ -1,4 +1,4 @@
-name: Tradingo CICD
+name: Tradingo Test build deploy
 
 on:
   push:
