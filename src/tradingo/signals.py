@@ -1,4 +1,5 @@
 import logging
+import operator
 import numba
 import numpy as np
 import math
@@ -200,39 +201,38 @@ def intraday_momentum(
     signal = z_score.copy()
 
     # apply caps and threshold
-    signal.loc[signal.squeeze().abs() < threshold] = 0
-    signal.loc[signal.squeeze().abs() > cap] = np.sign(signal) * cap
-    signal = signal.fillna(0.0).ffill()
-
-    # determine where sign has changed in a given day.
-    signal = signal.replace(0, np.nan).groupby(signal.index.date).ffill().fillna(0)
-    direction = (
-        np.sign(signal).replace(0, np.nan).groupby(signal.index.date).ffill().fillna(0)
+    #
+    signal = (
+        signal.where(signal.abs() > threshold, 0)
+        .where(signal.abs() < cap, np.sign(signal) * cap)
+        .groupby(signal.index.date)
+        .ffill()
+        .fillna(0)
     )
 
-    signal.loc[
-        (np.sign(direction.squeeze()) != np.sign(direction.squeeze().shift()))
-        & (np.sign(direction.squeeze()) != 0)
-        & (np.sign(direction.shift().squeeze()) != 0)
-    ] = direction
-    direction = direction.groupby(direction.index.date).ffill()
+    signal = signal.where(
+        signal.index.to_series().dt.date.eq(signal.index.to_series().dt.date.shift()),
+        0,  # make first reading 0.0 position
+    ).where(
+        np.sign(signal.shift()).eq(np.sign(signal)), 0  # make changes in sign 0
+    )
 
     def dynamic_floor(series, shift=0):
         return series.groupby(series.index.date).transform(
             lambda i: i.where(
-                ~(
-                    (np.sign(i.shift(shift)) != 0)
-                    & (np.sign(i.shift(shift)) != np.sign(i))
+                ~functools.reduce(
+                    operator.and_,
+                    (
+                        (np.sign(i.shift(s)).ne(0) & np.sign(i.shift(s)).ne(np.sign(i)))
+                        for s in range(1, shift)
+                    ),
                 ),
                 0,
             )
         )
 
-    for i in range(1, 5):
+    signal = dynamic_floor(signal, 5)
 
-        signal = dynamic_floor(signal, i)
-
-    # direction = direction.ffill()
     if monotonic:
 
         signal_cumabsmax = signal.abs().groupby(signal.index.date).cummax()
@@ -255,9 +255,7 @@ def intraday_momentum(
         pd.DatetimeIndex(schedule.market_close),
     )
 
-    signal.loc[signal.index.isin(close_at)] = (
-        0.0  # pd.DataFrame(0.0, index=close_at, columns=signal.columns)
-    )
+    signal.loc[signal.index.isin(close_at)] = 0.0
 
     return (
         signal,
