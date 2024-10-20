@@ -49,16 +49,23 @@ def backtest(
     **kwargs,
 ):
 
-    mid_close = ((bid_close + ask_close) / 2).dropna()
+    mid_close = (bid_close + ask_close) / 2
     bid_close, ask_close = bid_close.reindex(mid_close.index), ask_close.reindex(
         mid_close.index
     )
 
-    portfolio = portfolio.reindex(mid_close.index, method="ffill").fillna(0.0)
+    # restrict position changes to where we have a price.
+    portfolio = (
+        portfolio.ffill()
+        .reindex(mid_close.index, method="ffill")
+        .where(mid_close.notna(), np.nan)
+        .ffill()
+        .fillna(0.0)
+    )
+
+    # portfolio = portfolio.reindex(mid_close.index, method="ffill").fillna(0.0)
     trades = portfolio.diff()
     trades.iloc[0] = portfolio.iloc[0]
-    # TODO refind handling
-    #
 
     if dividends is None:
         dividends = pd.DataFrame(
@@ -84,23 +91,29 @@ def backtest(
     def compute_backtest(inst_trades: pd.Series):
 
         logger.info("Computing backtest for ticker=%s", inst_trades.name)
-        inst_asks = ask_close[inst_trades.name].ffill()
-        inst_bids = bid_close[inst_trades.name].ffill()
-        inst_limit = stop_limit[inst_trades.name]
-        inst_loss = stop_loss[inst_trades.name]
+        inst_mids = mid_close[inst_trades.name].ffill().dropna()
+        inst_asks = ask_close[inst_trades.name].reindex(inst_mids.index, method="ffill")
+        inst_bids = bid_close[inst_trades.name].reindex(inst_mids.index, method="ffill")
+        inst_limit = stop_limit[inst_trades.name].reindex(inst_mids.index)
+        inst_loss = stop_loss[inst_trades.name].reindex(inst_mids.index)
 
-        inst_dividends = dividends[inst_trades.name].fillna(0.0)
+        inst_dividends = (
+            dividends[inst_trades.name].reindex(mid_close.index).fillna(0.0)
+        )
 
         return pd.DataFrame(
             data=_backtest.compute_backtest(
-                inst_trades.fillna(0.0).to_numpy().astype("float32"),
+                inst_trades.reindex(inst_mids.index)
+                .fillna(0.0)
+                .to_numpy()
+                .astype("float32"),
                 inst_bids.to_numpy().astype("float32"),
                 inst_asks.to_numpy().astype("float32"),
                 inst_limit.to_numpy().astype("float32"),
                 inst_loss.to_numpy().astype("float32"),
                 inst_dividends.to_numpy().astype("float32"),
             ),
-            index=inst_trades.index,
+            index=inst_mids.index,
             columns=BACKTEST_FIELDS,
         )
 

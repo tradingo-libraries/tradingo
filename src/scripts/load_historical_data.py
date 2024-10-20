@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 ASSET_MAPPING = {
     "USA500.IDXUSD": "IX.D.SPTRD.IFS.IP",
     "GAS.CMDUSD": "CC.D.NG.UMP.IP",
+    "BRENT.CMDUSD": "CC.D.LCO.UMP.IP",
+    "USTBOND.TRUSD": "IR.D.10YEAR100.FWM2.IP",
 }
 
 
@@ -69,6 +71,7 @@ def main():
 
     if args.dry_run:
         print(result)
+    print("finished")
 
 
 @symbol_publisher(
@@ -149,10 +152,12 @@ if __name__ == "__main__":
     sys.argv.extend(
         [
             "--arctic-uri",
-            "lmdb:///home/rory/dev/airflow/test/arctic.db",
+            "s3://s3.us-east-1.amazonaws.com:tradingo-store?aws_auth=true&path_prefix=uat",
             "--path",
             str(Path.home() / "dev" / "market-data" / "GAS"),
             str(Path.home() / "dev" / "market-data" / "USA500"),
+            str(Path.home() / "dev" / "market-data" / "BRENT"),
+            # str(Path.home() / "dev" / "market-data" / "USTBOND"),
             # "--dry-run",
             "--provider",
             "ig-trading",
