@@ -125,8 +125,8 @@ def backtest(
 
     backtest_fields = (backtest.loc[:, f] for f in BACKTEST_FIELDS if f != "date")
 
-    net_exposure = (backtest["net_position"] * mid_close).sum(axis=1)
-    gross_exposure = (backtest["net_position"].abs() * mid_close).sum(axis=1)
+    net_exposure = (backtest["net_position"] * mid_close).ffill().sum(axis=1)
+    gross_exposure = (backtest["net_position"].abs() * mid_close).ffill().sum(axis=1)
 
     summary = (
         backtest[
@@ -137,6 +137,7 @@ def backtest(
                 "total_pnl",
             ]
         ]
+        .ffill()
         .transpose()
         .groupby(level=0)
         .sum()
