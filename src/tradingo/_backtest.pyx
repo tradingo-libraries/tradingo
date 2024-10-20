@@ -31,6 +31,7 @@ cpdef compute_backtest(
     cdef float[:] total_pnl = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
     cdef float[:] net_investment = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
     cdef float[:] net_position = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
+    cdef float[:] net_exposure = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
     cdef float[:] avg_open_price = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
     cdef float[:] stop_trade = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
 
@@ -43,6 +44,7 @@ cpdef compute_backtest(
         avg_open_price[0] = bid[0] if trades[0] < 0 else ask[0]
     else:
         avg_open_price[0] = 0.0
+    net_exposure[0] = trades[0] * avg_open_price[0]
     stop_trade[0] = 0
 
     # transient output variables
@@ -53,6 +55,7 @@ cpdef compute_backtest(
     cdef float m_realised_pnl = 0
     cdef float m_net_investment = 0
     cdef float m_loss_trade = 0
+    cdef float m_net_exposure = 0
 
     # loop variables
     cdef float price
@@ -122,6 +125,7 @@ cpdef compute_backtest(
         # total pnl
         m_total_pnl = m_realised_pnl + m_unrealised_pnl
         m_net_position += trade_quantity
+        m_net_exposure = m_net_position * price
 
         unrealised_pnl[idx] = m_unrealised_pnl
         realised_pnl[idx] = m_realised_pnl
@@ -130,6 +134,7 @@ cpdef compute_backtest(
         net_position[idx] = m_net_position
         avg_open_price[idx] = m_avg_open_price
         stop_trade[idx] = m_loss_trade
+        net_exposure[idx] = m_net_exposure
 
     return np.column_stack(
         (
@@ -138,6 +143,7 @@ cpdef compute_backtest(
             np.asarray(total_pnl),
             np.asarray(net_investment),
             np.asarray(net_position),
+            np.asarray(net_exposure),
             np.asarray(avg_open_price),
             np.asarray(stop_trade),
         )

@@ -17,6 +17,7 @@ BACKTEST_FIELDS = (
     "total_pnl",
     "net_investment",
     "net_position",
+    "net_exposure",
     "avg_open_price",
     "stop_trade",
 )
@@ -41,7 +42,7 @@ def backtest(
     portfolio: pd.DataFrame,
     bid_close: pd.DataFrame,
     ask_close: pd.DataFrame,
-    dividends: pd.DataFrame,
+    dividends: Optional[pd.DataFrame] = None,
     stop_limit: Optional[pd.DataFrame] = None,
     stop_loss: Optional[pd.DataFrame] = None,
     stage: str = "raw",
