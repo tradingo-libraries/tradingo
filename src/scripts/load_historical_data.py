@@ -3,6 +3,7 @@
 #
 import argparse
 import logging
+from typing import List
 import dateutil.tz
 from collections import defaultdict
 import re
@@ -14,6 +15,7 @@ from arcticdb import Arctic
 import pandas as pd
 
 from tradingo.signals import symbol_provider, symbol_publisher
+from tradingo import sampling
 
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 ASSET_MAPPING = {
     "USA500.IDXUSD": "IX.D.SPTRD.IFS.IP",
+    "GAS.CMDUSD": "CC.D.NG.UMP.IP",
+    "BRENT.CMDUSD": "CC.D.LCO.UMP.IP",
+    "USTBOND.TRUSD": "IR.D.10YEAR100.FWM2.IP",
 }
 
 
@@ -28,7 +33,7 @@ def cli_app():
 
     app = argparse.ArgumentParser("load-historical-data")
 
-    app.add_argument("--path", type=Path, required=True)
+    app.add_argument("--path", type=Path, required=True, nargs="+")
     app.add_argument("--arctic-uri", required=True)
     app.add_argument("--dry-run", action="store_true")
     app.add_argument("--universe", required=True)
@@ -48,38 +53,49 @@ def main():
     a = Arctic(args.arctic_uri)
 
     result = read_backfill(
-        path=args.path,
+        paths=args.path,
         arctic=a,
         dry_run=args.dry_run,
         universe=args.universe,
         provider=args.provider,
     )
 
+    service = sampling.get_ig_service()
+
+    sampling.download_instruments(
+        index_col=None,
+        epics=ASSET_MAPPING.values(),
+        universe=args.universe,
+        arctic=a,
+    )
+
     if args.dry_run:
         print(result)
+    print("finished")
 
 
-@symbol_provider(instruments="instruments/{universe}", no_date=True)
 @symbol_publisher(
     template="prices/{0}.{1}",
     symbol_prefix="{provider}.{universe}.",
 )
 def read_backfill(
-    path: Path,
+    paths: List[Path],
     **kwargs,
 ):
 
     data_files = defaultdict(list)
 
-    for file in os.listdir(path):
+    for path in paths:
 
-        if match := re.match(FILE_REGEX, file):
+        for file in os.listdir(path):
 
-            symbol, frequency, field, start_date, end_date = match.groups()
+            if match := re.match(FILE_REGEX, file):
 
-            # need to group by symbol
+                symbol, frequency, field, start_date, end_date = match.groups()
 
-            data_files[(field.lower(), symbol)].append(file)
+                # need to group by symbol
+
+                data_files[(field.lower(), symbol)].append(path / file)
 
     # symbol, ohlc, symbol
     #
@@ -87,7 +103,7 @@ def read_backfill(
     def read_file(f):
         logger.warning("Reading %s", f)
         out = pd.read_csv(
-            path / f,
+            f,
             index_col=0,
             date_format="%d.%m.%Y %H:%M:%S.%f",
         )
@@ -136,14 +152,17 @@ if __name__ == "__main__":
     sys.argv.extend(
         [
             "--arctic-uri",
-            "lmdb:///home/rory/dev/airflow/test/arctic.db",
+            "s3://s3.us-east-1.amazonaws.com:tradingo-store?aws_auth=true&path_prefix=uat",
             "--path",
-            str(Path.home() / "Downloads/"),
+            str(Path.home() / "dev" / "market-data" / "GAS"),
+            str(Path.home() / "dev" / "market-data" / "USA500"),
+            str(Path.home() / "dev" / "market-data" / "BRENT"),
+            # str(Path.home() / "dev" / "market-data" / "USTBOND"),
             # "--dry-run",
             "--provider",
             "ig-trading",
             "--universe",
-            "igtrading",
+            "im-assets",
         ]
     )
 

@@ -1,4 +1,5 @@
 import logging
+import operator
 import numba
 import numpy as np
 import math
@@ -6,6 +7,7 @@ import functools
 
 import pandas as pd
 
+from pandas._libs.tslibs import IncompatibleFrequency
 import pandas_market_calendars as pmc
 
 from tradingo.symbols import symbol_provider, symbol_publisher
@@ -164,8 +166,7 @@ def intraday_momentum(
     threshold=1,
     close_offset_periods: int = 0,
     monotonic: bool = True,
-    trading_stop_periods: int = 0,
-    trade_once: bool = True,
+    incremental: int = 0,
     **kwargs,
 ):
 
@@ -184,15 +185,23 @@ def intraday_momentum(
 
     previous_close_px = close_px.shift()
 
-    long_vol = close_px.pct_change().ewm(long_vol, min_periods=long_vol).std()
-    short_vol = close_px.pct_change().ewm(short_vol, min_periods=short_vol).std()
+    long_vol = (
+        previous_close_px.pct_change()
+        .ewm(long_vol, min_periods=long_vol)
+        .std()
+        .reindex(close.index, method="ffill")
+    )
+    short_vol = (
+        previous_close_px.pct_change()
+        .ewm(short_vol, min_periods=short_vol)
+        .std()
+        .reindex(close.index, method="ffill")
+    )
 
     previous_close_px = previous_close_px.reindex(
         close.index,
         method="ffill",
     )
-    long_vol = long_vol.reindex(close.index, method="ffill")
-    short_vol = short_vol.reindex(close.index, method="ffill")
     close_px = close_px.reindex(close.index, method="ffill")
 
     z_score = ((close - previous_close_px) / previous_close_px) / long_vol
@@ -200,43 +209,37 @@ def intraday_momentum(
     signal = z_score.copy()
 
     # apply caps and threshold
-    signal.loc[signal.squeeze().abs() < threshold] = 0
-    signal.loc[signal.squeeze().abs() > cap] = np.sign(signal) * cap
-    signal = signal.fillna(0.0).ffill()
-
-    # determine where sign has changed in a given day.
-    signal = signal.replace(0, np.nan).groupby(signal.index.date).ffill().fillna(0)
-    direction = (
-        np.sign(signal).replace(0, np.nan).groupby(signal.index.date).ffill().fillna(0)
+    #
+    signal = (
+        signal.where(signal.abs() > threshold, 0)
+        .where(signal.abs() < cap, np.sign(signal) * cap)
+        .groupby(signal.index.date)
+        .ffill()
+        .fillna(0)
     )
 
-    signal.loc[
-        (np.sign(direction.squeeze()) != np.sign(direction.squeeze().shift()))
-        & (np.sign(direction.squeeze()) != 0)
-        & (np.sign(direction.shift().squeeze()) != 0)
-    ] = direction
-    direction = direction.groupby(direction.index.date).ffill()
+    signal = signal.where(
+        signal.index.to_series().dt.date.eq(signal.index.to_series().dt.date.shift()),
+        0,  # make first reading 0.0 position
+    ).where(
+        np.sign(signal.shift()).eq(np.sign(signal)), 0  # make changes in sign 0
+    )
 
     def dynamic_floor(series, shift=0):
         return series.groupby(series.index.date).transform(
             lambda i: i.where(
-                ~(
-                    (np.sign(i.shift(shift)) != 0)
-                    & (np.sign(i.shift(shift)) != np.sign(i))
+                ~functools.reduce(
+                    operator.and_,
+                    (
+                        (np.sign(i.shift(s)).ne(0) & np.sign(i.shift(s)).ne(np.sign(i)))
+                        for s in range(1, shift)
+                    ),
                 ),
                 0,
             )
         )
 
-    for i in range(1, 5):
-
-        signal = dynamic_floor(signal, i)
-
-    # direction = direction.ffill()
-    if monotonic:
-
-        signal_cumabsmax = signal.abs().groupby(signal.index.date).cummax()
-        signal = signal_cumabsmax * np.sign(signal)
+    signal = dynamic_floor(signal, 5)
 
     # ensure
     # signal[(signal.shift().abs() >= threshold) & (np.sign(signal.shift()))]
@@ -244,20 +247,40 @@ def intraday_momentum(
     signal = (gearing * signal) / (short_vol * np.sqrt(252))
     # signal = signal.abs().groupby(signal.index.date).cummax() * np.sign(z_score)
     # signal closes position at close time
-    #
 
-    close_at = functools.reduce(
-        pd.DatetimeIndex.union,
-        (
-            schedule.market_close - (i * pd.tseries.frequencies.to_offset(frequency))
-            for i in range(1, close_offset_periods + 1)
-        ),
-        pd.DatetimeIndex(schedule.market_close),
-    )
+    def periods_before_close(n):
 
-    signal.loc[signal.index.isin(close_at)] = (
-        0.0  # pd.DataFrame(0.0, index=close_at, columns=signal.columns)
-    )
+        return functools.reduce(
+            pd.DatetimeIndex.union,
+            (
+                schedule.market_close
+                - (i * pd.tseries.frequencies.to_offset(frequency))
+                for i in range(1, n + 1)
+            ),
+            pd.DatetimeIndex(schedule.market_close),
+        )
+
+    close_at = periods_before_close(n=close_offset_periods)
+
+    if monotonic:
+
+        signal_cumabsmax = signal.abs().groupby(signal.index.date).cummax()
+        is_long = np.sign(signal).groupby(signal.index.date).cummax()
+        is_short = np.sign(signal).groupby(signal.index.date).cummin()
+        direction = is_long.where(is_long > 0, is_short)
+        signal = signal_cumabsmax * np.sign(direction)
+
+    if incremental:
+
+        no_trade_at = periods_before_close(n=incremental)
+        signal = signal.groupby(signal.index.date).cumsum() * 1 / incremental
+        signal.loc[signal.index.isin(no_trade_at)] = 0.0
+
+    signal.loc[signal.index.isin(close_at)] = 0.0
+
+    # signal = signal.where((close > previous_close_px) & np.sign(signal) > 0, 0).where(
+    #     (close < previous_close_px) & np.sign(signal) < 0, 0
+    # )
 
     return (
         signal,
