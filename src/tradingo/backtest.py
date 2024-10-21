@@ -46,8 +46,12 @@ def backtest(
     stop_limit: Optional[pd.DataFrame] = None,
     stop_loss: Optional[pd.DataFrame] = None,
     stage: str = "raw",
+    price_ffill_limit: int = 0,
     **kwargs,
 ):
+
+    bid_close = bid_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
+    ask_close = ask_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
 
     mid_close = (bid_close + ask_close) / 2
     bid_close, ask_close = bid_close.reindex(mid_close.index), ask_close.reindex(

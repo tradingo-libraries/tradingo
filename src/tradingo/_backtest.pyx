@@ -93,7 +93,7 @@ cpdef compute_backtest(
         m_unrealised_pnl = (price - avg_open_price[idx_prev]) * m_net_position 
 
         m_realised_pnl = realised_pnl[idx_prev]
-        m_avg_open_price = avg_open_price[idx_prev]
+        m_avg_open_price = avg_open_price[idx_prev] if m_net_position != 0 else 0.0
 
         if trade_quantity != 0 and not isnan(trade_quantity):
 
