@@ -148,6 +148,7 @@ def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
     "signals/intraday_momentum.short_vol",
     "signals/intraday_momentum.long_vol",
     "signals/intraday_momentum.previous_close_px",
+    "signals/intraday_momentum.has_close",
     symbol_prefix="{provider}.{universe}.",
 )
 @symbol_provider(
@@ -167,6 +168,7 @@ def intraday_momentum(
     close_offset_periods: int = 0,
     monotonic: bool = True,
     incremental: int = 0,
+    only_with_close: bool = True,
     **kwargs,
 ):
 
@@ -195,6 +197,8 @@ def intraday_momentum(
         previous_close_px.pct_change()
         .ewm(short_vol, min_periods=short_vol)
         .std()
+        .rolling(10)
+        .quantile(q=0.75)
         .reindex(close.index, method="ffill")
     )
 
@@ -241,9 +245,8 @@ def intraday_momentum(
 
     signal = dynamic_floor(signal, 5)
 
-    # ensure
-    # signal[(signal.shift().abs() >= threshold) & (np.sign(signal.shift()))]
-    gearing = 1  # 0.05
+    # allocate 10_000 notional in unit vol space
+    gearing = 10_000 / previous_close_px
     signal = (gearing * signal) / (short_vol * np.sqrt(252))
     # signal = signal.abs().groupby(signal.index.date).cummax() * np.sign(z_score)
     # signal closes position at close time
@@ -273,8 +276,23 @@ def intraday_momentum(
     if incremental:
 
         no_trade_at = periods_before_close(n=incremental)
-        signal = signal.groupby(signal.index.date).cumsum() * 1 / incremental
         signal.loc[signal.index.isin(no_trade_at)] = 0.0
+        signal = signal.groupby(signal.index.date).cumsum() * 1
+
+    if only_with_close:
+
+        has_close = (
+            close.groupby(close.index.date)
+            .apply(
+                lambda i: i[
+                    i.index.tz_convert(cal.close_time.tzinfo).time == cal.close_time
+                ]
+                .notna()
+                .reindex(i.index, method="bfill")
+            )
+            .droplevel(0)
+        )
+        signal = signal.where(has_close, 0)
 
     signal.loc[signal.index.isin(close_at)] = 0.0
 
@@ -288,4 +306,5 @@ def intraday_momentum(
         short_vol,
         long_vol,
         previous_close_px,
+        has_close,
     )
