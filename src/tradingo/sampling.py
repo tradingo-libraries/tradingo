@@ -162,12 +162,14 @@ def sample_ig_instruments(
                 return pd.DataFrame(
                     np.nan,
                     columns=pd.MultiIndex.from_tuples(
-                        ("Open", "bid"),
-                        ("Open", "ask"),
-                        ("High", "bid"),
-                        ("High", "ask"),
-                        ("Low", "bid"),
-                        ("Low", "ask"),
+                        (
+                            ("Open", "bid"),
+                            ("Open", "ask"),
+                            ("High", "bid"),
+                            ("High", "ask"),
+                            ("Low", "bid"),
+                            ("Low", "ask"),
+                        )
                     ),
                     index=[],
                 )  # TODO:
