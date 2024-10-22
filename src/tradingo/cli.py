@@ -20,7 +20,7 @@ DEFAULT_STAGE = "raw.shares"
 
 
 def resolve_config(
-    config: str,
+    config: str | pathlib.Path,
 ):
     try:
         return json.loads(config)
