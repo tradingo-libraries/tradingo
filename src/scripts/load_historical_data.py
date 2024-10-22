@@ -10,7 +10,7 @@ import re
 import os
 from pathlib import Path
 
-from arcticdb import Arctic
+from arcticdb import Arctic, LibraryOptions
 
 import pandas as pd
 
@@ -80,6 +80,7 @@ def main():
 @symbol_publisher(
     template="prices/{0}.{1}",
     symbol_prefix="{provider}.{universe}.",
+    library_options=LibraryOptions(dynamic_schema=True),
 )
 def read_backfill(
     paths: List[Path],

@@ -1,5 +1,5 @@
 import dateutil.tz
-from pandas.io.pytables import import_optional_dependency
+import logging
 from tradingo.symbols import symbol_provider, symbol_publisher
 from typing import Literal, Optional
 
@@ -13,6 +13,9 @@ from yfinance import Ticker
 
 import pandas as pd
 import numpy as np
+
+
+logger = logging.getLogger(__name__)
 
 
 FUTURES_FIELDS = [
@@ -131,6 +134,7 @@ def download_instruments(
 @symbol_publisher(
     template="prices/{0}.{1}",
     symbol_prefix="{provider}.{universe}.",
+    library_options=LibraryOptions(dynamic_schema=True),
 )
 def sample_ig_instruments(
     instruments: pd.DataFrame,
@@ -158,7 +162,8 @@ def sample_ig_instruments(
                 wait=0,
             )["prices"]
         except Exception as ex:
-            if ex.args[0] == "Historical price data not found":
+            if ex.args and ex.args[0] == "Historical price data not found":
+                logger.warning("Historical price data not found %s", symbol)
                 return pd.DataFrame(
                     np.nan,
                     columns=pd.MultiIndex.from_tuples(
@@ -169,9 +174,9 @@ def sample_ig_instruments(
                             ("High", "ask"),
                             ("Low", "bid"),
                             ("Low", "ask"),
-                        )
+                        ),
                     ),
-                    index=[],
+                    index=pd.DatetimeIndex([], name="DateTime"),
                 )  # TODO:
             raise ex
 
