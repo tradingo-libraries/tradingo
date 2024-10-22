@@ -148,7 +148,6 @@ def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
     "signals/intraday_momentum.short_vol",
     "signals/intraday_momentum.long_vol",
     "signals/intraday_momentum.previous_close_px",
-    "signals/intraday_momentum.has_close",
     symbol_prefix="{provider}.{universe}.",
 )
 @symbol_provider(
@@ -306,5 +305,4 @@ def intraday_momentum(
         short_vol,
         long_vol,
         previous_close_px,
-        has_close,
     )
