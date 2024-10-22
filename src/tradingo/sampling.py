@@ -161,7 +161,11 @@ def sample_ig_instruments(
             raise ex
 
     result = pd.concat(
-        (get_data(symbol) for symbol in instruments.index.to_list()),
+        (
+            d
+            for d in (get_data(symbol) for symbol in instruments.index.to_list())
+            if not d.empty
+        ),
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
