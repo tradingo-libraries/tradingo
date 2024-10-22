@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 from enum import Enum
 import importlib
 import functools
@@ -403,4 +404,6 @@ def main():
 
 
 if __name__ == "__main__":
+
+    logging.getLogger("tradingo").setLevel(logging.INFO)
     main()
