@@ -29,6 +29,14 @@ ASSET_MAPPING = {
     "COCOA.CMDUSD": "CC.D.CC.UMP.IP",
 }
 
+MULTIPLIERS = {
+    "USA500.IDXUSD": 1,
+    "GAS.CMDUSD": 1000,
+    "BRENT.CMDUSD": 100,
+    "USTBOND.TRUSD": 100,
+    "COCOA.CMDUSD": 1,
+}
+
 
 def cli_app():
 
@@ -128,6 +136,8 @@ def read_backfill(
         axis=1,
         keys=data_files.keys(),
     ).reorder_levels([0, 2, 1], axis=1)
+
+    result = result.mul(pd.Series(MULTIPLIERS), level=2, axis=1)
 
     result.rename(columns=ASSET_MAPPING, inplace=True)
 

@@ -284,13 +284,14 @@ def intraday_momentum(
             close.groupby(close.index.date)
             .apply(
                 lambda i: i[
-                    i.index.tz_convert(cal.close_time.tzinfo).time == cal.close_time
+                    (i.index.tz_convert(cal.close_time.tzinfo).time == cal.close_time)
                 ]
                 .notna()
                 .reindex(i.index, method="bfill")
             )
             .droplevel(0)
         )
+        has_close[signal.index.date == close.index.date[-1]] = True
         signal = signal.where(has_close, 0)
 
     signal.loc[signal.index.isin(close_at)] = 0.0
