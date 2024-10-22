@@ -1,4 +1,5 @@
 import dateutil.tz
+from pandas.io.pytables import import_optional_dependency
 from tradingo.symbols import symbol_provider, symbol_publisher
 from typing import Literal, Optional
 
@@ -11,6 +12,7 @@ from arcticdb import LibraryOptions
 from yfinance import Ticker
 
 import pandas as pd
+import numpy as np
 
 
 FUTURES_FIELDS = [
@@ -157,15 +159,22 @@ def sample_ig_instruments(
             )["prices"]
         except Exception as ex:
             if ex.args[0] == "Historical price data not found":
-                return pd.DataFrame()
+                return pd.DataFrame(
+                    np.nan,
+                    columns=pd.MultiIndex.from_tuples(
+                        ("Open", "bid"),
+                        ("Open", "ask"),
+                        ("High", "bid"),
+                        ("High", "ask"),
+                        ("Low", "bid"),
+                        ("Low", "ask"),
+                    ),
+                    index=[],
+                )  # TODO:
             raise ex
 
     result = pd.concat(
-        (
-            d
-            for d in (get_data(symbol) for symbol in instruments.index.to_list())
-            if not d.empty
-        ),
+        ((get_data(symbol) for symbol in instruments.index.to_list())),
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
