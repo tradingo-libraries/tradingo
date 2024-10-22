@@ -118,9 +118,7 @@ def download_instruments(
         service = get_ig_service()
 
         return (
-            pd.DataFrame(
-                [i["instrument"] for i in service.fetch_markets_by_epics(epics)]
-            )
+            pd.DataFrame((service.fetch_market_by_epic(e)["instrument"] for e in epics))
             .set_index("epic")
             .rename_axis("Symbol", axis=0),
         )
