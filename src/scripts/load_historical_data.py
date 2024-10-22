@@ -10,7 +10,7 @@ import re
 import os
 from pathlib import Path
 
-from arcticdb import Arctic
+from arcticdb import Arctic, LibraryOptions
 
 import pandas as pd
 
@@ -27,6 +27,14 @@ ASSET_MAPPING = {
     "BRENT.CMDUSD": "CC.D.LCO.UMP.IP",
     "USTBOND.TRUSD": "IR.D.10YEAR100.FWM2.IP",
     "COCOA.CMDUSD": "CC.D.CC.UMP.IP",
+}
+
+MULTIPLIERS = {
+    "USA500.IDXUSD": 1,
+    "GAS.CMDUSD": 1000,
+    "BRENT.CMDUSD": 100,
+    "USTBOND.TRUSD": 100,
+    "COCOA.CMDUSD": 1,
 }
 
 
@@ -80,6 +88,7 @@ def main():
 @symbol_publisher(
     template="prices/{0}.{1}",
     symbol_prefix="{provider}.{universe}.",
+    library_options=LibraryOptions(dynamic_schema=True),
 )
 def read_backfill(
     paths: List[Path],
@@ -127,6 +136,8 @@ def read_backfill(
         axis=1,
         keys=data_files.keys(),
     ).reorder_levels([0, 2, 1], axis=1)
+
+    result = result.mul(pd.Series(MULTIPLIERS), level=2, axis=1)
 
     result.rename(columns=ASSET_MAPPING, inplace=True)
 
