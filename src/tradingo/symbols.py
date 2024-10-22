@@ -148,6 +148,7 @@ def symbol_publisher(
             dry_run=False,
             arctic: Optional[adb.Arctic] = None,
             snapshot: Optional[str] = None,
+            clean: bool = False,
             **kwargs,
         ):
 
@@ -193,6 +194,8 @@ def symbol_publisher(
                         lib, create_if_missing=True, library_options=library_options
                     )
                     if isinstance(data.index, pd.DatetimeIndex):
+                        if clean:
+                            lib.delete(sym)
                         result = lib.update(
                             sym,
                             data,

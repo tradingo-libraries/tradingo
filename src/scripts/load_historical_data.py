@@ -26,6 +26,7 @@ ASSET_MAPPING = {
     "GAS.CMDUSD": "CC.D.NG.UMP.IP",
     "BRENT.CMDUSD": "CC.D.LCO.UMP.IP",
     "USTBOND.TRUSD": "IR.D.10YEAR100.FWM2.IP",
+    "COCOA.CMDUSD": "CC.D.CC.UMP.IP",
 }
 
 
@@ -38,6 +39,7 @@ def cli_app():
     app.add_argument("--dry-run", action="store_true")
     app.add_argument("--universe", required=True)
     app.add_argument("--provider", required=True)
+    app.add_argument("--clean", action="store_true")
 
     return app
 
@@ -58,6 +60,7 @@ def main():
         dry_run=args.dry_run,
         universe=args.universe,
         provider=args.provider,
+        clean=args.clean,
     )
 
     service = sampling.get_ig_service()
@@ -157,12 +160,14 @@ if __name__ == "__main__":
             str(Path.home() / "dev" / "market-data" / "GAS"),
             str(Path.home() / "dev" / "market-data" / "USA500"),
             str(Path.home() / "dev" / "market-data" / "BRENT"),
-            # str(Path.home() / "dev" / "market-data" / "USTBOND"),
+            str(Path.home() / "dev" / "market-data" / "USTBOND"),
+            str(Path.home() / "dev" / "market-data" / "COCOA"),
             # "--dry-run",
+            "--clean",
             "--provider",
             "ig-trading",
             "--universe",
-            "im-assets",
+            "im-multi-asset",
         ]
     )
 

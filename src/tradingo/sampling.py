@@ -137,10 +137,12 @@ def sample_ig_instruments(
     interval: str,
     **kwargs,
 ):
+
     service = get_ig_service()
-    result = pd.concat(
-        (
-            service.fetch_historical_prices_by_epic(
+
+    def get_data(symbol):
+        try:
+            return service.fetch_historical_prices_by_epic(
                 symbol,
                 end_date=pd.Timestamp(end_date)
                 .tz_convert(dateutil.tz.tzlocal())
@@ -153,8 +155,13 @@ def sample_ig_instruments(
                 resolution=interval,
                 wait=0,
             )["prices"]
-            for symbol in instruments.index.to_list()
-        ),
+        except Exception as ex:
+            if ex.args[0] == "Historical price data not found":
+                return pd.DataFrame()
+            raise ex
+
+    result = pd.concat(
+        (get_data(symbol) for symbol in instruments.index.to_list()),
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
