@@ -3,7 +3,7 @@
 #
 import argparse
 import logging
-from typing import List
+from typing import List, Optional
 import dateutil.tz
 from collections import defaultdict
 import re
@@ -48,6 +48,7 @@ def cli_app():
     app.add_argument("--universe", required=True)
     app.add_argument("--provider", required=True)
     app.add_argument("--clean", action="store_true")
+    app.add_argument("--end-date", type=pd.Timestamp, default=None)
 
     return app
 
@@ -92,6 +93,7 @@ def main():
 )
 def read_backfill(
     paths: List[Path],
+    end_date: Optional[pd.Timestamp] = None,
     **kwargs,
 ):
 
@@ -141,6 +143,10 @@ def read_backfill(
 
     result.rename(columns=ASSET_MAPPING, inplace=True)
 
+    if end_date:
+
+        result = result[result.index <= end_date]
+
     return (
         (result["bid"]["Open"], ("bid", "open")),
         (result["bid"]["High"], ("bid", "high")),
@@ -166,7 +172,7 @@ if __name__ == "__main__":
     sys.argv.extend(
         [
             "--arctic-uri",
-            "s3://s3.us-east-1.amazonaws.com:tradingo-store?aws_auth=true&path_prefix=uat",
+            "lmdb:///home/rory/dev/tradingo-plat/data/prod/tradingo.db",
             "--path",
             str(Path.home() / "dev" / "market-data" / "GAS"),
             str(Path.home() / "dev" / "market-data" / "USA500"),
@@ -179,6 +185,8 @@ if __name__ == "__main__":
             "ig-trading",
             "--universe",
             "im-multi-asset",
+            "--end-date",
+            "2018-10-21 00:00:00+00:00",
         ]
     )
 

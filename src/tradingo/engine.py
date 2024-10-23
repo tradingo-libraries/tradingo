@@ -3,10 +3,12 @@ import logging
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 
 from trading_ig.rest import IGService
 from tradingo.api import Tradingo
 from tradingo.sampling import get_ig_service
+from tradingo.symbols import symbol_provider, symbol_publisher
 
 
 logger = logging.getLogger(__name__)
@@ -90,29 +92,35 @@ def cli_app():
     return app
 
 
+# TODO: #21 - symbol_publisher
+@symbol_provider(
+    instruments="instruments/{universe}",
+    no_date=True,
+)
+@symbol_provider(
+    target_positions="portfolio/{name}.{stage}",
+    symbol_prefix="{provider}.{universe}.",
+)
 def adjust_position_sizes(
     stage: str,
-    portfolio_name: str,
+    instruments: pd.DataFrame,
+    target_positions: pd.DataFrame,
     universe: str,
     provider: str,
     name: str,
     service: Optional[IGService] = None,
-    t: Optional[Tradingo] = None,
-    arctic_uri: Optional[str] = None,
+    **kwargs,
 ):
 
-    service = service or get_ig_service()
-    t = t or Tradingo(
-        name=name,
-        uri=arctic_uri,
-        universe=universe,
-        provider=provider,
+    logger.info(
+        "Adjusting name=%s universe=%s provider=%s stage=%s",
+        name,
+        universe,
+        provider,
     )
 
-    instruments = t.instruments.igtrading()
+    service = service or get_ig_service()
     current_positions = get_current_positions(service)
-    stage, pos_type = stage.split(".")
-    target_positions = t.portfolio[portfolio_name][stage][pos_type]()
 
     current_sizes = (
         current_positions.groupby("epic")["size"]
@@ -128,7 +136,6 @@ def adjust_position_sizes(
         # changing sides, close existing
         if current_position and np.sign(current_position) != np.sign(latest_target):
             logger.info("Closing open position of %s for %s", current_position, epic)
-
             close_all_open_position(current_positions.loc[epic], service)
             current_position = 0.0
 
