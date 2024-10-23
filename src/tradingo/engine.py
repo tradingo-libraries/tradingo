@@ -117,6 +117,7 @@ def adjust_position_sizes(
         name,
         universe,
         provider,
+        stage,
     )
 
     service = service or get_ig_service()
