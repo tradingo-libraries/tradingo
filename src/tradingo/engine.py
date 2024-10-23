@@ -92,6 +92,16 @@ def cli_app():
     return app
 
 
+def get_currency(instrument: pd.Series):
+    if "$" in instrument.name:
+        return "USD"
+    elif "£" in instrument.name:
+        return "GBP"
+    elif "€" in instrument.name:
+        return "EUR"
+    return "GBP"
+
+
 # TODO: #21 - symbol_publisher
 @symbol_provider(
     instruments="instruments/{universe}",
@@ -156,7 +166,7 @@ def adjust_position_sizes(
 
             result = service.create_open_position(
                 direction=side,
-                currency_code="GBP",
+                currency_code=get_currency(instruments.loc[epic]),
                 order_type="MARKET",
                 expiry=instruments.loc[epic].expiry,
                 size=target,
