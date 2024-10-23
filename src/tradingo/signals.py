@@ -168,6 +168,8 @@ def intraday_momentum(
     monotonic: bool = True,
     incremental: int = 0,
     only_with_close: bool = True,
+    vol_floor_window=120,
+    vol_floor_quantile=0.75,
     **kwargs,
 ):
 
@@ -196,8 +198,8 @@ def intraday_momentum(
         previous_close_px.pct_change()
         .ewm(short_vol, min_periods=short_vol)
         .std()
-        .rolling(10)
-        .quantile(q=0.75)
+        .rolling(vol_floor_window, min_periods=1)
+        .quantile(q=vol_floor_quantile)
         .reindex(close.index, method="ffill")
     )
 
