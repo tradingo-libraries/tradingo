@@ -337,12 +337,10 @@ def build_graph(
             "tradingo.engine.adjust_position_sizes",
             task_args=[],
             task_kwargs={
-                "portfolio_name": portfolio_name,
-                "name": config["name"],
+                "name": portfolio_name,
                 "provider": provider,
                 "universe": universe,
                 "stage": backtest_kwargs["stage"],
-                "arctic_uri": ARCTIC_URL,
             },
             dependencies=[portfolio_name],
         )
