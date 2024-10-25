@@ -67,7 +67,12 @@ Provider = Literal[
 ]
 
 
-def get_ig_service() -> IGService:
+def get_ig_service(
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+    api_key: Optional[str] = None,
+    acc_type: Optional[str] = None,
+) -> IGService:
 
     retryer = Retrying(
         wait=wait_exponential(),
@@ -75,10 +80,10 @@ def get_ig_service() -> IGService:
     )
 
     service = IGService(
-        username=config.username,
-        password=config.password,
-        api_key=config.api_key,
-        acc_type=config.acc_type,
+        username=username or config.username,
+        password=password or config.password,
+        api_key=api_key or config.api_key,
+        acc_type=acc_type or config.acc_type,
         use_rate_limiter=True,
         retryer=retryer,
     )
@@ -141,10 +146,12 @@ def sample_ig_instruments(
     end_date: pd.Timestamp,
     start_date: pd.Timestamp,
     interval: str,
+    wait: int = 0,
+    service: Optional[IGService] = None,
     **kwargs,
 ):
 
-    service = get_ig_service()
+    service = service or get_ig_service()
 
     def get_data(symbol):
         try:
@@ -159,7 +166,7 @@ def sample_ig_instruments(
                 .tz_localize(None)
                 .isoformat(),
                 resolution=interval,
-                wait=0,
+                wait=wait,
             )["prices"]
         except Exception as ex:
             if ex.args and ex.args[0] == "Historical price data not found":

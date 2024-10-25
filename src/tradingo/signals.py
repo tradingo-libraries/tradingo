@@ -170,10 +170,13 @@ def intraday_momentum(
     only_with_close: bool = True,
     vol_floor_window=120,
     vol_floor_quantile=0.75,
+    ffill_limit: int = 1,
     **kwargs,
 ):
 
-    close = (ask_close + bid_close) / 2
+    close = (
+        ((ask_close + bid_close) / 2).groupby(ask_close.index.date).ffill(ffill_limit)
+    )
 
     cal = pmc.get_calendar(calendar)
     schedule = cal.schedule(start_date=close.index[0], end_date=close.index[-1])
@@ -188,37 +191,38 @@ def intraday_momentum(
 
     previous_close_px = close_px.shift()
 
+    log_returns = np.log(previous_close_px) - np.log(previous_close_px.shift())
     long_vol = (
-        previous_close_px.pct_change()
-        .ewm(long_vol, min_periods=long_vol)
+        log_returns.ewm(long_vol, min_periods=long_vol)
         .std()
         .reindex(close.index, method="ffill")
     )
     short_vol = (
-        previous_close_px.pct_change()
-        .ewm(short_vol, min_periods=short_vol)
+        log_returns.ewm(short_vol, min_periods=short_vol)
         .std()
         .rolling(vol_floor_window, min_periods=1)
         .quantile(q=vol_floor_quantile)
         .reindex(close.index, method="ffill")
     )
 
-    previous_close_px = previous_close_px.reindex(
-        close.index,
-        method="ffill",
+    previous_close_px = (
+        previous_close_px.reindex(
+            close.index,
+            method="ffill",
+            limit=1,
+        )
+        .groupby(close.index.date)
+        .ffill()
     )
-    close_px = close_px.reindex(close.index, method="ffill")
 
     z_score = ((close - previous_close_px) / previous_close_px) / long_vol
-
-    signal = z_score.copy()
 
     # apply caps and threshold
     #
     signal = (
-        signal.where(signal.abs() > threshold, 0)
-        .where(signal.abs() < cap, np.sign(signal) * cap)
-        .groupby(signal.index.date)
+        z_score.where(z_score.abs() > threshold, 0)
+        .where(z_score.abs() < cap, np.sign(z_score) * cap)
+        .groupby(z_score.index.date)
         .ffill()
         .fillna(0)
     )
