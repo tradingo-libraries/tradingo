@@ -142,9 +142,6 @@ def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
     return (pd.DataFrame(buffered, index=signal.index, columns=signal.columns),)
 
 
-def z_score():
-
-
 @symbol_publisher(
     "signals/intraday_momentum",
     "signals/intraday_momentum.z_score",
