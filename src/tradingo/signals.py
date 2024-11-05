@@ -142,6 +142,9 @@ def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
     return (pd.DataFrame(buffered, index=signal.index, columns=signal.columns),)
 
 
+def z_score():
+
+
 @symbol_publisher(
     "signals/intraday_momentum",
     "signals/intraday_momentum.z_score",
@@ -165,6 +168,7 @@ def intraday_momentum(
     cap=2,
     threshold=1,
     close_offset_periods: int = 0,
+    open_offset_periods: int = 0,
     monotonic: bool = True,
     incremental: int = 0,
     only_with_close: bool = True,
@@ -191,14 +195,27 @@ def intraday_momentum(
 
     previous_close_px = close_px.shift()
 
+<<<<<<< Updated upstream
     log_returns = np.log(previous_close_px) - np.log(previous_close_px.shift())
     long_vol = (
         log_returns.ewm(long_vol, min_periods=long_vol)
+=======
+    returns = np.log(previous_close_px / previous_close_px.shift())
+
+    long_vol = (
+        returns
+        .ewm(long_vol, min_periods=long_vol)
+>>>>>>> Stashed changes
         .std()
         .reindex(close.index, method="ffill")
     )
     short_vol = (
+<<<<<<< Updated upstream
         log_returns.ewm(short_vol, min_periods=short_vol)
+=======
+        returns
+        .ewm(short_vol, min_periods=short_vol)
+>>>>>>> Stashed changes
         .std()
         .rolling(vol_floor_window, min_periods=1)
         .quantile(q=vol_floor_quantile)
