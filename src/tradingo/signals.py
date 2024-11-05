@@ -175,6 +175,7 @@ def intraday_momentum(
     vol_floor_window=120,
     vol_floor_quantile=0.75,
     ffill_limit: int = 1,
+    start_after: int = 0,
     **kwargs,
 ):
 
@@ -250,6 +251,20 @@ def intraday_momentum(
     ).where(
         np.sign(signal.shift()).eq(np.sign(signal)), 0  # make changes in sign 0
     )
+
+    def get_pre_trade_index(periods):
+        idx = pd.DatetimeIndex([])
+
+        for i in range(0, periods):
+            idx = idx.union(
+                schedule.market_open + (pd.tseries.frequencies.to_offset(frequency) * i)
+            )
+
+        return pd.to_datetime(idx)
+
+    if start_after:
+        idx = get_pre_trade_index(start_after)
+        signal.loc[signal.index.isin(idx)] = 0.0
 
     def dynamic_floor(series, shift=0):
         return series.groupby(series.index.date).transform(
