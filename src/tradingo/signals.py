@@ -5,6 +5,8 @@ import numpy as np
 import math
 import functools
 
+from typing import Optional
+
 import pandas as pd
 
 from pandas._libs.tslibs import IncompatibleFrequency
@@ -173,6 +175,7 @@ def intraday_momentum(
     vol_floor_quantile=0.75,
     ffill_limit: int = 1,
     start_after: int = 0,
+    close_overrides: Optional[dict[str, dict[str, int]]] = None,
     **kwargs,
 ):
 
@@ -316,6 +319,14 @@ def intraday_momentum(
         )
         has_close[signal.index.date == close.index.date[-1]] = True
         signal = signal.where(has_close, 0)
+
+    if close_overrides:
+        for symbol, time in close_overrides.items():
+            time = (
+                signal.index.tz_convert(time["timezone"]).normalize()
+                + pd.Timedelta(hours=time["hours"], minutes=time["minutes"])
+            ).tz_convert("utc")
+            signal.loc[(signal.index >= time), symbol] = 0.0
 
     signal.loc[signal.index.isin(close_at)] = 0.0
 
