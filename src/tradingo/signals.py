@@ -5,6 +5,8 @@ import numpy as np
 import math
 import functools
 
+from typing import Optional
+
 import pandas as pd
 
 from pandas._libs.tslibs import IncompatibleFrequency
@@ -173,7 +175,7 @@ def intraday_momentum(
     vol_floor_quantile=0.75,
     ffill_limit: int = 1,
     start_after: int = 0,
-    close_overrides: dict[str, dict[str,int]],
+    close_overrides: Optional[dict[str, dict[str, int]]] = None,
     **kwargs,
 ):
 
