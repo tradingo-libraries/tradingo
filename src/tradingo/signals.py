@@ -9,7 +9,6 @@ from typing import Optional
 
 import pandas as pd
 
-from pandas._libs.tslibs import IncompatibleFrequency
 import pandas_market_calendars as pmc
 
 from tradingo.symbols import symbol_provider, symbol_publisher
