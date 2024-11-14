@@ -1,6 +1,8 @@
 import os
-from dash import Dash, html, dcc, callback, Output, Input
+import urllib.parse
+from dash import Dash, State, html, dcc, callback, Output, Input
 from flask import Flask
+from pandas.core.generic import weakref
 import plotly.express as px
 import pandas as pd
 from tradingo.api import Tradingo
@@ -24,23 +26,31 @@ app = Dash()
 
 app.layout = html.Div(
     [
-        html.H1(children="Tradingo Monitor", style={"textAlign": "center"}),
-        dcc.DatePickerRange(
-            start_date=pd.Timestamp.now().normalize(),
-            end_date=pd.Timestamp.now().normalize() + pd.Timedelta(hours=24),
-            id="date-selection",
+        html.Div(
+            [
+                html.H1(children="Tradingo Monitor", style={"textAlign": "center"}),
+                dcc.DatePickerRange(
+                    start_date=None,
+                    end_date=None,
+                    id="date-selection",
+                ),
+                dcc.Dropdown(
+                    value=None,
+                    options=api.instruments["im-multi-asset"]().index.to_list(),
+                    id="dropdown-selection",
+                    multi=True,
+                ),
+            ]
         ),
-        dcc.Dropdown(
-            value=None,
-            options=api.instruments["im-multi-asset"]().index.to_list(),
-            id="dropdown-selection",
-            multi=True,
+        html.Div(
+            [
+                dcc.Graph(id="z_score"),
+                dcc.Graph(id="net_position"),
+                dcc.Graph(id="unrealised_pnl"),
+                dcc.Graph(id="total_pnl"),
+                dcc.Graph(id="month-to-date"),
+            ]
         ),
-        dcc.Graph(id="z_score"),
-        dcc.Graph(id="net_position"),
-        dcc.Graph(id="unrealised_pnl"),
-        dcc.Graph(id="total_pnl"),
-        dcc.Graph(id="month-to-date"),
     ]
 )
 
@@ -75,8 +85,10 @@ def update_graph(
         return fig
 
     value = value or None
-    date = pd.Timestamp(start_date).normalize()
-    end = pd.Timestamp(end_date).normalize()
+    date = pd.Timestamp(start_date or pd.Timestamp.now()).normalize()
+    end = pd.Timestamp(
+        end_date or (pd.Timestamp.now().normalize() + pd.Timedelta(hours=24))
+    ).normalize()
     z_score = api.signals.intraday_momentum.z_score(
         columns=value,
         date_range=(date, end),
@@ -85,9 +97,16 @@ def update_graph(
     start = z_score.index[0]
     end = z_score.index[-1] + pd.Timedelta(minutes=15)
 
-    unrealised_pnl = api.backtest.intraday.rounded.position.instrument.unrealised_pnl(
-        columns=value,
-        date_range=(start, end),
+    unrealised_pnl = (
+        api.backtest.intraday.rounded.position.instrument.unrealised_pnl(
+            columns=value,
+            date_range=(start, end),
+        )
+        .ffill()
+        .fillna(0.0)
+        .diff()
+        .cumsum()
+        .fillna(0.0)
     )
 
     net_position = api.backtest.intraday.rounded.position.instrument.net_position(
@@ -101,15 +120,20 @@ def update_graph(
                 end,
             ),
         )
-        .total_pnl.diff()
-        .fillna(0)
+        .total_pnl.ffill()
+        .fillna(0.0)
+        .diff()
         .cumsum()
+        .fillna(0.0)
     )
+
+    inception = pd.Timestamp("2024-11-07 00:00:00+00:00")
 
     mtd = (
         api.backtest.intraday.rounded.position.portfolio(
             date_range=(
-                date - pd.offsets.Day(30),
+                inception,
+                # end - pd.offsets.BDay(30),
                 end,
             ),
         )
@@ -123,10 +147,10 @@ def update_graph(
 
     return (
         range_breaks(z_score.plot(title="z_score")),
+        range_breaks(net_position.plot(title="net_position")),
         range_breaks(unrealised_pnl.plot(title="unrealised_pnl")),
         range_breaks(total_pnl.plot(title="total_pnl")),
-        range_breaks(net_position.plot(title="net_position")),
-        mtd.plot(title="Month to date returns"),
+        mtd.plot(title="Returns since inception"),
     )
 
 

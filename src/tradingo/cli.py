@@ -172,6 +172,7 @@ def collect_sample_tasks(
     start_date: pd.Timestamp,
     sample_start_date: pd.Timestamp,
     end_date: pd.Timestamp,
+    include_instruments: bool = True,
 ):
 
     tasks = {}
@@ -183,18 +184,20 @@ def collect_sample_tasks(
         #
         provider = config["provider"]
 
-        tasks[f"{universe}.instruments"] = Task(
-            "tradingo.sampling.download_instruments",
-            [],
-            {
-                "html": config.get("html"),
-                "file": config.get("file"),
-                "tickers": config.get("tickers"),
-                "epics": config.get("epics"),
-                "index_col": config["index_col"],
-                "universe": universe,
-            },
-        )
+        if include_instruments:
+
+            tasks[f"{universe}.instruments"] = Task(
+                "tradingo.sampling.download_instruments",
+                [],
+                {
+                    "html": config.get("html"),
+                    "file": config.get("file"),
+                    "tickers": config.get("tickers"),
+                    "epics": config.get("epics"),
+                    "index_col": config["index_col"],
+                    "universe": universe,
+                },
+            )
         tasks[f"{universe}.sample"] = Task(
             config.get("function", "tradingo.sampling.sample_equity"),
             [],
@@ -206,7 +209,7 @@ def collect_sample_tasks(
                 "universe": universe,
                 "periods": config.get("periods"),
             },
-            [f"{universe}.instruments"],
+            [f"{universe}.instruments"] if include_instruments else [],
         )
         tasks[f"{universe}.vol"] = Task(
             "tradingo.signals.vol",
@@ -248,6 +251,7 @@ def build_graph(
     end_date,
     sample_start_date=None,
     snapshot_template=None,
+    include_instruments: bool = True,
 ) -> dict[str, Task]:
 
     sample_start_date = sample_start_date or start_date
@@ -260,6 +264,7 @@ def build_graph(
         start_date=start_date,
         sample_start_date=sample_start_date,
         end_date=end_date,
+        include_instruments=include_instruments,
     )
 
     for portfolio_name, portfolio_config in config["portfolio"].items():
