@@ -1,5 +1,6 @@
 import os
-from dash import Dash, html, dcc, callback, Output, Input
+import urllib.parse
+from dash import Dash, State, html, dcc, callback, Output, Input
 from flask import Flask
 import plotly.express as px
 import pandas as pd
@@ -47,11 +48,25 @@ app.layout = html.Div(
 
 @callback(
     (
+        Output("date-selection", "start_date"),
+        Output("date-selection", "end_date"),
+    ),
+    Input("url", "query"),
+)
+def on_page_load(query):
+
+    query = urllib.parse.urlparse(query)
+    return query["start_date"], query["end_date"]
+
+
+@callback(
+    (
         Output("z_score", "figure"),
         Output("net_position", "figure"),
         Output("unrealised_pnl", "figure"),
         Output("total_pnl", "figure"),
         Output("month-to-date", "figure"),
+        Output("url", "query"),
     ),
     (
         Input("dropdown-selection", "value"),
@@ -121,12 +136,20 @@ def update_graph(
         .total_pnl
     )
 
+    query = urllib.parse.urlunparse(
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+        }
+    )
+
     return (
         range_breaks(z_score.plot(title="z_score")),
         range_breaks(unrealised_pnl.plot(title="unrealised_pnl")),
         range_breaks(total_pnl.plot(title="total_pnl")),
         range_breaks(net_position.plot(title="net_position")),
         mtd.plot(title="Month to date returns"),
+        query,
     )
 
 

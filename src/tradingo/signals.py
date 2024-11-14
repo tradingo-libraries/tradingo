@@ -166,7 +166,6 @@ def intraday_momentum(
     cap=2,
     threshold=1,
     close_offset_periods: int = 0,
-    open_offset_periods: int = 0,
     monotonic: bool = True,
     incremental: int = 0,
     only_with_close: bool = True,
@@ -175,6 +174,7 @@ def intraday_momentum(
     ffill_limit: int = 1,
     start_after: int = 0,
     close_overrides: Optional[dict[str, dict[str, int]]] = None,
+    dynamic_floor: int = 0,
     **kwargs,
 ):
 
@@ -253,7 +253,7 @@ def intraday_momentum(
         idx = get_pre_trade_index(start_after)
         signal.loc[signal.index.isin(idx)] = 0.0
 
-    def dynamic_floor(series, shift=0):
+    def _dynamic_floor(series, shift=0):
         return series.groupby(series.index.date).transform(
             lambda i: i.where(
                 ~functools.reduce(
@@ -267,7 +267,8 @@ def intraday_momentum(
             )
         )
 
-    signal = dynamic_floor(signal, 5)
+    if dynamic_floor:
+        signal = _dynamic_floor(signal, dynamic_floor)
 
     # allocate 10_000 notional in unit vol space
     gearing = 10_000 / previous_close_px
