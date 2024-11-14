@@ -124,7 +124,7 @@ def update_graph(
     mtd = (
         api.backtest.intraday.rounded.position.portfolio(
             date_range=(
-                date - pd.offsets.Day(30),
+                date,
                 end,
             ),
         )
