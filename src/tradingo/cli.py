@@ -176,6 +176,7 @@ def collect_sample_tasks(
 ):
 
     tasks = {}
+    instrument_tasks = {}
 
     for universe, config in universes.items():
 
@@ -184,20 +185,23 @@ def collect_sample_tasks(
         #
         provider = config["provider"]
 
-        if include_instruments:
+        instrument_task = Task(
+            "tradingo.sampling.download_instruments",
+            [],
+            {
+                "html": config.get("html"),
+                "file": config.get("file"),
+                "tickers": config.get("tickers"),
+                "epics": config.get("epics"),
+                "index_col": config["index_col"],
+                "universe": universe,
+            },
+        )
 
-            tasks[f"{universe}.instruments"] = Task(
-                "tradingo.sampling.download_instruments",
-                [],
-                {
-                    "html": config.get("html"),
-                    "file": config.get("file"),
-                    "tickers": config.get("tickers"),
-                    "epics": config.get("epics"),
-                    "index_col": config["index_col"],
-                    "universe": universe,
-                },
-            )
+        if include_instruments:
+            tasks[f"{universe}.instruments"] = instrument_task
+        instrument_tasks[f"{universe}.instruments"] = instrument_task
+
         tasks[f"{universe}.sample"] = Task(
             config.get("function", "tradingo.sampling.sample_equity"),
             [],
@@ -242,7 +246,7 @@ def collect_sample_tasks(
                 [f"{universe}.sample"],
             )
 
-    return tasks
+    return tasks, instrument_tasks
 
 
 def build_graph(
@@ -252,13 +256,15 @@ def build_graph(
     sample_start_date=None,
     snapshot_template=None,
     include_instruments: bool = True,
-) -> dict[str, Task]:
+    include_live: bool = False,
+) -> tuple[dict[str, Task], dict[str, Task]]:
 
     sample_start_date = sample_start_date or start_date
 
     global_tasks = {}
+    eod_tasks = {}
 
-    sample_tasks = collect_sample_tasks(
+    sample_tasks, instrument_tasks = collect_sample_tasks(
         config["universe"],
         global_tasks=global_tasks,
         start_date=start_date,
@@ -350,11 +356,28 @@ def build_graph(
             dependencies=[portfolio_name],
         )
 
+        downstream_live = eod_tasks[f"{portfolio_name}.downstream.live"] = Task(
+            "tradingo.engine.adjust_position_sizes",
+            task_args=[],
+            task_kwargs={
+                "name": portfolio_name,
+                "provider": provider,
+                "universe": universe,
+                "stage": backtest_kwargs["stage"],
+            },
+            dependencies=[portfolio_name],
+        )
+
+        if include_live:
+            global_tasks[f"{portfolio_name}.downstream.live"] = downstream_live
+
         downstream.resolve_dependencies(global_tasks)
         backtest.resolve_dependencies(global_tasks)
         trades.resolve_dependencies(global_tasks)
 
-    return global_tasks
+    eod_tasks.update(instrument_tasks)
+
+    return global_tasks, eod_tasks
 
 
 def serialise_dag(graph: dict[str, Task]):
@@ -391,7 +414,7 @@ def main():
 
     args = cli_app().parse_args()
 
-    graph = build_graph(args.config, args.start_date, args.end_date)
+    graph, _ = build_graph(args.config, args.start_date, args.end_date)
     arctic = Arctic(args.arctic_uri)
 
     update_dag(graph)
