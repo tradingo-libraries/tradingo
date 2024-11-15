@@ -279,6 +279,7 @@ def build_graph(
 
     sample_tasks, instrument_tasks = collect_sample_tasks(
         global_tasks,
+        eod_tasks,
         universes=config["universe"],
         start_date=start_date,
         sample_start_date=sample_start_date,
@@ -364,7 +365,8 @@ def build_graph(
                 "name": portfolio_name,
                 "provider": provider,
                 "universe": universe,
-                "stage": backtest_kwargs["stage"],
+                "from_date": sample_start_date,
+                "to_date": end_date,
             },
             dependencies=[portfolio_name],
         )
@@ -378,7 +380,7 @@ def build_graph(
                 "universe": universe,
                 "stage": backtest_kwargs["stage"],
             },
-            dependencies=[portfolio_name],
+            dependencies=[] if not include_live else [f"{portfolio_name}.downstream"],
         )
 
         if include_live:
