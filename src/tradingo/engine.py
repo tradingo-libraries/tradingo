@@ -112,9 +112,9 @@ def get_currency(instrument: pd.Series):
     symbol_prefix="{provider}.{universe}.",
 )
 def adjust_position_sizes(
-    stage: str,
     instruments: pd.DataFrame,
     target_positions: pd.DataFrame,
+    stage: str,
     universe: str,
     provider: str,
     name: str,
