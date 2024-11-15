@@ -184,7 +184,7 @@ def sample_ig_instruments(
                         ),
                     ),
                     index=pd.DatetimeIndex([], name="DateTime"),
-                )  # TODO:
+                )
             raise ex
 
     result = pd.concat(
