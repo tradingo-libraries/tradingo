@@ -166,8 +166,8 @@ def collect_signal_tasks(
                 **config.get("kwargs", {}),
                 "start_date": start_date,
                 "end_date": end_date,
-                "universe": universe,
-                "provider": provider,
+                "universe": config.get("kwargs", {}).get("universe", universe),
+                "provider": config.get("kwargs", {}).get("provider", provider),
             },
             [
                 f"{universe}.sample",
@@ -316,7 +316,7 @@ def build_graph(
 
         signals = collect_signal_tasks(
             global_tasks,
-            signals=config["signal_configs"],
+            signals={config["signal_configs"].items()},
             universe=portfolio_config["universe"],
             provider=portfolio_config["provider"],
             start_date=start_date,
