@@ -316,7 +316,7 @@ def build_graph(
 
         signals = collect_signal_tasks(
             global_tasks,
-            signals={config["signal_configs"].items()},
+            signals=config["signal_configs"],
             universe=portfolio_config["universe"],
             provider=portfolio_config["provider"],
             start_date=start_date,
