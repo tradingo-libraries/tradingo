@@ -365,20 +365,20 @@ def build_graph(
                 "name": portfolio_name,
                 "provider": provider,
                 "universe": universe,
-                "from_date": sample_start_date,
-                "to_date": end_date,
+                "stage": backtest_kwargs["stage"],
             },
             dependencies=[portfolio_name],
         )
 
         downstream_live = eod_tasks[f"{portfolio_name}.downstream.live"] = Task(
-            "tradingo.engine.adjust_position_sizes",
+            "tradingo.live.get_activity_history",
             task_args=[],
             task_kwargs={
                 "name": portfolio_name,
                 "provider": provider,
                 "universe": universe,
-                "stage": backtest_kwargs["stage"],
+                "from_date": sample_start_date,
+                "to_date": end_date,
             },
             dependencies=[] if not include_live else [f"{portfolio_name}.downstream"],
         )
