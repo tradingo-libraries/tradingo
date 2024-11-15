@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import logging
 from enum import Enum
 import importlib
@@ -38,6 +39,7 @@ def cli_app():
     app.add_argument("--end-date", type=pd.Timestamp)
     app.add_argument("--force-rerun", action="store_true")
     app.add_argument("--arctic-uri", default=ARCTIC_URL)
+    app.add_argument("--auth-file", type=pathlib.Path)
     return app
 
 
@@ -429,7 +431,14 @@ def main():
 
     args = cli_app().parse_args()
 
-    graph, _ = build_graph(args.config, args.start_date, args.end_date)
+    if args.auth_file:
+        os.environ.update(
+            {k: str(v) for k, v in json.loads(args.auth_file.read_text()).items()}
+        )
+
+    graph, _ = build_graph(
+        args.config, args.start_date, args.end_date, include_live=True
+    )
     arctic = Arctic(args.arctic_uri)
 
     update_dag(graph)
