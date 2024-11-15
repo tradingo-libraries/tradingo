@@ -44,7 +44,9 @@ def test_build_graph():
         },
     }
 
-    tasks = build_graph(config, pd.Timestamp("2018-01-01"), pd.Timestamp("2024-09-18"))
+    tasks, eod_tasks = build_graph(
+        config, pd.Timestamp("2018-01-01"), pd.Timestamp("2024-09-18")
+    )
 
     assert tasks[PORTFOLIO].dependencies == [
         tasks[f"{UNIVERSE}.sample"],

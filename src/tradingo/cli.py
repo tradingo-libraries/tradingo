@@ -45,13 +45,29 @@ def task_resolver(func):
 
     functools.wraps(func)
 
-    def wrapper(*args, global_tasks, **kwargs):
+    def wrapper(*global_tasks, **kwargs):
 
-        tasks_out = func(*args, **kwargs)
-        global_tasks.update(tasks_out)
+        tasks_out = func(**kwargs)
 
-        for task in tasks_out.values():
-            task.resolve_dependencies(global_tasks)
+        if isinstance(tasks_out, (tuple, list)):
+
+            task_sets = tasks_out
+
+            for tasks_out, all_tasks in zip(task_sets, global_tasks):
+
+                all_tasks.update(tasks_out)
+
+                for task in tasks_out.values():
+                    task.resolve_dependencies(all_tasks)
+
+            return task_sets
+
+        else:
+
+            global_tasks[0].update(tasks_out)
+
+            for task in tasks_out.values():
+                task.resolve_dependencies(global_tasks[0])
 
         return tasks_out
 
@@ -180,9 +196,6 @@ def collect_sample_tasks(
 
     for universe, config in universes.items():
 
-        # TODO: start,end date
-        #
-        #
         provider = config["provider"]
 
         instrument_task = Task(
@@ -265,8 +278,8 @@ def build_graph(
     eod_tasks = {}
 
     sample_tasks, instrument_tasks = collect_sample_tasks(
-        config["universe"],
-        global_tasks=global_tasks,
+        global_tasks,
+        universes=config["universe"],
         start_date=start_date,
         sample_start_date=sample_start_date,
         end_date=end_date,
@@ -301,10 +314,10 @@ def build_graph(
         )
 
         signals = collect_signal_tasks(
-            config["signal_configs"],
-            portfolio_config["universe"],
-            portfolio_config["provider"],
-            global_tasks=global_tasks,
+            global_tasks,
+            signals=config["signal_configs"],
+            universe=portfolio_config["universe"],
+            provider=portfolio_config["provider"],
             start_date=start_date,
             end_date=end_date,
         )
