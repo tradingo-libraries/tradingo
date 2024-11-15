@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import dateutil.tz
 
 from tradingo.symbols import symbol_publisher
@@ -26,8 +27,8 @@ def get_activity_history(
     )
     act["DateTime"] = (
         pd.to_datetime(act["date"] + " " + act["time"])
-        .tz_localize(dateutil.tz.tzlocal())
-        .tz_convert("utc")
+        .dt.tz_localize(dateutil.tz.tzlocal())
+        .dt.tz_convert("utc")
     )
 
     return tuple(
