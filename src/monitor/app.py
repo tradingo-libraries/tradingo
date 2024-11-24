@@ -5,6 +5,7 @@ from flask import Flask
 from pandas.core.generic import weakref
 import plotly.express as px
 import pandas as pd
+import numpy as np
 from tradingo.api import Tradingo
 
 ARCTIC_URL = os.environ.get(
@@ -46,8 +47,11 @@ app.layout = html.Div(
             [
                 dcc.Graph(id="z_score"),
                 dcc.Graph(id="net_position"),
+                dcc.Graph(id="raw_position"),
                 dcc.Graph(id="unrealised_pnl"),
                 dcc.Graph(id="total_pnl"),
+                dcc.Graph(id="short_vol"),
+                dcc.Graph(id="long_vol"),
                 dcc.Graph(id="month-to-date"),
             ]
         ),
@@ -59,8 +63,11 @@ app.layout = html.Div(
     (
         Output("z_score", "figure"),
         Output("net_position", "figure"),
+        Output("raw_position", "figure"),
         Output("unrealised_pnl", "figure"),
         Output("total_pnl", "figure"),
+        Output("short_vol", "figure"),
+        Output("long_vol", "figure"),
         Output("month-to-date", "figure"),
     ),
     (
@@ -85,7 +92,9 @@ def update_graph(
         return fig
 
     value = value or None
-    date = pd.Timestamp(start_date or pd.Timestamp.now()).normalize()
+    date = pd.Timestamp(
+        start_date or pd.Timestamp.now() - pd.offsets.BDay(1)
+    ).normalize()
     end = pd.Timestamp(
         end_date or (pd.Timestamp.now().normalize() + pd.Timedelta(hours=24))
     ).normalize()
@@ -93,6 +102,13 @@ def update_graph(
         columns=value,
         date_range=(date, end),
     )
+
+    short_vol = api.signals.intraday_momentum.short_vol(
+        date_range=(end_date or pd.Timestamp.now() - pd.offsets.BDay(30), None)
+    ).resample("B").last() * np.sqrt(252)
+    long_vol = api.signals.intraday_momentum.long_vol(
+        date_range=(end_date or pd.Timestamp.now() - pd.offsets.BDay(30), None)
+    ).resample("B").last() * np.sqrt(252)
 
     start = z_score.index[0]
     end = z_score.index[-1] + pd.Timedelta(minutes=15)
@@ -110,6 +126,10 @@ def update_graph(
     )
 
     net_position = api.backtest.intraday.rounded.position.instrument.net_position(
+        columns=value,
+        date_range=(start, end),
+    )
+    raw_position = api.portfolio.intraday.raw.position(
         columns=value,
         date_range=(start, end),
     )
@@ -148,8 +168,12 @@ def update_graph(
     return (
         range_breaks(z_score.plot(title="z_score")),
         range_breaks(net_position.plot(title="net_position")),
+        range_breaks(raw_position.plot(title="raw_position")),
         range_breaks(unrealised_pnl.plot(title="unrealised_pnl")),
         range_breaks(total_pnl.plot(title="total_pnl")),
+        # range_breaks(short_vol.plot(title="short_vol")),
+        short_vol.plot(title="short_vol"),
+        long_vol.plot(title="long_vol"),
         mtd.plot(title="Returns since inception"),
     )
 

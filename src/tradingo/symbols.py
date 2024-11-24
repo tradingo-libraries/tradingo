@@ -93,14 +93,15 @@ def symbol_provider(
                 if symbol in kwargs and kwargs[symbol] is None:
                     requested_symbols.pop(symbol)
 
-            symbols_data = {
-                k: (
+            def get_symbol_data(v):
+                symbol = parse_symbol(v, kwargs, symbol_prefix=symbol_prefix)
+                return (
                     arctic.get_library(
-                        parse_symbol(v, kwargs, symbol_prefix=symbol_prefix).library,
+                        symbol.library,
                         create_if_missing=True,
                     )
                     .read(
-                        parse_symbol(v, kwargs, symbol_prefix=symbol_prefix).symbol,
+                        symbol.symbol,
                         date_range=(
                             None
                             if no_date
@@ -109,10 +110,13 @@ def symbol_provider(
                                 pd.Timestamp(end_date) if end_date else None,
                             )
                         ),
-                        **parse_symbol(v, kwargs, symbol_prefix=symbol_prefix).kwargs,
+                        **symbol.kwargs,
                     )
                     .data
                 )
+
+            symbols_data = {
+                k: get_symbol_data(v)
                 for k, v in requested_symbols.items()
                 if k not in orig_symbol_data
             }
@@ -122,7 +126,11 @@ def symbol_provider(
             logger.info("Providing %s symbols from %s", symbols_data.keys(), arctic)
 
             return func(
-                *args, **kwargs, arctic=arctic, start_date=start_date, end_date=end_date
+                *args,
+                **kwargs,
+                arctic=arctic,
+                start_date=start_date,
+                end_date=end_date,
             )
 
         return wrapper
@@ -176,20 +184,20 @@ def symbol_publisher(
                         else {k: v for k, v in astype.items() if k in data.columns}
                     )
 
-                logger.info(
-                    "writing symbol=%s rows=%s",
-                    parse_symbol(symbol, kwargs, symbol_prefix, symbol_postfix),
-                    len(data.index),
-                )
-
-                lib, sym, params = parse_symbol(
-                    symbol,
-                    kwargs,
-                    symbol_prefix=symbol_prefix,
-                    symbol_postfix=symbol_postfix,
-                )
-
                 if not dry_run:
+                    parsed_symbol = parse_symbol(
+                        symbol,
+                        kwargs,
+                        symbol_prefix=symbol_prefix,
+                        symbol_postfix=symbol_postfix,
+                    )
+                    logger.info(
+                        "writing symbol=%s rows=%s",
+                        parsed_symbol,
+                        len(data.index),
+                    )
+
+                    lib, sym, params = parsed_symbol
                     lib = arctic.get_library(
                         lib, create_if_missing=True, library_options=library_options
                     )

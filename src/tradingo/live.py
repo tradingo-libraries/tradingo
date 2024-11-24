@@ -9,6 +9,7 @@ from tradingo.sampling import get_ig_service
 @symbol_publisher(
     template="live/activity.{0}",
     symbol_prefix="{provider}.{universe}.",
+    astype={"level": "float"},
 )
 def get_activity_history(
     from_date,
@@ -23,7 +24,8 @@ def get_activity_history(
     svc = svc or get_ig_service()
 
     act = svc.fetch_account_activity_by_date(
-        from_date=pd.Timestamp(from_date), to_date=pd.Timestamp(to_date)
+        from_date=pd.Timestamp(from_date),
+        to_date=pd.Timestamp(to_date),
     )
     act["DateTime"] = (
         pd.to_datetime(act["date"] + " " + act["time"])
