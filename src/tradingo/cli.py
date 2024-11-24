@@ -33,13 +33,13 @@ def cli_app():
     app = argparse.ArgumentParser("tradingo")
 
     app.add_argument("--config", type=resolve_config)
+    app.add_argument("--auth", type=resolve_config)
     app.add_argument("--task", required=True)
     app.add_argument("--with-deps", action="store_true")
     app.add_argument("--start-date", type=pd.Timestamp)
     app.add_argument("--end-date", type=pd.Timestamp)
     app.add_argument("--force-rerun", action="store_true")
     app.add_argument("--arctic-uri", default=ARCTIC_URL)
-    app.add_argument("--auth-file", type=pathlib.Path)
     return app
 
 
@@ -431,10 +431,8 @@ def main():
 
     args = cli_app().parse_args()
 
-    if args.auth_file:
-        os.environ.update(
-            {k: str(v) for k, v in json.loads(args.auth_file.read_text()).items()}
-        )
+    if args.auth:
+        os.environ.update({k: str(v) for k, v in args.auth.items()})
 
     graph, _ = build_graph(
         args.config, args.start_date, args.end_date, include_live=True

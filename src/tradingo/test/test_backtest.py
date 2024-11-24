@@ -1,4 +1,4 @@
-from numpy import divide
+import numpy as np
 import pytest
 import pandas as pd
 
@@ -54,7 +54,7 @@ def test_backtest_integration(benchmark, tradingo):
                 index=pd.bdate_range("2020-01-01", periods=260, freq="B"),
                 columns=["ABCD"],
             ),
-            "(prices_.diff()*portfolio_.shift()).squeeze()",
+            "pd.Series([np.nan, np.nan, *(prices_.diff()*portfolio_.shift()).squeeze().iloc[2:]], index=prices_.index)",
             "pd.Series(0.0, index=prices_.index)",
         ),
         (
@@ -70,7 +70,7 @@ def test_backtest_integration(benchmark, tradingo):
                     columns=["ABCD"],
                 ).cumprod(),
             ),
-            "(prices_.diff()*portfolio_.shift()).squeeze()",
+            "pd.Series([*(prices_.diff()*portfolio_.shift()).squeeze().iloc[0:-1], np.nan], index=prices_.index)",
             "pd.Series([*(0 for _ in range(0, 259)), 12.280985478055433], index=prices_.index)",
         ),
     ],
@@ -119,6 +119,70 @@ def test_backtest_smoke(tradingo, prices_, portfolio_, unrealised_pnl, realised_
         check_names=False,
         check_freq=False,
         rtol=1e-4,
+    )
+
+
+@pytest.mark.parametrize(
+    "position, prices, unrealised_pnl, realised_pnl, total_pnl",
+    (
+        (
+            pd.DataFrame(
+                [0, 1, 1, 1, 0, 0],
+                columns=["ABC"],
+                index=pd.bdate_range("2024-11-24", periods=6),
+            ),
+            pd.DataFrame(
+                [10, 10, 11, 12, 13, 14],
+                columns=["ABC"],
+                index=pd.bdate_range("2024-11-24", periods=6),
+            ),
+            pd.DataFrame(
+                [np.nan, 0, 1, 2, np.nan, np.nan],
+                columns=["ABC"],
+                index=pd.bdate_range("2024-11-24", periods=6),
+            ),
+            pd.DataFrame(
+                [0, 0, 0, 0, 3, 3],
+                columns=["ABC"],
+                index=pd.bdate_range("2024-11-24", periods=6),
+            ),
+            pd.DataFrame(
+                [0, 0, 1, 2, 3, 3],
+                columns=["ABC"],
+                index=pd.bdate_range("2024-11-24", periods=6),
+            ),
+        ),
+    ),
+)
+def test_backtest_all_closed(
+    position,
+    prices,
+    unrealised_pnl,
+    realised_pnl,
+    total_pnl,
+):
+    bt = backtest.backtest(
+        dry_run=True,
+        portfolio=position,
+        bid_close=prices,
+        ask_close=prices,
+        dividends=None,
+    )
+
+    pd.testing.assert_frame_equal(
+        bt["backtest/instrument.unrealised_pnl"],
+        unrealised_pnl,
+        check_dtype=False,
+    )
+    pd.testing.assert_frame_equal(
+        bt["backtest/instrument.realised_pnl"],
+        realised_pnl,
+        check_dtype=False,
+    )
+    pd.testing.assert_frame_equal(
+        bt["backtest/instrument.total_pnl"],
+        total_pnl,
+        check_dtype=False,
     )
 
 

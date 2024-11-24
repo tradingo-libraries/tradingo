@@ -119,12 +119,18 @@ cpdef compute_backtest(
                 if trade_quantity > abs(m_net_position):
                     m_avg_open_price = trade_price
 
+
+
         if dividend != 0 and not isnan(dividend):
             m_realised_pnl += m_net_position * dividend
 
         # total pnl
-        m_total_pnl = m_realised_pnl + m_unrealised_pnl
         m_net_position += trade_quantity
+        if m_net_position == 0.0:
+            m_unrealised_pnl = 0.0
+
+        m_total_pnl = m_realised_pnl + m_unrealised_pnl
+
         m_net_exposure = m_net_position * price
 
         unrealised_pnl[idx] = m_unrealised_pnl

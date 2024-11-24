@@ -38,14 +38,12 @@ BACKTEST_FIELDS = (
 )
 def backtest(
     *,
-    name: str,
     portfolio: pd.DataFrame,
     bid_close: pd.DataFrame,
     ask_close: pd.DataFrame,
     dividends: Optional[pd.DataFrame] = None,
     stop_limit: Optional[pd.DataFrame] = None,
     stop_loss: Optional[pd.DataFrame] = None,
-    stage: str = "raw",
     price_ffill_limit: int = 0,
     **kwargs,
 ):
@@ -90,7 +88,7 @@ def backtest(
             columns=mid_close.columns,
         )
 
-    logger.info("running backtest for %s on stage %s with %s", name, stage, kwargs)
+    logger.info("running backtest for %s", kwargs)
 
     def compute_backtest(inst_trades: pd.Series):
 
@@ -127,8 +125,6 @@ def backtest(
         axis=1,
     ).reorder_levels([1, 0], axis=1)
 
-    backtest_fields = (backtest.loc[:, f] for f in BACKTEST_FIELDS if f != "date")
-
     net_exposure = (backtest["net_position"] * mid_close).ffill().sum(axis=1)
     gross_exposure = (backtest["net_position"].abs() * mid_close).ffill().sum(axis=1)
 
@@ -149,5 +145,10 @@ def backtest(
     )
     summary["net_exposure"] = net_exposure
     summary["gross_exposure"] = gross_exposure
+
+    backtest["unrealised_pnl"] = backtest["unrealised_pnl"].where(
+        backtest.net_position.ne(0.0), np.nan
+    )
+    backtest_fields = (backtest.loc[:, f] for f in BACKTEST_FIELDS if f != "date")
 
     return (summary, *backtest_fields)
