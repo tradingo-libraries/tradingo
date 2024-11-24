@@ -167,6 +167,7 @@ def test_backtest_all_closed(
         bid_close=prices,
         ask_close=prices,
         dividends=None,
+        arctic="None",
     )
 
     pd.testing.assert_frame_equal(
