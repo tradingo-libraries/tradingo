@@ -392,7 +392,8 @@ def build_graph(
         if include_live:
             global_tasks[f"{portfolio_name}.downstream.live"] = downstream_live
 
-        downstream.resolve_dependencies(global_tasks)
+        if "downstream" in portfolio_config:
+            downstream.resolve_dependencies(global_tasks)
         backtest.resolve_dependencies(global_tasks)
         trades.resolve_dependencies(global_tasks)
 
