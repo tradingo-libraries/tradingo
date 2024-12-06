@@ -40,6 +40,7 @@ def cli_app():
     app.add_argument("--end-date", type=pd.Timestamp)
     app.add_argument("--force-rerun", action="store_true")
     app.add_argument("--arctic-uri", default=ARCTIC_URL)
+    app.add_argument("--dry-run", action="store_true")
     return app
 
 
@@ -449,9 +450,14 @@ def main():
     task = graph[args.task]
 
     try:
-        task.run(
-            run_dependencies=args.with_deps, force_rerun=args.force_rerun, arctic=arctic
+        out = task.run(
+            run_dependencies=args.with_deps,
+            force_rerun=args.force_rerun,
+            arctic=arctic,
+            dry_run=args.dry_run,
         )
+        if args.dry_run:
+            print(out)
     finally:
         serialise_dag(graph)
 

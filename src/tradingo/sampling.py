@@ -223,7 +223,7 @@ def sample_ig_instruments(
     "prices/adj_close",
     "prices/volume",
     "prices/dividend",
-    "prices/split_ratio",
+    # "prices/split_ratio",
     astype=float,
     symbol_prefix="{provider}.{universe}.",
 )
@@ -258,7 +258,7 @@ def sample_equity(
         100 * (1 + close.pct_change()).cumprod(),
         data.pivot(columns=["symbol"], values="volume"),
         data.pivot(columns=["symbol"], values="dividend"),
-        data.pivot(columns=["symbol"], values="split_ratio"),
+        # data.pivot(columns=["symbol"], values="split_ratio"),
     )
 
 

@@ -20,6 +20,10 @@ ARCTIC_URL = os.environ.get(
 )
 
 
+class SymbolParseError(Exception):
+    """raised when cant parse symbol"""
+
+
 class Symbol(NamedTuple):
 
     library: str
@@ -47,12 +51,18 @@ def lib_provider(**libs):
 
 def parse_symbol(symbol, kwargs, symbol_prefix="", symbol_postfix=""):
     string_kwargs = {k: str(v) for k, v in kwargs.items()}
-    symbol = symbol.format(**string_kwargs)
-    parsed_symbol = urlparse(symbol)
-    lib, sym = parsed_symbol.path.split("/")
-    kwargs = dict(parse_qsl(parsed_symbol.query))
-    symbol_prefix = symbol_prefix.format(**string_kwargs)
-    symbol_postfix = symbol_postfix.format(**string_kwargs)
+    try:
+        symbol = symbol.format(**string_kwargs)
+        parsed_symbol = urlparse(symbol)
+        lib, sym = parsed_symbol.path.split("/")
+        kwargs = dict(parse_qsl(parsed_symbol.query))
+        symbol_prefix = symbol_prefix.format(**string_kwargs)
+        symbol_postfix = symbol_postfix.format(**string_kwargs)
+    except KeyError as ex:
+        raise SymbolParseError(
+            f"Missing parameter: {ex.args[0]},"
+            f" {symbol_prefix=}, {symbol_postfix=}, {symbol=},"
+        )
     for key, value in kwargs.items():
         if key == "as_of":
             try:
@@ -153,7 +163,7 @@ def symbol_publisher(
         @functools.wraps(func)
         def wrapper(
             *args,
-            dry_run=False,
+            dry_run=True,
             arctic: Optional[adb.Arctic] = None,
             snapshot: Optional[str] = None,
             clean: bool = False,
