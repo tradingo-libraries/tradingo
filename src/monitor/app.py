@@ -64,11 +64,13 @@ app.layout = html.Div(
                 dcc.Graph(id="raw_position"),
                 dcc.Graph(id="unrealised_pnl"),
                 dcc.Graph(id="total_pnl"),
+                dcc.Graph(id="instrument_total_pnl"),
                 dcc.Graph(id="gross_margin"),
                 dcc.Graph(id="margin"),
                 dcc.Graph(id="short_vol"),
                 dcc.Graph(id="long_vol"),
-                dcc.Graph(id="month-to-date"),
+                dcc.Graph(id="year-to-date"),
+                dcc.Graph(id="five-year-to-date"),
             ]
         ),
     ]
@@ -136,11 +138,13 @@ def set_portfolio_value(options):
         Output("raw_position", "figure"),
         Output("unrealised_pnl", "figure"),
         Output("total_pnl", "figure"),
+        Output("instrument_total_pnl", "figure"),
         Output("margin", "figure"),
         Output("gross_margin", "figure"),
         Output("short_vol", "figure"),
         Output("long_vol", "figure"),
-        Output("month-to-date", "figure"),
+        Output("year-to-date", "figure"),
+        Output("five-year-to-date", "figure"),
     ),
     (
         Input("asset-selection", "value"),
@@ -151,7 +155,7 @@ def set_portfolio_value(options):
     ),
 )
 def update_graph(
-    value,
+    assets,
     start_date,
     end_date,
     universe,
@@ -170,30 +174,32 @@ def update_graph(
     def range_breaks(fig):
         fig.update_xaxes(
             rangebreaks=[
-                dict(bounds=[21.5, 13.5], pattern="hour"),
-                dict(bounds=["sat", "mon"]),
+                dict(bounds=[22, 13], pattern="hour"),
+                dict(bounds=["sat", "mon"], pattern="day of week"),
             ]
         )
         return fig
 
-    value = value or None
+    assets = assets or None
     date = pd.Timestamp(
-        start_date or pd.Timestamp.now() - pd.offsets.BDay(0)
+        start_date or (pd.Timestamp.now() - pd.offsets.BDay(0))
     ).normalize()
     end = pd.Timestamp(
         end_date or (pd.Timestamp.now().normalize() + pd.Timedelta(hours=24))
     ).normalize()
 
     z_score = api.signals.intraday_momentum.z_score(
-        columns=value,
+        columns=assets,
         date_range=(date, end),
     )
 
     short_vol = api.signals.intraday_momentum.short_vol(
-        date_range=(end or pd.Timestamp.now() - pd.offsets.BDay(30), end)
+        date_range=((end or pd.Timestamp.now()) - pd.offsets.BDay(30), end),
+        columns=assets,
     ).resample("B").last() * np.sqrt(252)
     long_vol = api.signals.intraday_momentum.long_vol(
-        date_range=(end or pd.Timestamp.now() - pd.offsets.BDay(30), end)
+        date_range=((end or pd.Timestamp.now()) - pd.offsets.BDay(30), end),
+        columns=assets,
     ).resample("B").last() * np.sqrt(252)
 
     start = z_score.index[0]
@@ -202,7 +208,7 @@ def update_graph(
     unrealised_pnl = (
         api.backtest[portfolio]
         .rounded.position.instrument.unrealised_pnl(
-            columns=value,
+            columns=assets,
             date_range=(start, end),
         )
         .ffill()
@@ -213,18 +219,18 @@ def update_graph(
     )
 
     net_position = api.backtest[portfolio].rounded.position.instrument.net_position(
-        columns=value,
+        columns=assets,
         date_range=(start, end),
     )
     raw_position = api.portfolio[portfolio].raw.position(
-        columns=value,
+        columns=assets,
         date_range=(start, end),
     )
     margin = (
         api.backtest[portfolio]
         .rounded.position.instrument.net_exposure(
             date_range=(start, end),
-            columns=value,
+            columns=assets,
         )
         .abs()
         * 0.05
@@ -233,7 +239,6 @@ def update_graph(
         api.backtest[portfolio]
         .rounded.position.portfolio(
             date_range=(start, end),
-            columns=value,
         )
         .gross_exposure.abs()
         * 0.05
@@ -252,15 +257,43 @@ def update_graph(
         .cumsum()
         .fillna(0.0)
     )
+    instrument_total_pnl = (
+        api.backtest[portfolio]
+        .rounded.position.instrument.total_pnl(
+            date_range=(
+                start - pd.offsets.YearBegin(1),
+                end,
+            ),
+        )
+        .resample(pd.offsets.BDay(1))
+        .last()
+        .ffill()
+        .fillna(0.0)
+        .diff()
+        .cumsum()
+        .fillna(0.0)
+    )
 
-    inception = pd.Timestamp("2024-11-07 00:00:00+00:00")
-
-    mtd = (
+    one_year = (
         api.backtest[portfolio]
         .rounded.position.portfolio(
             date_range=(
-                inception,
-                # end - pd.offsets.BDay(30),
+                end - pd.offsets.BDay(252),
+                end,
+            ),
+        )
+        .resample(pd.offsets.BDay(1))
+        .last()
+        .diff()
+        .fillna(0)
+        .cumsum()
+        .total_pnl
+    )
+    five_year = (
+        api.backtest[portfolio]
+        .rounded.position.portfolio(
+            date_range=(
+                end - 5 * pd.offsets.BDay(252),
                 end,
             ),
         )
@@ -278,12 +311,16 @@ def update_graph(
         range_breaks(raw_position.plot(title="raw_position")),
         range_breaks(unrealised_pnl.plot(title="unrealised_pnl")),
         range_breaks(total_pnl.plot(title="total_pnl")),
-        range_breaks(gross_margin.plot(title="total_margin")),
+        instrument_total_pnl.plot(title="instrument_total_pnl"),
+        range_breaks(
+            (gross_margin - unrealised_pnl.sum(axis=1)).plot(title="total_margin")
+        ),
         range_breaks(margin.plot(title="margin")),
         # range_breaks(short_vol.plot(title="short_vol")),
         short_vol.plot(title="short_vol"),
         long_vol.plot(title="long_vol"),
-        mtd.plot(title="Returns since inception"),
+        one_year.plot(title="1Y returns"),
+        five_year.plot(title="5Y returns"),
     )
 
 
