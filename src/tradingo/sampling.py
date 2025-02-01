@@ -169,7 +169,10 @@ def sample_ig_instruments(
                 wait=wait,
             )["prices"]
         except Exception as ex:
-            if ex.args and ex.args[0] == "Historical price data not found":
+            if ex.args and (
+                ex.args[0] == "Historical price data not found"
+                or ex.args[0] == "error.price-history.io-error"
+            ):
                 logger.warning("Historical price data not found %s", symbol)
                 return pd.DataFrame(
                     np.nan,

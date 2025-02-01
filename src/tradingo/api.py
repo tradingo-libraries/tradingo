@@ -1,11 +1,8 @@
 from __future__ import annotations
-from copy import deepcopy
 import inspect
-from os import pathconf_names
 from typing import Optional
 import contextlib
 import pandas as pd
-from datetime import datetime
 import re
 import arcticdb as adb
 
@@ -26,28 +23,28 @@ class _Read:
         common_kwargs,
         root: Tradingo,
     ):
-        self.path_so_far = path_so_far
-        self.library = library
-        self.assets = assets
-        self.path = ".".join(self.path_so_far)
-        self.common_args = common_args
-        self.common_kwargs = common_kwargs
-        self.root = root
+        self._path_so_far = path_so_far
+        self._library = library
+        self._assets = assets
+        self._path = ".".join(self._path_so_far)
+        self._common_args = common_args
+        self._common_kwargs = common_kwargs
+        self._root = root
 
     def __dir__(self):
         return [*self.list(), *super().__dir__()]
 
     def __repr__(self):
-        return f'Namespace("{self.path}")'
+        return f'Namespace("{self._path}")'
 
     def __getattr__(self, symbol):
         return self.__class__(
-            (*self.path_so_far, symbol),
-            library=self.library,
-            assets=self.assets,
-            common_args=self.common_args,
-            common_kwargs=self.common_kwargs,
-            root=self.root,
+            (*self._path_so_far, symbol),
+            library=self._library,
+            assets=self._assets,
+            common_args=self._common_args,
+            common_kwargs=self._common_kwargs,
+            root=self._root,
         )
 
     def __getitem__(self, symbol):
@@ -58,13 +55,13 @@ class _Read:
         operation, index = next(
             (
                 (elem, i)
-                for i, elem in enumerate(self.path_so_far)
+                for i, elem in enumerate(self._path_so_far)
                 if elem in operations
             ),
-            (None, len(self.path_so_far)),
+            (None, len(self._path_so_far)),
         )
-        part_one_path = self.path_so_far[0:index]
-        part_two_path = self.path_so_far[index + 1 :]
+        part_one_path = self._path_so_far[0:index]
+        part_two_path = self._path_so_far[index + 1 :]
 
         lib_kwargs = {
             k: v for k, v in kwargs.items() if k in READ_SIG.parameters.keys()
@@ -93,20 +90,20 @@ class _Read:
             kw.setdefault(
                 "columns",
                 (
-                    self.assets
+                    self._assets
                     if all(i in path for i in ("backtest", "portfolio"))
                     else None
                 ),
             )
 
-            for k in self.common_kwargs:
+            for k in self._common_kwargs:
                 kw.pop(k, None)
-            return self.library.read(
+            return self._library.read(
                 ".".join(path),
                 *args,
-                *self.common_args,
+                *self._common_args,
                 **kw,
-                **self.common_kwargs,
+                **self._common_kwargs,
             ).data
 
         lhs = get_data_at_path(part_one_path, lib_kwargs)
@@ -118,12 +115,15 @@ class _Read:
                 callback_args = (
                     lhs,
                     self.__class__(
-                        (*self.root._get_path_so_far(callback_lib), *part_two_path[1:]),
-                        getattr(self.root, (callback_lib)).library,
-                        self.assets,
-                        self.common_args,
-                        self.common_kwargs,
-                        self.root,
+                        (
+                            *self._root._get_path_so_far(callback_lib),
+                            *part_two_path[1:],
+                        ),
+                        getattr(self._root, (callback_lib))._library,
+                        self._assets,
+                        self._common_args,
+                        self._common_kwargs,
+                        self._root,
                     )(*args, **kwargs),
                 )
 
@@ -136,45 +136,43 @@ class _Read:
         return lhs
 
     def update(self, *args, **kwargs):
-        self.library.update(self.path, *args, **kwargs)
+        self._library.update(self._path, *args, **kwargs)
 
     def list(self, *args, **kwargs):
-        regex = re.escape(".".join((self.path_so_far)) + ".")
+        regex = re.escape(".".join((self._path_so_far)) + ".")
         kwargs["regex"] = regex + kwargs.setdefault("regex", "")
         return list(
             dict.fromkeys(
                 [
-                    i.replace(f'{".".join(self.path_so_far)}.', "").split(".")[0]
-                    for i in self.library.list_symbols(*args, **kwargs)
+                    i.replace(f'{".".join(self._path_so_far)}.', "").split(".")[0]
+                    for i in self._library.list_symbols(*args, **kwargs)
                 ]
             )
         )
 
     def head(self, *args, **kwargs):
-        return self.library.head(self.path, *args, **kwargs).data
+        return self._library.head(self._path, *args, **kwargs).data
 
     def tail(self, *args, **kwargs):
-        return self.library.tail(self.path, *args, **kwargs).data
+        return self._library.tail(self._path, *args, **kwargs).data
 
     def exists(self):
-        pass
+        """Return true if symbol exists"""
+        return bool(self._library.list_symbols(regex=f"^{re.escape(self._path)}$"))
 
 
 class Tradingo(adb.Arctic):
 
     def __init__(
         self,
-        name,
         *args,
         provider: Optional[str] = None,
         universe: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        self.name = name
-        self.provider = provider
-        self.instrument_symbol = universe
-        self.universe = universe
+        self._provider = provider
+        self._universe = universe
         self._context_args = ()
         self._context_kwargs = {}
 
@@ -192,10 +190,10 @@ class Tradingo(adb.Arctic):
         path_so_far = []
         if library == "instruments":
             return path_so_far
-        if self.provider:
-            path_so_far.append(self.provider)
-        if self.universe:
-            path_so_far.append(self.universe)
+        if self._provider:
+            path_so_far.append(self._provider)
+        if self._universe:
+            path_so_far.append(self._universe)
         return path_so_far
 
     def __getattr__(self, library):
@@ -213,8 +211,8 @@ class Tradingo(adb.Arctic):
                 )
 
             assets = []
-            if self.universe:
-                assets = getattr(self.instruments, self.universe)().index.to_list()
+            if self._universe:
+                assets = getattr(self.instruments, self._universe)().index.to_list()
 
             return _Read(
                 library=self.get_library(library),
