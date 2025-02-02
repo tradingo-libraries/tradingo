@@ -4,7 +4,6 @@ from typing import Optional
 
 import pandas as pd
 import numpy as np
-import riskfolio as rf
 
 import arcticdb as adb
 
@@ -140,6 +139,9 @@ def portfolio_optimization(
     aum: float,
     **kwargs,
 ):
+
+    import riskfolio as rf
+
     def get_weights(
         returns,
         factors,

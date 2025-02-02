@@ -59,6 +59,10 @@ app.layout = html.Div(
         ),
         html.Div(
             [
+                dcc.Graph(id="day-to-date"),
+                dcc.Graph(id="week-to-date"),
+                dcc.Graph(id="month-to-date"),
+                dcc.Graph(id="year-to-date"),
                 dcc.Graph(id="z_score"),
                 dcc.Graph(id="net_position"),
                 dcc.Graph(id="raw_position"),
@@ -69,8 +73,6 @@ app.layout = html.Div(
                 dcc.Graph(id="margin"),
                 dcc.Graph(id="short_vol"),
                 dcc.Graph(id="long_vol"),
-                dcc.Graph(id="year-to-date"),
-                dcc.Graph(id="five-year-to-date"),
             ]
         ),
     ]
@@ -85,9 +87,8 @@ def set_universe_options(_):
     api = Tradingo(
         uri=ARCTIC_URL,
         provider="ig-trading",
-        name="etft",
     )
-    return api.instruments.library.list_symbols()
+    return api.instruments._library.list_symbols()
 
 
 @callback(
@@ -101,7 +102,6 @@ def set_asset_options(universe):
         uri=ARCTIC_URL,
         provider="ig-trading",
         universe=universe,
-        name="etft",
     )
     return api.instruments[universe]().index.to_list()
 
@@ -116,7 +116,6 @@ def set_portfolio_options(universe):
     api = Tradingo(
         uri=ARCTIC_URL,
         provider="ig-trading",
-        name="etft",
     )
     return api.portfolio[universe].list()
 
@@ -143,8 +142,10 @@ def set_portfolio_value(options):
         Output("gross_margin", "figure"),
         Output("short_vol", "figure"),
         Output("long_vol", "figure"),
+        Output("day-to-date", "figure"),
+        Output("week-to-date", "figure"),
+        Output("month-to-date", "figure"),
         Output("year-to-date", "figure"),
-        Output("five-year-to-date", "figure"),
     ),
     (
         Input("asset-selection", "value"),
@@ -168,7 +169,6 @@ def update_graph(
         uri=ARCTIC_URL,
         provider="ig-trading",
         universe=universe,
-        name="etft",
     )
 
     def range_breaks(fig):
@@ -274,14 +274,17 @@ def update_graph(
         .fillna(0.0)
     )
 
+    returns = api.backtest[portfolio].rounded.position.portfolio(
+        date_range=(
+            end - pd.offsets.BDay(252),
+            end,
+        ),
+    )
     one_year = (
-        api.backtest[portfolio]
-        .rounded.position.portfolio(
-            date_range=(
-                end - pd.offsets.BDay(252),
-                end,
-            ),
-        )
+        returns.resample(pd.offsets.BDay(1)).last().diff().fillna(0).cumsum().total_pnl
+    )
+    one_month = (
+        returns.loc[end - pd.offsets.Day(30) : end]
         .resample(pd.offsets.BDay(1))
         .last()
         .diff()
@@ -289,20 +292,17 @@ def update_graph(
         .cumsum()
         .total_pnl
     )
-    five_year = (
-        api.backtest[portfolio]
-        .rounded.position.portfolio(
-            date_range=(
-                end - 5 * pd.offsets.BDay(252),
-                end,
-            ),
-        )
-        .resample(pd.offsets.BDay(1))
+    one_week = (
+        returns.loc[end - pd.offsets.Week(1) : end]
+        .resample(pd.offsets.Hour(4))
         .last()
         .diff()
         .fillna(0)
         .cumsum()
         .total_pnl
+    )
+    one_day = (
+        returns.loc[end - pd.offsets.BDay(1) : end].diff().fillna(0).cumsum().total_pnl
     )
 
     return (
@@ -319,8 +319,10 @@ def update_graph(
         # range_breaks(short_vol.plot(title="short_vol")),
         short_vol.plot(title="short_vol"),
         long_vol.plot(title="long_vol"),
-        one_year.plot(title="1Y returns"),
-        five_year.plot(title="5Y returns"),
+        one_day.plot(title="DTD"),
+        one_week.plot(title="WTD"),
+        one_month.plot(title="MTD"),
+        one_year.plot(title="YTD"),
     )
 
 
