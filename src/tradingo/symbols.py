@@ -54,7 +54,10 @@ def parse_symbol(symbol, kwargs, symbol_prefix="", symbol_postfix=""):
     try:
         symbol = symbol.format(**string_kwargs)
         parsed_symbol = urlparse(symbol)
-        lib, sym = parsed_symbol.path.split("/")
+        try:
+            lib, sym = parsed_symbol.path.split("/")
+        except ValueError as ex:
+            raise SymbolParseError(f"symbol {symbol} is invalid.") from ex
         kwargs = dict(parse_qsl(parsed_symbol.query))
         symbol_prefix = symbol_prefix.format(**string_kwargs)
         symbol_postfix = symbol_postfix.format(**string_kwargs)
