@@ -62,7 +62,9 @@ def test_build_graph():
     assert tasks[f"{PORTFOLIO}.backtest"].dependencies == [tasks[PORTFOLIO]]
 
     assert tasks[f"{UNIVERSE}.sample"].dependencies == [
-        tasks[f"{UNIVERSE}.instruments"]
+        tasks["A.sample"],
+        tasks["B.sample"],
+        tasks[f"{UNIVERSE}.instruments"],
     ]
     assert tasks[f"{UNIVERSE}.signal1"].dependencies == [
         tasks[f"{UNIVERSE}.sample"],
