@@ -195,7 +195,8 @@ def sample_instrument(
                 ),
                 index=pd.DatetimeIndex([], name="DateTime", tz="utc"),
             )
-        raise ex
+        else:
+            raise ex
 
     return (
         result["bid"],
