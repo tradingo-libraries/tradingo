@@ -137,7 +137,8 @@ def download_instruments(
 
 
 @symbol_publisher(
-    template="prices_igtrading/{epic}",
+    "prices_igtrading/{epic}.bid",
+    "prices_igtrading/{epic}.ask",
     library_options=arcticdb.LibraryOptions(
         dynamic_schema=True,
         dedup=True,
@@ -150,10 +151,11 @@ def sample_instrument(
     interval: str,
     wait: int = 0,
     service: Optional[IGService] = None,
+    **kwargs,
 ):
     service = service or get_ig_service()
     try:
-        return (
+        result = (
             service.fetch_historical_prices_by_epic(
                 epic,
                 end_date=pd.Timestamp(end_date)
@@ -170,29 +172,35 @@ def sample_instrument(
             .tz_localize(dateutil.tz.tzlocal())
             .tz_convert("utc")
         )
+
     except Exception as ex:
         if ex.args and (
             ex.args[0] == "Historical price data not found"
             or ex.args[0] == "error.price-history.io-error"
         ):
-            logger.warning("Historical price data not found %s", symbol)
-            return pd.DataFrame(
+            logger.warning("Historical price data not found %s", epic)
+            result = pd.DataFrame(
                 np.nan,
                 columns=pd.MultiIndex.from_tuples(
                     (
-                        ("Open", "bid"),
-                        ("Open", "ask"),
-                        ("High", "bid"),
-                        ("High", "ask"),
-                        ("Low", "bid"),
-                        ("Low", "ask"),
-                        ("Close", "bid"),
-                        ("Close", "ask"),
+                        ("bid", "Open"),
+                        ("bid", "High"),
+                        ("bid", "Low"),
+                        ("bid", "Close"),
+                        ("ask", "Open"),
+                        ("ask", "High"),
+                        ("ask", "Low"),
+                        ("ask", "Close"),
                     ),
                 ),
                 index=pd.DatetimeIndex([], name="DateTime", tz="utc"),
             )
         raise ex
+
+    return (
+        result["bid"],
+        result["ask"],
+    )
 
 
 @lib_provider(pricelib="prices_igtrading")
@@ -211,7 +219,14 @@ def create_universe(
 ):
 
     def get_data(symbol: str):
-        return pricelib.read(symbol, date_range=(start_date, end_date)).data
+        return pd.concat(
+            (
+                pricelib.read(f"{symbol}.bid", date_range=(start_date, end_date)).data,
+                pricelib.read(f"{symbol}.ask", date_range=(start_date, end_date)).data,
+            ),
+            axis=1,
+            keys=("bid", "ask"),
+        )
 
     result = pd.concat(
         ((get_data(symbol) for symbol in instruments.index.to_list())),
