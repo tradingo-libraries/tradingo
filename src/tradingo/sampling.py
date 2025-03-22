@@ -137,7 +137,7 @@ def download_instruments(
 
 
 @symbol_publisher(
-    template="prices_igtrading/{epic}",
+    "prices_igtrading/{epic}",
     library_options=arcticdb.LibraryOptions(
         dynamic_schema=True,
         dedup=True,
@@ -150,6 +150,7 @@ def sample_instrument(
     interval: str,
     wait: int = 0,
     service: Optional[IGService] = None,
+    **kwargs,
 ):
     service = service or get_ig_service()
     try:
@@ -168,29 +169,31 @@ def sample_instrument(
                 wait=wait,
             )["prices"]
             .tz_localize(dateutil.tz.tzlocal())
-            .tz_convert("utc")
+            .tz_convert("utc"),
         )
     except Exception as ex:
         if ex.args and (
             ex.args[0] == "Historical price data not found"
             or ex.args[0] == "error.price-history.io-error"
         ):
-            logger.warning("Historical price data not found %s", symbol)
-            return pd.DataFrame(
-                np.nan,
-                columns=pd.MultiIndex.from_tuples(
-                    (
-                        ("Open", "bid"),
-                        ("Open", "ask"),
-                        ("High", "bid"),
-                        ("High", "ask"),
-                        ("Low", "bid"),
-                        ("Low", "ask"),
-                        ("Close", "bid"),
-                        ("Close", "ask"),
+            logger.warning("Historical price data not found %s", epic)
+            return (
+                pd.DataFrame(
+                    np.nan,
+                    columns=pd.MultiIndex.from_tuples(
+                        (
+                            ("Open", "bid"),
+                            ("Open", "ask"),
+                            ("High", "bid"),
+                            ("High", "ask"),
+                            ("Low", "bid"),
+                            ("Low", "ask"),
+                            ("Close", "bid"),
+                            ("Close", "ask"),
+                        ),
                     ),
+                    index=pd.DatetimeIndex([], name="DateTime", tz="utc"),
                 ),
-                index=pd.DatetimeIndex([], name="DateTime", tz="utc"),
             )
         raise ex
 

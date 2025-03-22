@@ -190,6 +190,9 @@ def symbol_publisher(
 
             for data, symbol in zip(out, symbols_):
 
+                if data.empty:
+                    continue
+
                 if astype:
                     data = data.astype(
                         astype

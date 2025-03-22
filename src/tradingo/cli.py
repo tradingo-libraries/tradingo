@@ -226,6 +226,7 @@ def collect_sample_tasks(
                 {
                     "start_date": sample_start_date,
                     "end_date": end_date,
+                    "instruments": universe,
                 },
                 [f"{universe}.instruments"] if include_instruments else [],
             )
