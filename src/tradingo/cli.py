@@ -220,15 +220,20 @@ def collect_sample_tasks(
 
         if provider == "ig-trading":
 
+            deps = [f"{instrument}.sample" for instrument in config["epics"]]
+
+            if include_instruments:
+                deps.append(f"{universe}.instruments")
+
             tasks[f"{universe}.sample"] = create_universe = Task(
                 "tradingo.sampling.create_universe",
-                [f"{instrument}.sample" for instrument in config["epics"]],
+                [],
                 {
                     "start_date": sample_start_date,
                     "end_date": end_date,
                     "instruments": universe,
                 },
-                [f"{universe}.instruments"] if include_instruments else [],
+                deps,
             )
 
             for instrument in config["epics"]:
