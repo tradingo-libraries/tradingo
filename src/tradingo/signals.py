@@ -7,6 +7,9 @@ import functools
 
 from typing import Optional
 
+from sklearn.model_selection import train_test_split
+from sklearn.neural_network import MLPClassifier
+from sklearn.multioutput import MultiOutputClassifier
 import pandas as pd
 
 import pandas_market_calendars as pmc
@@ -340,4 +343,49 @@ def intraday_momentum(
         short_vol,
         long_vol,
         previous_close_px,
+    )
+
+
+@symbol_publisher(
+    "signals/dynamic_mean_reversion",
+    symbol_prefix="{provider}.{universe}.",
+)
+@symbol_provider(
+    z_score="signals/intraday_momentum.z_score",
+    symbol_prefix="{provider}.{universe}.",
+)
+def dynamic_mean_reversion(
+    z_score: pd.DataFrame,
+    n_lags: int = 30,
+    **kwargs,
+) -> tuple[pd.DataFrame]:
+    mean_reverting = y = (
+        (
+            z_score.resample(pd.offsets.BDay(1)).last().abs()
+            > z_score.resample(pd.offsets.BDay(1)).first().abs()
+        )
+        .reindex(z_score.index, method="ffill")
+        .astype(int)
+    )
+
+    X = pd.concat(
+        (z_score.shift(i).squeeze().rename(i) for i in range(1, n_lags)),
+        axis=1,
+    ).dropna()
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        train_size=0.5,
+        shuffle=False,
+    )
+
+    model = MultiOutputClassifier(MLPClassifier())
+
+    model.fit(X_train, y_train)
+
+    return pd.DataFrame(
+        model.predict(X_test),
+        index=z_score.index,
+        columns=z_score.columns,
     )

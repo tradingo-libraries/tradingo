@@ -201,7 +201,7 @@ def collect_sample_tasks(
 
         provider = config["provider"]
 
-        instrument_task = Task(
+        tasks[f"{universe}.sample"] = instrument_task = Task(
             "tradingo.sampling.download_instruments",
             [],
             {
@@ -218,19 +218,46 @@ def collect_sample_tasks(
             tasks[f"{universe}.instruments"] = instrument_task
         instrument_tasks[f"{universe}.instruments"] = instrument_task
 
-        tasks[f"{universe}.sample"] = Task(
-            config.get("function", "tradingo.sampling.sample_equity"),
-            [],
-            {
-                "start_date": sample_start_date,
-                "end_date": end_date,
-                "provider": provider,
-                "interval": config.get("interval", "1d"),
-                "universe": universe,
-                "periods": config.get("periods"),
-            },
-            [f"{universe}.instruments"] if include_instruments else [],
-        )
+        if provider == "ig-trading":
+
+            tasks[f"{universe}.sample"] = create_universe = Task(
+                "tradingo.sampling.create_universe",
+                [f"{instrument}.sample" for instrument in config["epics"]],
+                {
+                    "start_date": sample_start_date,
+                    "end_date": end_date,
+                },
+                [f"{universe}.instruments"] if include_instruments else [],
+            )
+
+            for instrument in config["epics"]:
+                t = tasks[f"{instrument}.sample"] = Task(
+                    config.get("function", "tradingo.sampling.sample_instrument"),
+                    [],
+                    {
+                        "start_date": sample_start_date,
+                        "end_date": end_date,
+                        "interval": config.get("interval", "1d"),
+                        "epic": instrument,
+                    },
+                    [],
+                )
+
+        else:
+
+            tasks[f"{universe}.sample"] = Task(
+                config.get("function", "tradingo.sampling.sample_equity"),
+                [],
+                {
+                    "start_date": sample_start_date,
+                    "end_date": end_date,
+                    "provider": provider,
+                    "interval": config.get("interval", "1d"),
+                    "universe": universe,
+                    "periods": config.get("periods"),
+                },
+                [f"{universe}.instruments"] if include_instruments else [],
+            )
         tasks[f"{universe}.vol"] = Task(
             "tradingo.signals.vol",
             [],
