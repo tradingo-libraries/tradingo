@@ -36,8 +36,8 @@ def lib_provider(**libs):
     def decorator(func):
 
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            arctic = adb.Arctic(ARCTIC_URL)
+        def wrapper(*args, arctic=None, **kwargs):
+            arctic = arctic or adb.Arctic(ARCTIC_URL)
             libs_ = {
                 k: arctic.get_library(v, create_if_missing=True)
                 for k, v in libs.items()
