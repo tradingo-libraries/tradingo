@@ -195,6 +195,7 @@ def sample_instrument(
                 ),
                 index=pd.DatetimeIndex([], name="DateTime", tz="utc"),
             )
+            # raise SkipException after return
         else:
             raise ex
 
@@ -204,13 +205,13 @@ def sample_instrument(
     )
 
 
-@lib_provider(pricelib="prices_igtrading")
 @symbol_provider(instruments="instruments/{universe}", no_date=True)
 @symbol_publisher(
     template="prices/{0}.{1}",
     symbol_prefix="{provider}.{universe}.",
     library_options=LibraryOptions(dynamic_schema=True),
 )
+@lib_provider(pricelib="prices_igtrading")
 def create_universe(
     pricelib: arcticdb.library.Library,
     instruments: pd.DataFrame,

@@ -139,8 +139,10 @@ class _Read:
         self._library.update(self._path, *args, **kwargs)
 
     def list(self, *args, **kwargs):
-        regex = re.escape(".".join((self._path_so_far)) + ".")
-        kwargs["regex"] = regex + kwargs.setdefault("regex", "")
+
+        if self._path_so_far:
+            regex = re.escape(".".join((self._path_so_far)) + ".")
+            kwargs["regex"] = regex + kwargs.setdefault("regex", "")
         return list(
             dict.fromkeys(
                 [
