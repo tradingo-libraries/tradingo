@@ -4,7 +4,7 @@ import pytest
 from tradingo.cli import build_graph
 
 
-PROVIDER = "test-provider"
+PROVIDER = "ig-trading"
 UNIVERSE = "test-universe"
 PORTFOLIO = "test-portfolio"
 NAME = "test-name"
@@ -17,6 +17,7 @@ def test_build_graph():
         "universe": {
             UNIVERSE: {
                 "provider": PROVIDER,
+                "epics": ["A", "B"],
                 "index_col": None,
                 "volatility": {
                     "speeds": [32, 64],
@@ -55,10 +56,16 @@ def test_build_graph():
         tasks[f"{UNIVERSE}.signal1.capped"],
     ]
 
+    assert "A.sample" in tasks
+    assert "B.sample" in tasks
+    assert f"{UNIVERSE}.sample" in tasks
+
     assert tasks[f"{PORTFOLIO}.backtest"].dependencies == [tasks[PORTFOLIO]]
 
     assert tasks[f"{UNIVERSE}.sample"].dependencies == [
-        tasks[f"{UNIVERSE}.instruments"]
+        tasks["A.sample"],
+        tasks["B.sample"],
+        tasks[f"{UNIVERSE}.instruments"],
     ]
     assert tasks[f"{UNIVERSE}.signal1"].dependencies == [
         tasks[f"{UNIVERSE}.sample"],

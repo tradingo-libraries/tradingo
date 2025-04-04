@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import os
 import logging
 from enum import Enum
@@ -7,39 +8,83 @@ import functools
 import argparse
 from json.decoder import JSONDecodeError
 import pathlib
-import json
 from typing import Callable, Iterable
-from arcticdb import Arctic
-
 import pandas as pd
 
-from tradingo.symbols import ARCTIC_URL
+from .api import Tradingo
+
 
 SIGNAL_KEY = "{0}.{1}".format
 
 DEFAULT_STAGE = "raw.shares"
 
 
+def print_graph(task_dict):
+    for task, dependencies in task_dict.items():
+        print(f"{task}:")
+        if dependencies:
+            for dep in dependencies:
+                print(f"  - {dep}")
+        else:
+            print("  No dependencies")
+        print()
+
+
+def print_list(li):
+
+    for item in li:
+        print(item)
+
+
 def resolve_config(
     config: str | pathlib.Path,
 ):
-    try:
-        return json.loads(config)
-    except (JSONDecodeError, TypeError) as _:
-        return json.loads(pathlib.Path(config).read_text())
+    if isinstance(config, str):
+        try:
+            return json.loads(config)
+        except (JSONDecodeError, TypeError) as _:
+            pass
+    return json.loads(pathlib.Path(config).read_text())
 
 
 def cli_app():
-    app = argparse.ArgumentParser("tradingo")
+    app = argparse.ArgumentParser("tradingo-tasks")
+    app.add_argument(
+        "--auth",
+        type=resolve_config,
+    )
+    app.add_argument(
+        "--arctic-uri",
+        default="lmdb:///home/rory/dev/tradingo-plat/data/prod/tradingo.db",
+    )
+    app.add_argument(
+        "--config",
+        type=resolve_config,
+        default=resolve_config(
+            pathlib.Path("/home/rory/dev/tradingo-plat/config/trading/ig-trading.json/")
+        ),
+    )
 
-    app.add_argument("--config", type=resolve_config)
-    app.add_argument("--auth", type=resolve_config)
-    app.add_argument("--task", required=True)
-    app.add_argument("--with-deps", action="store_true")
-    app.add_argument("--start-date", type=pd.Timestamp)
-    app.add_argument("--end-date", type=pd.Timestamp)
-    app.add_argument("--force-rerun", action="store_true")
-    app.add_argument("--arctic-uri", default=ARCTIC_URL)
+    entity = app.add_subparsers(dest="entity")
+    universe = entity.add_parser("universe")
+    universe_subparsers = universe.add_subparsers(dest="universe_action")
+    uni_list = universe_subparsers.add_parser("list")
+    uni_show = universe_subparsers.add_parser("show")
+
+    uni_show.add_argument("name")
+
+    task = entity.add_parser("task")
+
+    task_subparsers = task.add_subparsers(dest="list_action")
+    run_tasks = task_subparsers.add_parser("run")
+    run_tasks.add_argument("task")
+    run_tasks.add_argument("--with-deps", action="store_true")
+    run_tasks.add_argument("--start-date", type=pd.Timestamp, required=True)
+    run_tasks.add_argument("--end-date", type=pd.Timestamp, required=True)
+    run_tasks.add_argument("--force-rerun", action="store_true", default=True)
+    run_tasks.add_argument("--dry-run", action="store_true")
+
+    list_tasks = task_subparsers.add_parser("list")
     return app
 
 
@@ -200,7 +245,7 @@ def collect_sample_tasks(
 
         provider = config["provider"]
 
-        instrument_task = Task(
+        tasks[f"{universe}.sample"] = instrument_task = Task(
             "tradingo.sampling.download_instruments",
             [],
             {
@@ -217,19 +262,52 @@ def collect_sample_tasks(
             tasks[f"{universe}.instruments"] = instrument_task
         instrument_tasks[f"{universe}.instruments"] = instrument_task
 
-        tasks[f"{universe}.sample"] = Task(
-            config.get("function", "tradingo.sampling.sample_equity"),
-            [],
-            {
-                "start_date": sample_start_date,
-                "end_date": end_date,
-                "provider": provider,
-                "interval": config.get("interval", "1d"),
-                "universe": universe,
-                "periods": config.get("periods"),
-            },
-            [f"{universe}.instruments"] if include_instruments else [],
-        )
+        if provider == "ig-trading":
+
+            deps = [f"{instrument}.sample" for instrument in config["epics"]]
+
+            if include_instruments:
+                deps.append(f"{universe}.instruments")
+
+            tasks[f"{universe}.sample"] = create_universe = Task(
+                "tradingo.sampling.create_universe",
+                [],
+                {
+                    "start_date": sample_start_date,
+                    "end_date": end_date,
+                    "instruments": f"instruments/{universe}",
+                },
+                deps,
+            )
+
+            for instrument in config["epics"]:
+                t = tasks[f"{instrument}.sample"] = Task(
+                    config.get("function", "tradingo.sampling.sample_instrument"),
+                    [],
+                    {
+                        "start_date": sample_start_date,
+                        "end_date": end_date,
+                        "interval": config.get("interval", "1d"),
+                        "epic": instrument,
+                    },
+                    [],
+                )
+
+        else:
+
+            tasks[f"{universe}.sample"] = Task(
+                config.get("function", "tradingo.sampling.sample_equity"),
+                [],
+                {
+                    "start_date": sample_start_date,
+                    "end_date": end_date,
+                    "provider": provider,
+                    "interval": config.get("interval", "1d"),
+                    "universe": universe,
+                    "periods": config.get("periods"),
+                },
+                [f"{universe}.instruments"] if include_instruments else [],
+            )
         tasks[f"{universe}.vol"] = Task(
             "tradingo.signals.vol",
             [],
@@ -371,35 +449,39 @@ def build_graph(
             dependencies=[portfolio_name],
         )
 
-        downstream = global_tasks[f"{portfolio_name}.downstream"] = Task(
-            "tradingo.engine.adjust_position_sizes",
-            task_args=[],
-            task_kwargs={
-                "name": portfolio_name,
-                "provider": provider,
-                "universe": universe,
-                "stage": backtest_kwargs["stage"],
-            },
-            dependencies=[portfolio_name],
-        )
+        if "downstream" in portfolio_config:
 
-        downstream_live = eod_tasks[f"{portfolio_name}.downstream.live"] = Task(
-            "tradingo.live.get_activity_history",
-            task_args=[],
-            task_kwargs={
-                "name": portfolio_name,
-                "provider": provider,
-                "universe": universe,
-                "from_date": sample_start_date,
-                "to_date": end_date,
-            },
-            dependencies=[] if not include_live else [f"{portfolio_name}.downstream"],
-        )
+            downstream = global_tasks[f"{portfolio_name}.downstream"] = Task(
+                "tradingo.engine.adjust_position_sizes",
+                task_args=[],
+                task_kwargs={
+                    "name": portfolio_name,
+                    "provider": provider,
+                    "universe": universe,
+                    "stage": backtest_kwargs["stage"],
+                },
+                dependencies=[portfolio_name],
+            )
+
+            downstream_live = eod_tasks[f"{portfolio_name}.downstream.live"] = Task(
+                "tradingo.live.get_activity_history",
+                task_args=[],
+                task_kwargs={
+                    "name": portfolio_name,
+                    "provider": provider,
+                    "universe": universe,
+                    "from_date": sample_start_date,
+                    "to_date": end_date,
+                },
+                dependencies=(
+                    [] if not include_live else [f"{portfolio_name}.downstream"]
+                ),
+            )
+            downstream.resolve_dependencies(global_tasks)
 
         if include_live:
             global_tasks[f"{portfolio_name}.downstream.live"] = downstream_live
 
-        downstream.resolve_dependencies(global_tasks)
         backtest.resolve_dependencies(global_tasks)
         trades.resolve_dependencies(global_tasks)
 
@@ -438,28 +520,76 @@ def update_dag(graph: dict[str, Task]):
             graph[k].state = state if state == TaskState.SUCCESS else TaskState.PENDING
 
 
+def handle_tasks(args, arctic):
+
+    if args.list_action == "list":
+        graph, _ = build_graph(
+            args.config, pd.Timestamp.now(), pd.Timestamp.now(), include_live=True
+        )
+
+        print_graph({k: v.dependency_names for k, v in graph.items()})
+
+        return
+
+    elif args.list_action == "run":
+        graph, _ = build_graph(
+            args.config, args.start_date, args.end_date, include_live=True
+        )
+
+        update_dag(graph)
+
+        task = graph[args.task]
+
+        try:
+            out = task.run(
+                run_dependencies=args.with_deps,
+                force_rerun=args.force_rerun,
+                arctic=arctic,
+                dry_run=args.dry_run,
+            )
+            if args.dry_run:
+                print(out)
+        finally:
+            serialise_dag(graph)
+
+    else:
+
+        raise ValueError(args.list_action)
+
+
+def handle_universes(args, api: Tradingo):
+
+    if args.universe_action == "list":
+
+        print_list(api.instruments.list())
+
+    elif args.universe_action == "show":
+
+        print(api.instruments[args.name]())
+
+    else:
+
+        ValueError(args.universe_action)
+
+
 def main():
 
     args = cli_app().parse_args()
-
     if args.auth:
         os.environ.update({k: str(v) for k, v in args.auth.items()})
 
-    graph, _ = build_graph(
-        args.config, args.start_date, args.end_date, include_live=True
-    )
-    arctic = Arctic(args.arctic_uri)
+    arctic = Tradingo(args.arctic_uri)
 
-    update_dag(graph)
+    if args.entity == "task":
 
-    task = graph[args.task]
+        handle_tasks(args, arctic)
 
-    try:
-        task.run(
-            run_dependencies=args.with_deps, force_rerun=args.force_rerun, arctic=arctic
-        )
-    finally:
-        serialise_dag(graph)
+    elif args.entity == "universe":
+
+        handle_universes(args, api=arctic)
+
+    else:
+        raise ValueError(args.entity)
 
 
 if __name__ == "__main__":

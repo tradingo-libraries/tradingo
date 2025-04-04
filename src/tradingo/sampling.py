@@ -1,6 +1,7 @@
+import arcticdb
 import dateutil.tz
 import logging
-from tradingo.symbols import symbol_provider, symbol_publisher
+from tradingo.symbols import lib_provider, symbol_provider, symbol_publisher
 from typing import Literal, Optional
 
 from trading_ig.rest import IGService, ApiExceededException
@@ -135,28 +136,28 @@ def download_instruments(
     raise ValueError(file)
 
 
-@symbol_provider(instruments="instruments/{universe}", no_date=True)
 @symbol_publisher(
-    template="prices/{0}.{1}",
-    symbol_prefix="{provider}.{universe}.",
-    library_options=LibraryOptions(dynamic_schema=True),
+    "prices_igtrading/{epic}.bid",
+    "prices_igtrading/{epic}.ask",
+    library_options=arcticdb.LibraryOptions(
+        dynamic_schema=True,
+        dedup=True,
+    ),
 )
-def sample_ig_instruments(
-    instruments: pd.DataFrame,
-    end_date: pd.Timestamp,
+def sample_instrument(
+    epic: str,
     start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
     interval: str,
     wait: int = 0,
     service: Optional[IGService] = None,
     **kwargs,
 ):
-
     service = service or get_ig_service()
-
-    def get_data(symbol):
-        try:
-            return service.fetch_historical_prices_by_epic(
-                symbol,
+    try:
+        result = (
+            service.fetch_historical_prices_by_epic(
+                epic,
                 end_date=pd.Timestamp(end_date)
                 .tz_convert(dateutil.tz.tzlocal())
                 .tz_localize(None)
@@ -168,31 +169,72 @@ def sample_ig_instruments(
                 resolution=interval,
                 wait=wait,
             )["prices"]
-        except Exception as ex:
-            if ex.args and ex.args[0] == "Historical price data not found":
-                logger.warning("Historical price data not found %s", symbol)
-                return pd.DataFrame(
-                    np.nan,
-                    columns=pd.MultiIndex.from_tuples(
-                        (
-                            ("Open", "bid"),
-                            ("Open", "ask"),
-                            ("High", "bid"),
-                            ("High", "ask"),
-                            ("Low", "bid"),
-                            ("Low", "ask"),
-                        ),
+            .tz_localize(dateutil.tz.tzlocal())
+            .tz_convert("utc")
+        )
+
+    except Exception as ex:
+        if ex.args and (
+            ex.args[0] == "Historical price data not found"
+            or ex.args[0] == "error.price-history.io-error"
+        ):
+            logger.warning("Historical price data not found %s", epic)
+            result = pd.DataFrame(
+                np.nan,
+                columns=pd.MultiIndex.from_tuples(
+                    (
+                        ("bid", "Open"),
+                        ("bid", "High"),
+                        ("bid", "Low"),
+                        ("bid", "Close"),
+                        ("ask", "Open"),
+                        ("ask", "High"),
+                        ("ask", "Low"),
+                        ("ask", "Close"),
                     ),
-                    index=pd.DatetimeIndex([], name="DateTime"),
-                )
+                ),
+                index=pd.DatetimeIndex([], name="DateTime", tz="utc"),
+            )
+            # raise SkipException after return
+        else:
             raise ex
+
+    return (
+        result["bid"],
+        result["ask"],
+    )
+
+
+@symbol_provider(instruments="instruments/{universe}", no_date=True)
+@symbol_publisher(
+    template="prices/{0}.{1}",
+    symbol_prefix="{provider}.{universe}.",
+    library_options=LibraryOptions(dynamic_schema=True),
+)
+@lib_provider(pricelib="prices_igtrading")
+def create_universe(
+    pricelib: arcticdb.library.Library,
+    instruments: pd.DataFrame,
+    end_date: pd.Timestamp,
+    start_date: pd.Timestamp,
+    **kwargs,
+):
+
+    def get_data(symbol: str):
+        return pd.concat(
+            (
+                pricelib.read(f"{symbol}.bid", date_range=(start_date, end_date)).data,
+                pricelib.read(f"{symbol}.ask", date_range=(start_date, end_date)).data,
+            ),
+            axis=1,
+            keys=("bid", "ask"),
+        )
 
     result = pd.concat(
         ((get_data(symbol) for symbol in instruments.index.to_list())),
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
-    result.index = result.index.tz_localize(dateutil.tz.tzlocal()).tz_convert("utc")
     return (
         (result["bid"]["Open"], ("bid", "open")),
         (result["bid"]["High"], ("bid", "high")),
@@ -206,11 +248,6 @@ def sample_ig_instruments(
         (((result["ask"]["High"] + result["bid"]["High"]) / 2), ("mid", "high")),
         (((result["ask"]["Low"] + result["bid"]["Low"]) / 2), ("mid", "low")),
         (((result["ask"]["Close"] + result["bid"]["Close"]) / 2), ("mid", "close")),
-        # (result["last"]["Open"], ("last", "open")),
-        # (result["last"]["High"], ("last", "high")),
-        # (result["last"]["Low"], ("last", "low")),
-        # (result["last"]["Close"], ("last", "close")),
-        # (result["last"]["Volume"], ("last", "volume")),
     )
 
 
@@ -223,7 +260,7 @@ def sample_ig_instruments(
     "prices/adj_close",
     "prices/volume",
     "prices/dividend",
-    "prices/split_ratio",
+    # "prices/split_ratio",
     astype=float,
     symbol_prefix="{provider}.{universe}.",
 )
@@ -258,7 +295,7 @@ def sample_equity(
         100 * (1 + close.pct_change()).cumprod(),
         data.pivot(columns=["symbol"], values="volume"),
         data.pivot(columns=["symbol"], values="dividend"),
-        data.pivot(columns=["symbol"], values="split_ratio"),
+        # data.pivot(columns=["symbol"], values="split_ratio"),
     )
 
 

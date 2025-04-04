@@ -21,6 +21,10 @@ ARCTIC_URL = os.environ.get(
 )
 
 
+class SymbolParseError(Exception):
+    """raised when cant parse symbol"""
+
+
 class Symbol(NamedTuple):
 
     library: str
@@ -37,20 +41,30 @@ class Symbol(NamedTuple):
 
         string_kwargs = {k: str(v) for k, v in kwargs.items()}
 
-        parsed_symbol = urlparse(base.format(**string_kwargs))
-        lib, sym = parsed_symbol.path.split("/", maxsplit=1)
-        kwargs_ = dict(parse_qsl(parsed_symbol.query))
+        try:
+            symbol = base.format(**string_kwargs)
+            parsed_symbol = urlparse(symbol)
+            try:
+                lib, sym = parsed_symbol.path.split("/")
+            except ValueError as ex:
+                raise SymbolParseError(f"symbol {symbol} is invalid.") from ex
+            kwargs = dict(parse_qsl(parsed_symbol.query))
+            symbol_prefix = symbol_prefix.format(**string_kwargs)
+            symbol_postfix = symbol_postfix.format(**string_kwargs)
+        except KeyError as ex:
+            raise SymbolParseError(
+                f"Missing parameter: {ex.args[0]},"
+                f" {symbol_prefix=}, {symbol_postfix=}, {symbol=},"
+            )
 
-        symbol_prefix = symbol_prefix.format(**string_kwargs)
-        symbol_postfix = symbol_postfix.format(**string_kwargs)
-        for key, value in kwargs_.items():
+        for key, value in kwargs.items():
             if key == "as_of":
                 try:
-                    kwargs_[key] = int(value)
+                    kwargs[key] = int(value)
                 except TypeError:
                     continue
 
-        return cls(lib, symbol_prefix + sym + symbol_postfix, kwargs_)
+        return cls(lib, symbol_prefix + sym + symbol_postfix, kwargs)
 
 
 def lib_provider(**libs):
@@ -58,8 +72,8 @@ def lib_provider(**libs):
     def decorator(func):
 
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            arctic = adb.Arctic(ARCTIC_URL)
+        def wrapper(*args, arctic=None, **kwargs):
+            arctic = arctic or adb.Arctic(ARCTIC_URL)
             libs_ = {
                 k: arctic.get_library(v, create_if_missing=True)
                 for k, v in libs.items()
@@ -162,7 +176,7 @@ def symbol_publisher(
         @functools.wraps(func)
         def wrapper(
             *args,
-            dry_run=False,
+            dry_run=True,
             arctic: Optional[adb.Arctic] = None,
             snapshot: Optional[str] = None,
             clean: bool = False,
@@ -185,6 +199,9 @@ def symbol_publisher(
             libraries = defaultdict(dict)
 
             for data, symbol in zip(out, symbols_):
+
+                if data.empty:
+                    continue
 
                 if astype:
                     data = data.astype(

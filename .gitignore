@@ -252,3 +252,5 @@ airflow-build-dockerfile*
 /prod/
 cython_debug/
 src/tradingo/_backtest.c
+
+Untitled*.ipynb
