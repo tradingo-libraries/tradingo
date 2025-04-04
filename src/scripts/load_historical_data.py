@@ -168,11 +168,15 @@ if __name__ == "__main__":
     import sys
 
     logging.getLogger(__name__).setLevel(logging.INFO)
+    
+    env = os.environ.get("ENVIRONMENT", "dev")
+    dir = Path(f"{Path.home()}/dev/tradingo-plat/data/{env}")
+    dir.mkdir(parents=True, exist_ok=True)
 
     sys.argv.extend(
         [
             "--arctic-uri",
-            "lmdb:///home/rory/dev/tradingo-plat/data/prod/tradingo.db",
+            f"lmdb://{dir}/tradingo.db",
             "--path",
             str(Path.home() / "dev" / "market-data" / "GAS"),
             str(Path.home() / "dev" / "market-data" / "USA500"),
@@ -181,12 +185,9 @@ if __name__ == "__main__":
             str(Path.home() / "dev" / "market-data" / "COCOA"),
             # "--dry-run",
             "--clean",
-            "--provider",
-            "ig-trading",
-            "--universe",
-            "im-multi-asset",
-            "--end-date",
-            "2018-10-21 00:00:00+00:00",
+            "--provider", "ig-trading",
+            "--universe", "im-multi-asset",
+            "--end-date", "2018-10-21 00:00:00+00:00",
         ]
     )
 

@@ -1,4 +1,6 @@
 import pandas as pd
+import pytest
+
 from tradingo.cli import build_graph
 
 
@@ -22,7 +24,6 @@ def test_build_graph():
                 },
             }
         },
-        "volatility": {"speeds": []},
         "signal_configs": {
             "signal1": {"function": "module.function", "args": [], "kwargs": {}},
             "signal1.capped": {
@@ -70,3 +71,7 @@ def test_build_graph():
         tasks[f"{UNIVERSE}.sample"],
         tasks[f"{UNIVERSE}.vol"],
     ]
+
+
+if __name__ == "__main__":
+    pytest.main()

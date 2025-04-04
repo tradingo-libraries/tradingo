@@ -1,17 +1,18 @@
-import os
-from collections import defaultdict
-from typing import Optional
+from __future__ import annotations
+
 import functools
 import logging
-from typing import NamedTuple
-from urllib.parse import urlparse, parse_qsl
-
-import pandas as pd
+import os
+from collections import defaultdict
+from typing import NamedTuple, Optional
 
 import arcticdb as adb
+import pandas as pd
+from urllib.parse import urlparse, parse_qsl
 
 
 logger = logging.getLogger(__name__)
+
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "test")
 ARCTIC_URL = os.environ.get(
@@ -30,6 +31,41 @@ class Symbol(NamedTuple):
     symbol: str
     kwargs: dict
 
+    @classmethod
+    def parse(
+        cls, base: str, kwargs: dict, symbol_prefix: str = "", symbol_postfix: str = ""
+    ) -> Symbol:
+        """
+        Parse a symbol string and return a Symbol object.
+        """
+
+        string_kwargs = {k: str(v) for k, v in kwargs.items()}
+
+        try:
+            symbol = base.format(**string_kwargs)
+            parsed_symbol = urlparse(symbol)
+            try:
+                lib, sym = parsed_symbol.path.split("/")
+            except ValueError as ex:
+                raise SymbolParseError(f"symbol {symbol} is invalid.") from ex
+            kwargs = dict(parse_qsl(parsed_symbol.query))
+            symbol_prefix = symbol_prefix.format(**string_kwargs)
+            symbol_postfix = symbol_postfix.format(**string_kwargs)
+        except KeyError as ex:
+            raise SymbolParseError(
+                f"Missing parameter: {ex.args[0]},"
+                f" {symbol_prefix=}, {symbol_postfix=}, {symbol=},"
+            )
+
+        for key, value in kwargs.items():
+            if key == "as_of":
+                try:
+                    kwargs[key] = int(value)
+                except TypeError:
+                    continue
+
+        return cls(lib, symbol_prefix + sym + symbol_postfix, kwargs)
+
 
 def lib_provider(**libs):
 
@@ -47,32 +83,6 @@ def lib_provider(**libs):
         return wrapper
 
     return decorator
-
-
-def parse_symbol(symbol, kwargs, symbol_prefix="", symbol_postfix=""):
-    string_kwargs = {k: str(v) for k, v in kwargs.items()}
-    try:
-        symbol = symbol.format(**string_kwargs)
-        parsed_symbol = urlparse(symbol)
-        try:
-            lib, sym = parsed_symbol.path.split("/")
-        except ValueError as ex:
-            raise SymbolParseError(f"symbol {symbol} is invalid.") from ex
-        kwargs = dict(parse_qsl(parsed_symbol.query))
-        symbol_prefix = symbol_prefix.format(**string_kwargs)
-        symbol_postfix = symbol_postfix.format(**string_kwargs)
-    except KeyError as ex:
-        raise SymbolParseError(
-            f"Missing parameter: {ex.args[0]},"
-            f" {symbol_prefix=}, {symbol_postfix=}, {symbol=},"
-        )
-    for key, value in kwargs.items():
-        if key == "as_of":
-            try:
-                kwargs[key] = int(value)
-            except TypeError:
-                continue
-    return Symbol(lib, symbol_prefix + sym + symbol_postfix, kwargs)
 
 
 def symbol_provider(
@@ -107,7 +117,7 @@ def symbol_provider(
                     requested_symbols.pop(symbol)
 
             def get_symbol_data(v):
-                symbol = parse_symbol(v, kwargs, symbol_prefix=symbol_prefix)
+                symbol = Symbol.parse(v, kwargs, symbol_prefix=symbol_prefix)
                 return (
                     arctic.get_library(
                         symbol.library,
@@ -201,7 +211,7 @@ def symbol_publisher(
                     )
 
                 if not dry_run:
-                    parsed_symbol = parse_symbol(
+                    parsed_symbol = Symbol.parse(
                         symbol,
                         kwargs,
                         symbol_prefix=symbol_prefix,
