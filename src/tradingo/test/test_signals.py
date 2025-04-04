@@ -103,3 +103,7 @@ def test_intraday_momentum(
     assert subset[-(close_offset_periods + 1) :]["signals/intraday_momentum"][
         "ABCD"
     ].to_list() == [0 for _ in range(0, 1 + close_offset_periods)]
+
+
+if __name__=="__main__":
+    pytest.main([__file__])
