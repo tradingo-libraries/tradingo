@@ -38,7 +38,7 @@ class Symbol(NamedTuple):
         string_kwargs = {k: str(v) for k, v in kwargs.items()}
 
         parsed_symbol = urlparse(base.format(**string_kwargs))
-        lib, sym = parsed_symbol.path.split("/")
+        lib, sym = parsed_symbol.path.split("/", maxsplit=1)
         kwargs_ = dict(parse_qsl(parsed_symbol.query))
 
         symbol_prefix = symbol_prefix.format(**string_kwargs)
