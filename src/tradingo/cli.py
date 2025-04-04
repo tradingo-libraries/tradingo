@@ -273,6 +273,17 @@ def build_graph(
     include_instruments: bool = True,
     include_live: bool = False,
 ) -> tuple[dict[str, Task], dict[str, Task]]:
+    """
+    make a tasks graph with dependencies from a config, in this order:
+      * instruments
+      * samples
+      * signals
+      * portfolios
+      * backtests
+      * trades
+      * downstream
+      * downstream_live
+    """
 
     sample_start_date = sample_start_date or start_date
 
