@@ -6,16 +6,13 @@ from arcticdb.arctic import Library
 import pandas as pd
 import numpy as np
 
-import arcticdb as adb
 from tradingo import symbols
 
 
 logger = logging.getLogger(__name__)
 
 
-@symbols.lib_provider(
-    signals="signals",
-)
+@symbols.lib_provider(signals="signals")
 def portfolio_construction(
     signals: Library,
     close: pd.DataFrame,
@@ -95,7 +92,6 @@ def portfolio_optimization(
     rebalance_rule: str,
     min_periods: int,
     aum: float,
-    **kwargs,
 ):
 
     import riskfolio as rf
@@ -171,10 +167,8 @@ def instrument_ivol(close, provider, **kwargs):
 
 def position_from_trades(
     close: pd.DataFrame,
-    instruments: pd.DataFrame,
     aum: float,
     trade_file: str,
-    **kwargs,
 ):
 
     trades = (

@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 def vol(
     speeds,
     close: pd.DataFrame,
-    **kwargs,
 ):
     returns = np.log(close / close.shift())
     return tuple(
@@ -49,11 +48,11 @@ def ewmac_signal(
     )
 
 
-def scaled(signal, scale: float, **kwargs):
+def scaled(signal, scale: float):
     return ((signal / signal.abs().max()) * scale,)
 
 
-def capped(signal: pd.Series, cap: float, **kwargs):
+def capped(signal: pd.Series, cap: float):
     signal[signal.abs() >= cap] = np.sign(signal) * cap
     return (signal,)
 
@@ -84,7 +83,7 @@ def _linear_buffer(signal: np.ndarray, thresholds: np.ndarray):
     return res
 
 
-def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
+def buffered(signal: pd.Series | pd.DataFrame, buffer_width):
 
     signal = signal.ffill().fillna(0.0)
 
@@ -284,7 +283,6 @@ def intraday_momentum(
 def dynamic_mean_reversion(
     z_score: pd.DataFrame,
     n_lags: int = 30,
-    **kwargs,
 ) -> tuple[pd.DataFrame]:
     mean_reverting = y = (
         (
