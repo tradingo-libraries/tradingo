@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import functools
 import logging
 import os
@@ -9,16 +10,10 @@ from typing import NamedTuple, Optional
 import arcticdb as adb
 import pandas as pd
 from urllib.parse import urlparse, parse_qsl
+from tradingo.env_provider import EnvProvider
 
 
 logger = logging.getLogger(__name__)
-
-
-ENVIRONMENT = os.environ.get("ENVIRONMENT", "test")
-ARCTIC_URL = os.environ.get(
-    "TRADINGO_ARCTIC_URL",
-    f"lmdb:///home/rory/dev/airflow/{ENVIRONMENT}/arctic.db",
-)
 
 
 class SymbolParseError(Exception):
@@ -72,13 +67,17 @@ def lib_provider(**libs):
     def decorator(func):
 
         @functools.wraps(func)
-        def wrapper(*args, arctic=None, **kwargs):
-            arctic = arctic or adb.Arctic(ARCTIC_URL)
+        def wrapper(*args, arctic, **kwargs):
             libs_ = {
                 k: arctic.get_library(v, create_if_missing=True)
                 for k, v in libs.items()
             }
-            return func(*args, **libs_, **kwargs)
+            return func(
+                *args,
+                arctic=arctic,
+                **libs_,
+                **kwargs,
+            )
 
         return wrapper
 
@@ -96,13 +95,13 @@ def symbol_provider(
         @functools.wraps(func)
         def wrapper(
             *args,
+            arctic: adb.Arctic,
             start_date=None,
             end_date=None,
-            arctic: Optional[adb.Arctic] = None,
             **kwargs,
         ):
 
-            arctic = arctic or adb.Arctic(ARCTIC_URL)
+            arctic = arctic
             orig_symbol_data = {}
             requested_symbols = symbols.copy()
 
@@ -176,14 +175,13 @@ def symbol_publisher(
         @functools.wraps(func)
         def wrapper(
             *args,
+            arctic: adb.Arctic,
             dry_run=True,
-            arctic: Optional[adb.Arctic] = None,
             snapshot: Optional[str] = None,
             clean: bool = False,
             **kwargs,
         ):
 
-            arctic = arctic or adb.Arctic(ARCTIC_URL)
             out = func(*args, arctic=arctic, **kwargs)
             logger.info("Publishing %s to %s", symbols or template, arctic)
 

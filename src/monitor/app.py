@@ -1,5 +1,5 @@
 import os
-import urllib.parse
+import time
 
 import dash
 import numpy as np
@@ -8,6 +8,7 @@ import plotly.express as px
 from dash import Dash, Input, Output, State, callback, dcc, html
 from flask import Flask
 from pandas.core.generic import weakref
+import datetime
 
 from tradingo.api import Tradingo
 
@@ -302,7 +303,15 @@ def update_graph(
         .total_pnl
     )
     one_day = (
-        returns.loc[end - pd.offsets.BDay(1) : end].diff().fillna(0).cumsum().total_pnl
+        returns[
+            (returns.index.time < datetime.time.fromisoformat("21:30"))
+            & (returns.index.time > datetime.time.fromisoformat("09:30"))
+        ]
+        .loc[end - pd.offsets.BDay(1) : end]
+        .diff()
+        .fillna(0)
+        .cumsum()
+        .total_pnl
     )
 
     return (

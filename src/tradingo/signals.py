@@ -14,20 +14,10 @@ import pandas as pd
 
 import pandas_market_calendars as pmc
 
-from tradingo.symbols import symbol_provider, symbol_publisher
-
 
 logger = logging.getLogger(__name__)
 
 
-@symbol_provider(
-    close="prices/adj_close",
-    symbol_prefix="{provider}.{universe}.",
-)
-@symbol_publisher(
-    template="signals/vol_{0}",
-    symbol_prefix="{provider}.{universe}.",
-)
 def vol(
     speeds,
     close: pd.DataFrame,
@@ -43,29 +33,11 @@ def vol(
     )
 
 
-@symbol_provider(close="prices/adj_close", symbol_prefix="{provider}.{universe}.")
-@symbol_publisher(
-    "signals/{signal_name}",
-    symbol_prefix="{provider}.{universe}.",
-)
 def ewmac_signal(
     close: pd.DataFrame,
     speed1: int,
     speed2: int,
-    provider: str,
-    config_name: str,
-    model_name="ewmac",
-    signal_name="ewmac_{speed1}_{speed2}",
-    **kwargs,
 ):
-
-    logger.info(
-        "Running %s model=%s signal=%s with %s",
-        config_name,
-        model_name,
-        signal_name,
-        provider,
-    )
 
     returns = np.log(close / close.shift())
 
@@ -77,26 +49,10 @@ def ewmac_signal(
     )
 
 
-@symbol_publisher(
-    "signals/{signal}.scaled",
-    symbol_prefix="{provider}.{universe}.{model_name}.",
-)
-@symbol_provider(
-    signal="signals/{signal}",
-    symbol_prefix="{provider}.{universe}.{model_name}.",
-)
 def scaled(signal, scale: float, **kwargs):
     return ((signal / signal.abs().max()) * scale,)
 
 
-@symbol_publisher(
-    "signals/{signal}.capped",
-    symbol_prefix="{provider}.{universe}.{model_name}.",
-)
-@symbol_provider(
-    signal="signals/{signal}",
-    symbol_prefix="{provider}.{universe}.{model_name}.",
-)
 def capped(signal: pd.Series, cap: float, **kwargs):
     signal[signal.abs() >= cap] = np.sign(signal) * cap
     return (signal,)
@@ -128,13 +84,6 @@ def _linear_buffer(signal: np.ndarray, thresholds: np.ndarray):
     return res
 
 
-@symbol_publisher(
-    "{library}/{signal}.buffered", symbol_prefix="{provider}.{universe}.{model_name}."
-)
-@symbol_provider(
-    signal="{library}/{signal}",
-    symbol_prefix="{provider}.{universe}.{model_name}.",
-)
 def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
 
     signal = signal.ffill().fillna(0.0)
@@ -146,19 +95,6 @@ def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
     return (pd.DataFrame(buffered, index=signal.index, columns=signal.columns),)
 
 
-@symbol_publisher(
-    "signals/intraday_momentum",
-    "signals/intraday_momentum.z_score",
-    "signals/intraday_momentum.short_vol",
-    "signals/intraday_momentum.long_vol",
-    "signals/intraday_momentum.previous_close_px",
-    symbol_prefix="{provider}.{universe}.",
-)
-@symbol_provider(
-    ask_close="prices/ask.close",
-    bid_close="prices/bid.close",
-    symbol_prefix="{provider}.{universe}.",
-)
 def intraday_momentum(
     ask_close,
     bid_close,
@@ -346,14 +282,6 @@ def intraday_momentum(
     )
 
 
-@symbol_publisher(
-    "signals/dynamic_mean_reversion",
-    symbol_prefix="{provider}.{universe}.",
-)
-@symbol_provider(
-    z_score="signals/intraday_momentum.z_score",
-    symbol_prefix="{provider}.{universe}.",
-)
 def dynamic_mean_reversion(
     z_score: pd.DataFrame,
     n_lags: int = 30,

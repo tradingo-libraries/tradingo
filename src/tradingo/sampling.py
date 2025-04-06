@@ -1,16 +1,13 @@
+import dataclasses
 import arcticdb
 import dateutil.tz
 import logging
-from tradingo.symbols import lib_provider, symbol_provider, symbol_publisher
+from tradingo.env_provider import EnvProvider
 from typing import Literal, Optional
 
 from trading_ig.rest import IGService, ApiExceededException
-from trading_ig.config import config
 
 from tenacity import Retrying, wait_exponential, retry_if_exception_type
-
-from arcticdb import LibraryOptions
-from yfinance import Ticker
 
 import pandas as pd
 import numpy as np
@@ -68,12 +65,17 @@ Provider = Literal[
 ]
 
 
+IGTradingConfig.from_file("config/variables.json").to_env()
+
+
 def get_ig_service(
     username: Optional[str] = None,
     password: Optional[str] = None,
     api_key: Optional[str] = None,
     acc_type: Optional[str] = None,
 ) -> IGService:
+
+    config = IGTradingConfig.from_env()
 
     retryer = Retrying(
         wait=wait_exponential(),
@@ -93,7 +95,6 @@ def get_ig_service(
     return service
 
 
-@symbol_publisher("instruments/{universe}", write_pickle=True)
 def download_instruments(
     index_col: str,
     *,
@@ -136,14 +137,6 @@ def download_instruments(
     raise ValueError(file)
 
 
-@symbol_publisher(
-    "prices_igtrading/{epic}.bid",
-    "prices_igtrading/{epic}.ask",
-    library_options=arcticdb.LibraryOptions(
-        dynamic_schema=True,
-        dedup=True,
-    ),
-)
 def sample_instrument(
     epic: str,
     start_date: pd.Timestamp,
@@ -205,13 +198,6 @@ def sample_instrument(
     )
 
 
-@symbol_provider(instruments="instruments/{universe}", no_date=True)
-@symbol_publisher(
-    template="prices/{0}.{1}",
-    symbol_prefix="{provider}.{universe}.",
-    library_options=LibraryOptions(dynamic_schema=True),
-)
-@lib_provider(pricelib="prices_igtrading")
 def create_universe(
     pricelib: arcticdb.library.Library,
     instruments: pd.DataFrame,
@@ -219,6 +205,9 @@ def create_universe(
     start_date: pd.Timestamp,
     **kwargs,
 ):
+
+    start_date = pd.Timestamp(start_date)
+    end_date = pd.Timestamp(end_date)
 
     def get_data(symbol: str):
         return pd.concat(
@@ -251,19 +240,6 @@ def create_universe(
     )
 
 
-@symbol_provider(instruments="instruments/{universe}", no_date=True)
-@symbol_publisher(
-    "prices/open",
-    "prices/high",
-    "prices/low",
-    "prices/close",
-    "prices/adj_close",
-    "prices/volume",
-    "prices/dividend",
-    # "prices/split_ratio",
-    astype=float,
-    symbol_prefix="{provider}.{universe}.",
-)
 def sample_equity(
     instruments: pd.DataFrame,
     start_date: str,
@@ -299,11 +275,6 @@ def sample_equity(
     )
 
 
-@symbol_publisher(
-    template="options/{0}.{1}",
-    symbol_prefix="{provider}.",
-    library_options=LibraryOptions(dynamic_schema=True, dedup=True),
-)
 def sample_options(
     universe: list[str], start_date: str, end_date: str, provider: Provider, **kwargs
 ):
@@ -332,11 +303,6 @@ def sample_options(
     return out
 
 
-@symbol_publisher(
-    template="futures/{0}.{1}",
-    symbol_prefix="{provider}.",
-    library_options=LibraryOptions(dynamic_schema=True, dedup=True),
-)
 def sample_futures(
     universe: list[str], start_date: str, end_date: str, provider: Provider, **kwargs
 ):

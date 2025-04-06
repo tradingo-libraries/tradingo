@@ -10,12 +10,9 @@ import re
 import os
 from pathlib import Path
 
-from arcticdb import Arctic, LibraryOptions
+from arcticdb import Arctic
 
 import pandas as pd
-
-from tradingo.signals import symbol_provider, symbol_publisher
-from tradingo import sampling
 
 
 logger = logging.getLogger(__name__)
@@ -86,11 +83,6 @@ def main():
     print("finished")
 
 
-@symbol_publisher(
-    template="prices/{0}.{1}",
-    symbol_prefix="{provider}.{universe}.",
-    library_options=LibraryOptions(dynamic_schema=True),
-)
 def read_backfill(
     paths: List[Path],
     end_date: Optional[pd.Timestamp] = None,
@@ -168,7 +160,7 @@ if __name__ == "__main__":
     import sys
 
     logging.getLogger(__name__).setLevel(logging.INFO)
-    
+
     env = os.environ.get("ENVIRONMENT", "dev")
     dir = Path(f"{Path.home()}/dev/tradingo-plat/data/{env}")
     dir.mkdir(parents=True, exist_ok=True)
@@ -185,9 +177,12 @@ if __name__ == "__main__":
             str(Path.home() / "dev" / "market-data" / "COCOA"),
             # "--dry-run",
             "--clean",
-            "--provider", "ig-trading",
-            "--universe", "im-multi-asset",
-            "--end-date", "2018-10-21 00:00:00+00:00",
+            "--provider",
+            "ig-trading",
+            "--universe",
+            "im-multi-asset",
+            "--end-date",
+            "2018-10-21 00:00:00+00:00",
         ]
     )
 

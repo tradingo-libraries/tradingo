@@ -6,9 +6,7 @@ import numpy as np
 import pandas as pd
 
 from trading_ig.rest import IGService
-from tradingo.api import Tradingo
 from tradingo.sampling import get_ig_service
-from tradingo.symbols import symbol_provider, symbol_publisher
 
 
 logger = logging.getLogger(__name__)
@@ -102,33 +100,11 @@ def get_currency(instrument: pd.Series):
     return "GBP"
 
 
-# TODO: #21 - symbol_publisher
-@symbol_provider(
-    instruments="instruments/{universe}",
-    no_date=True,
-)
-@symbol_provider(
-    target_positions="portfolio/{name}.{stage}",
-    symbol_prefix="{provider}.{universe}.",
-)
 def adjust_position_sizes(
     instruments: pd.DataFrame,
     target_positions: pd.DataFrame,
-    stage: str,
-    universe: str,
-    provider: str,
-    name: str,
     service: Optional[IGService] = None,
-    **kwargs,
 ):
-
-    logger.info(
-        "Adjusting name=%s universe=%s provider=%s stage=%s",
-        name,
-        universe,
-        provider,
-        stage,
-    )
 
     service = service or get_ig_service()
     current_positions = get_current_positions(service)

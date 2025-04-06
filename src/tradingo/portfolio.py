@@ -7,39 +7,19 @@ import numpy as np
 
 import arcticdb as adb
 
-from tradingo.symbols import lib_provider, symbol_provider, symbol_publisher
-
 
 logger = logging.getLogger(__name__)
 
 
-@lib_provider(model_signals="signals")
-@symbol_provider(
-    close="prices/close",
-    vol="signals/vol_128",
-    symbol_prefix="{provider}.{universe}.",
-)
-@symbol_provider(instruments="instruments/{universe}", no_date=True)
-@symbol_publisher(
-    template="{0}/{1}.{2}",
-    symbol_prefix="{provider}.{universe}.{name}.",
-)
 def portfolio_construction(
-    name: str,
-    model_signals: adb.library.Library,
     close: pd.DataFrame,
-    vol: pd.DataFrame,
     instruments: pd.DataFrame,
-    provider: str,
-    universe: str,
-    signal_weights: dict,
+    model_weights: dict[str, float],
     multiplier: float,
-    default_weight: float,
-    constraints: dict,
-    vol_scale: bool,
     aum: float,
+    default_instrument_weight: float = 1.0,
     instrument_weights: Optional[dict] = None,
-    **kwargs,
+    **model_signals: pd.DataFrame,
 ):
 
     instrument_weights = instrument_weights or {}
@@ -54,52 +34,29 @@ def portfolio_construction(
             continue
 
         weights = weights * instruments.apply(
-            lambda i: weights_config.get(i[key], default_weight),
+            lambda i: weights_config.get(i[key], default_instrument_weight),
             axis=1,
         )
         logger.info("Weights: %s", weights)
 
-    if signal_weights:
-
-        signal_value = (
-            pd.concat(
-                (
-                    model_signals.read(
-                        f"{provider}.{universe}.{signal}",
-                        date_range=(close.index[0], close.index[-1]),
-                    ).data
-                    * weights
-                    * signal_weight
-                    for signal, signal_weight in signal_weights.items()
-                ),
-                keys=signal_weights,
-                axis=1,
-            )
-            .transpose()
-            .groupby(level=[1])
-            .sum()
-            .transpose()
-            .ffill()
-            .fillna(0)
+    signal_value = (
+        pd.concat(
+            (
+                signal * weights * model_weights[model_name]
+                for model_name, signal in model_signals.items()
+            ),
+            keys=model_weights,
+            axis=1,
         )
-
-    else:
-        signal_value = weights * pd.DataFrame(
-            1,
-            index=close.index,
-            columns=close.columns,
-        )
-
-    if vol_scale:
-
-        weights = weights.div(10 * vol)
-
-    logger.info("signal_data: %s", signal_value)
+        .transpose()
+        .groupby(level=[1])
+        .sum()
+        .transpose()
+        .ffill()
+        .fillna(0)
+    )
 
     positions = signal_value.reindex_like(close).ffill()
-
-    if constraints["long_only"]:
-        positions[(positions < 0.0)] = 0.0
 
     pct_position = positions.div(positions.transpose().sum(), axis=0).fillna(0.0)
     for col in pct_position.columns:
@@ -110,26 +67,16 @@ def portfolio_construction(
     share_position = (pct_position * aum) / close
 
     return (
-        (pct_position, ("portfolio", "raw", "percent")),
-        (share_position, ("portfolio", "raw", "shares")),
-        (positions, ("portfolio", "raw", "position")),
-        (pct_position.round(decimals=2), ("portfolio", "rounded", "percent")),
-        (share_position.round(), ("portfolio", "rounded", "shares")),
-        (positions.round(), ("portfolio", "rounded", "position")),
-        (signal_value, ("signals", "raw", "signal")),
+        pct_position,
+        share_position,
+        positions,
+        pct_position.round(decimals=2),
+        share_position.round(),
+        positions.round(),
+        signal_value,
     )
 
 
-@symbol_provider(
-    close="prices/{provider}.{universe}.close",
-    factor_returns="prices/{factor_provider}.{factor_universe}.close",
-)
-@symbol_provider(instruments="instruments/{universe}", no_date=True)
-@symbol_publisher(
-    "portfolio/raw.percent",
-    "portfolio/raw.shares",
-    symbol_prefix="{provider}.{universe}.{name}.",
-)
 def portfolio_optimization(
     close: pd.DataFrame,
     factor_returns: pd.DataFrame,
@@ -194,8 +141,6 @@ def portfolio_optimization(
     return (pct_position, share_position)
 
 
-@symbol_provider(close="prices/adj_close", symbol_prefix="{provider}.{universe}.")
-@symbol_publisher("prices/ivol", symbol_prefix="{provider}.{universe}.")
 def instrument_ivol(close, provider, **kwargs):
     pct_returns = np.log(close / close.shift())
 
@@ -213,16 +158,6 @@ def instrument_ivol(close, provider, **kwargs):
     return (pd.concat(ivols, axis=1).rename_axis("Symbol"),)
 
 
-@symbol_provider(
-    close="prices/close",
-    symbol_prefix="{provider}.{universe}.",
-)
-@symbol_provider(instruments="instruments/{universe}", no_date=True)
-@symbol_publisher(
-    "portfolio/raw.percent",
-    "portfolio/raw.shares",
-    symbol_prefix="{provider}.{universe}.{name}.",
-)
 def position_from_trades(
     close: pd.DataFrame,
     instruments: pd.DataFrame,
@@ -267,16 +202,6 @@ def position_from_trades(
     )
 
 
-# FIXME: Not idempotent
-@symbol_provider(
-    positions="portfolio/{stage}?as_of=-1",
-    previous_positions="portfolio/{stage}?as_of=-2",
-    symbol_prefix="{provider}.{universe}.{name}.",
-)
-@symbol_publisher(
-    "trades/{stage}",
-    symbol_prefix="{provider}.{universe}.{name}.",
-)
 def calculate_trades(
     name: str,
     stage: str,
