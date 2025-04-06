@@ -389,7 +389,7 @@ def handle_universes(args, api: Tradingo):
 
 def main():
 
-    envconfig = TradingoConfig.from_env()
+    envconfig = TradingoConfig.from_env().to_env()
     args = cli_app().parse_args()
     IGTradingConfig.from_env().to_env()
     envconfig.to_env()
