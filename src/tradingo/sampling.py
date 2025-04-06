@@ -1,8 +1,8 @@
 import dataclasses
 import arcticdb
+from arcticdb.version_store.library import Library
 import dateutil.tz
 import logging
-from tradingo.env_provider import EnvProvider
 from typing import Literal, Optional
 
 from trading_ig.rest import IGService, ApiExceededException
@@ -11,6 +11,8 @@ from tenacity import Retrying, wait_exponential, retry_if_exception_type
 
 import pandas as pd
 import numpy as np
+from tradingo.config import IGTradingConfig
+from tradingo.symbols import lib_provider
 
 
 logger = logging.getLogger(__name__)
@@ -65,9 +67,6 @@ Provider = Literal[
 ]
 
 
-IGTradingConfig.from_file("config/variables.json").to_env()
-
-
 def get_ig_service(
     username: Optional[str] = None,
     password: Optional[str] = None,
@@ -96,13 +95,12 @@ def get_ig_service(
 
 
 def download_instruments(
-    index_col: str,
     *,
+    index_col: Optional[str] = None,
     html: Optional[str] = None,
     file: Optional[str] = None,
     tickers: Optional[list[str]] = None,
     epics: Optional[list[str]] = None,
-    **kwargs,
 ):
 
     if file:
@@ -144,7 +142,6 @@ def sample_instrument(
     interval: str,
     wait: int = 0,
     service: Optional[IGService] = None,
-    **kwargs,
 ):
     service = service or get_ig_service()
     try:
@@ -198,12 +195,12 @@ def sample_instrument(
     )
 
 
+@lib_provider(pricelib="{raw_prices_lib}")
 def create_universe(
-    pricelib: arcticdb.library.Library,
+    pricelib: Library,
     instruments: pd.DataFrame,
     end_date: pd.Timestamp,
     start_date: pd.Timestamp,
-    **kwargs,
 ):
 
     start_date = pd.Timestamp(start_date)
@@ -225,18 +222,18 @@ def create_universe(
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
     return (
-        (result["bid"]["Open"], ("bid", "open")),
-        (result["bid"]["High"], ("bid", "high")),
-        (result["bid"]["Low"], ("bid", "low")),
-        (result["bid"]["Close"], ("bid", "close")),
-        (result["ask"]["Open"], ("ask", "open")),
-        (result["ask"]["High"], ("ask", "high")),
-        (result["ask"]["Low"], ("ask", "low")),
-        (result["ask"]["Close"], ("ask", "close")),
-        (((result["ask"]["Open"] + result["bid"]["Open"]) / 2), ("mid", "open")),
-        (((result["ask"]["High"] + result["bid"]["High"]) / 2), ("mid", "high")),
-        (((result["ask"]["Low"] + result["bid"]["Low"]) / 2), ("mid", "low")),
-        (((result["ask"]["Close"] + result["bid"]["Close"]) / 2), ("mid", "close")),
+        result["bid"]["Open"],
+        result["bid"]["High"],
+        result["bid"]["Low"],
+        result["bid"]["Close"],
+        result["ask"]["Open"],
+        result["ask"]["High"],
+        result["ask"]["Low"],
+        result["ask"]["Close"],
+        ((result["ask"]["Open"] + result["bid"]["Open"]) / 2),
+        ((result["ask"]["High"] + result["bid"]["High"]) / 2),
+        ((result["ask"]["Low"] + result["bid"]["Low"]) / 2),
+        ((result["ask"]["Close"] + result["bid"]["Close"]) / 2),
     )
 
 
@@ -246,7 +243,6 @@ def sample_equity(
     end_date: str,
     provider: Provider,
     interval: str = "1d",
-    **kwargs,
 ):
     from openbb import obb
 

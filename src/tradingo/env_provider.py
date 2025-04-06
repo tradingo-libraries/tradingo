@@ -1,3 +1,5 @@
+"""Module for handling environment variables"""
+
 from typing import Optional
 import yaml
 import jinja2
@@ -138,6 +140,18 @@ class EnvProvider:
                 v.to_env(env=env)
                 continue
             env[f"{self.app_prefix}{k}".upper()] = str(v)
+        return self
+
+    def clean(self, env=None):
+        env = env if isinstance(env, dict) else os.environ
+        for k, v in self.__dict__.items():
+            if k == "app_prefix":
+                continue
+            if isinstance(v, EnvProvider):
+                v.clean(env=env)
+                continue
+            env.pop(f"{self.app_prefix}{k}".upper(), None)
+        return self
 
     @classmethod
     def from_env(

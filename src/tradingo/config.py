@@ -1,9 +1,9 @@
 import dataclasses
-from typing import Any
 import pathlib
-import pandas as pd
 
 from .env_provider import EnvProvider
+
+from . import templates
 
 
 @dataclasses.dataclass
@@ -17,10 +17,8 @@ class IGTradingConfig(EnvProvider):
 
 @dataclasses.dataclass
 class TradingoConfig(EnvProvider):
-    include_instruments: bool
-    dag_start_date: pd.Timestamp
-    start_date: pd.Timestamp
     config_home: pathlib.Path
     arctic_uri: str
-    graph: dict[str, Any]
+    templates: pathlib.Path = pathlib.Path(templates.__file__).parent
+    include_instruments: bool = False
     app_prefix = "TP"

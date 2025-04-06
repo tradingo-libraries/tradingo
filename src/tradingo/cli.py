@@ -12,7 +12,7 @@ import pandas as pd
 import yaml
 
 from .api import Tradingo
-from .config import TradingoConfig
+from .config import IGTradingConfig, TradingoConfig
 
 from . import symbols
 
@@ -52,7 +52,7 @@ def process_includes(config, variables):
             protocol, path = value["include"].split("://")
 
             if protocol == "file":
-                value = read_config_template(
+                incvalue = read_config_template(
                     pathlib.Path(path),
                     variables={
                         **value.get("variables", {}),
@@ -64,6 +64,10 @@ def process_includes(config, variables):
                 raise ValueError(
                     f"Unsupported protocol: '{protocol}' at '{key}' for '{path}'"
                 )
+            value = value.copy()
+            value.update(incvalue)
+            value.pop("include", None)
+            value.pop("variables", None)
 
         elif isinstance(value, dict):
             value = process_includes(value, variables)
@@ -75,9 +79,17 @@ def process_includes(config, variables):
 
 def cli_app():
     app = argparse.ArgumentParser("tradingo-tasks")
+
+    app.add_argument(
+        "--auth",
+        type=lambda i: IGTradingConfig.from_env(
+            env=read_config_template(pathlib.Path(i), os.environ)
+        ).to_env(),
+        required=True,
+    )
     app.add_argument(
         "--config",
-        type=read_config_template,
+        type=lambda i: read_config_template(pathlib.Path(i), os.environ),
         required=True,
     )
 
@@ -95,8 +107,8 @@ def cli_app():
     run_tasks = task_subparsers.add_parser("run")
     run_tasks.add_argument("task")
     run_tasks.add_argument("--with-deps", action="store_true")
-    run_tasks.add_argument("--start-date", type=pd.Timestamp, required=True)
-    run_tasks.add_argument("--end-date", type=pd.Timestamp, required=True)
+    run_tasks.add_argument("--start-date", type=pd.Timestamp, required=False)
+    run_tasks.add_argument("--end-date", type=pd.Timestamp, required=False)
     run_tasks.add_argument("--force-rerun", action="store_true", default=True)
     run_tasks.add_argument("--dry-run", action="store_true")
 
@@ -118,8 +130,10 @@ class Task:
         function,
         task_args,
         task_kwargs,
-        output_symbols,
-        input_symbols,
+        symbols_out,
+        symbols_in,
+        load_args,
+        publish_args,
         dependencies: Iterable[str] = (),
     ):
         self._function = function
@@ -128,8 +142,10 @@ class Task:
         self._dependencies = list(dependencies)
         self._resolved_dependencies = []
         self.state = TaskState.PENDING
-        self.output_symbols = output_symbols
-        self.input_symbols = input_symbols
+        self.symbols_out = symbols_out
+        self.symbols_in = symbols_in
+        self.load_args = load_args
+        self.publish_args = publish_args
 
     def __repr__(self):
         return (
@@ -143,13 +159,25 @@ class Task:
     @property
     def function(self) -> Callable:
         module, function_name = self._function.rsplit(".", maxsplit=1)
-        return symbols.symbol_publisher(
-            **self.output_symbols,
-        )(
-            symbols.symbol_provider(
-                **self.input_symbols,
-            )(getattr(importlib.import_module(module), function_name))
-        )
+        function = getattr(importlib.import_module(module), function_name)
+
+        if self.symbols_out:
+            function = symbols.symbol_publisher(
+                *self.symbols_out,
+                **self.publish_args,
+            )(function)
+        if self.symbols_in:
+            function = symbols.symbol_provider(
+                **self.symbols_in,
+                **self.load_args,
+            )(function)
+
+        return function
+
+    @staticmethod
+    def prepare_kwargs(task_kwargs, global_kwargs):
+        task_kwargs.update(global_kwargs)
+        return task_kwargs
 
     def run(self, *args, run_dependencies=False, force_rerun=False, **kwargs):
 
@@ -158,16 +186,19 @@ class Task:
             for dependency in self.dependencies:
 
                 dependency.run(
+                    *args,
                     run_dependencies=run_dependencies,
                     force_rerun=force_rerun,
+                    **kwargs,
                 )
 
         state = self.state
         try:
+            task_kwargs = self.prepare_kwargs(self.task_kwargs, kwargs)
             if self.state == TaskState.PENDING or force_rerun:
                 state = TaskState.FAILED
                 print(f"Running {self}")
-                self.function(*self.task_args, *args, **self.task_kwargs, **kwargs)
+                self.function(*self.task_args, *args, **task_kwargs)
                 self.state = state = TaskState.SUCCESS
         finally:
             self.state = state
@@ -208,26 +239,37 @@ def collect_task_configs(config, _tasks: Optional[dict[str, Any]] = None):
 class DAG(dict[str, Task]):
 
     @classmethod
-    def from_config(cls, config, **kwargs):
+    def from_config(cls, config):
 
-        process_includes(config)
         task_configs = collect_task_configs(config)
 
         tasks: dict[str, Task] = {}
 
         for task_name, task_config in task_configs.items():
-            params = {**task_config["params"], **kwargs}
-            tasks[task_name] = Task(
-                function=task_config["function"],
-                task_args=(),
-                task_kwargs=params,
-                dependencies=task_config["depends_on"],
-                input_symbols=task_config["input_symbols"],
-                output_symbols=task_config["output_symbols"],
-            )
+            if not task_config.get("enabled", True):
+                continue
+            params = task_config["params"]
+            try:
+                tasks[task_name] = Task(
+                    function=task_config["function"],
+                    task_args=(),
+                    task_kwargs=params,
+                    dependencies=task_config["depends_on"],
+                    symbols_in=task_config.get("symbols_in", {}),
+                    load_args=task_config.get("load_args", {}),
+                    publish_args=task_config.get("publish_args", {}),
+                    symbols_out=task_config.get("symbols_out", []),
+                )
+            except KeyError as ex:
+                raise ConfigLoadError(f"{task_name} is missing setting {ex.args[0]}")
 
-        for task in tasks.values():
-            task.resolve_dependencies(tasks)
+        for task_name, task in tasks.items():
+            try:
+                task.resolve_dependencies(tasks)
+            except KeyError as ex:
+                raise ConfigLoadError(
+                    f"Missing task in dag '{ex.args[0]}' for '{task_name}'"
+                ) from ex
 
         return cls(tasks)
 
@@ -246,7 +288,7 @@ class DAG(dict[str, Task]):
 
         return [
             task
-            for subl in (task.output_symbols for task in self.values())
+            for subl in (task.symbols_out for task in self.values())
             for task in subl
         ]
 
@@ -289,8 +331,6 @@ def handle_tasks(args, arctic):
     if args.list_action == "list":
         graph = DAG.from_config(
             args.config,
-            start_date=pd.Timestamp.now(),
-            end_date=pd.Timestamp.now(),
         )
 
         graph.print()
@@ -299,19 +339,23 @@ def handle_tasks(args, arctic):
     elif args.list_action == "run":
         graph = DAG.from_config(
             args.config,
-            start_date=args.start_date,
-            end_date=args.end_date,
         )
 
         graph.update_dag()
 
         try:
+            extra_kwargs = {}
+            if args.start_date:
+                extra_kwargs["start_date"] = args.start_date
+            if args.end_date:
+                extra_kwargs["end_date"] = args.end_date
             out = graph.run(
                 args.task,
                 run_dependencies=args.with_deps,
                 force_rerun=args.force_rerun,
                 arctic=arctic,
                 dry_run=args.dry_run,
+                **extra_kwargs,
             )
             if args.dry_run:
                 print(out)
@@ -345,11 +389,12 @@ def handle_universes(args, api: Tradingo):
 
 def main():
 
+    envconfig = TradingoConfig.from_env()
     args = cli_app().parse_args()
+    IGTradingConfig.from_env().to_env()
+    envconfig.to_env()
 
-    config: TradingoConfig = args.config
-
-    arctic = Tradingo(config.arctic_uri)
+    arctic = Tradingo(envconfig.arctic_uri)
 
     if args.entity == "task":
 

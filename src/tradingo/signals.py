@@ -114,7 +114,6 @@ def intraday_momentum(
     start_after: int = 0,
     close_overrides: Optional[dict[str, dict[str, int]]] = None,
     dynamic_floor: int = 0,
-    **kwargs,
 ):
 
     close = (

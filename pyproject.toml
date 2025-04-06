@@ -39,6 +39,9 @@ research = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"tradingo.templates" = ["*.yaml"]
+
 [build-system]
 requires = [
   "cython",

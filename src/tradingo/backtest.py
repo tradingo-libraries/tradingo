@@ -31,7 +31,6 @@ def backtest(
     stop_limit: Optional[pd.DataFrame] = None,
     stop_loss: Optional[pd.DataFrame] = None,
     price_ffill_limit: int = 0,
-    **kwargs,
 ):
 
     bid_close = bid_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
@@ -73,8 +72,6 @@ def backtest(
             index=mid_close.index,
             columns=mid_close.columns,
         )
-
-    logger.info("running backtest for %s", kwargs)
 
     def compute_backtest(inst_trades: pd.Series):
 

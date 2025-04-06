@@ -8,8 +8,8 @@ def test_dag_configuration():
                 "name": "MSFT.sample",
                 "function": "tradingo.sampling.sample_instrument",
                 "depends_on": [],
-                "input_symbols": [],
-                "output_symbols": [
+                "symbols_in": [],
+                "symbols_out": [
                     "ig-trading/{symbol}.mid",
                     "ig-trading/{symbol}.bid",
                     "ig-trading/{symbol}.ask",
@@ -21,9 +21,9 @@ def test_dag_configuration():
             "AAPL.sample": {
                 "name": "AAPL.sample",
                 "function": "tradingo.sampling.sample_instrument",
-                "input_symbols": [],
+                "symbols_in": [],
                 "depends_on": [],
-                "output_symbols": [
+                "symbols_out": [
                     "ig-trading/mid",
                     "ig-trading/bid",
                     "ig-trading/ask",
@@ -37,7 +37,7 @@ def test_dag_configuration():
             "universe.sample": {
                 "function": "tradingo.sampling.sample_universe",
                 "depends_on": ["AAPL.sample", "MSFT.sample"],
-                "input_symbols": [
+                "symbols_in": [
                     "ig-trading/AAPL.mid",
                     "ig-trading/AAPL.bid",
                     "ig-trading/AAPL.ask",
@@ -45,7 +45,7 @@ def test_dag_configuration():
                     "ig-trading/MSFT.bid",
                     "ig-trading/MSFT.ask",
                 ],
-                "output_symbols": [
+                "symbols_out": [
                     "prices/{universe}.mid.open",
                     "prices/{universe}.mid.high",
                     "prices/{universe}.mid.low",
@@ -65,9 +65,9 @@ def test_dag_configuration():
         "signals": {
             "signal.trend": {
                 "function": "tradingo.signals.trend",
-                "output_symbols": ["signals/{universe}.trend"],
+                "symbols_out": ["signals/{universe}.trend"],
                 "depends_on": ["universe.sample"],
-                "input_symbols": ["prices/{universe}.mid.close"],
+                "symbols_in": ["prices/{universe}.mid.close"],
                 "params": {
                     "prices": "prices/mid.close",
                     "library": "signals",

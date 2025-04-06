@@ -3387,6 +3387,11 @@ research = [
     { name = "jupyter" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "arcticdb" },
@@ -3408,6 +3413,9 @@ requires-dist = [
     { name = "yfinance" },
 ]
 provides-extras = ["dev", "research"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.5" }]
 
 [[package]]
 name = "traitlets"

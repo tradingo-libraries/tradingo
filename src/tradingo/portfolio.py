@@ -2,24 +2,31 @@ import logging
 import re
 from typing import Optional
 
+from arcticdb.arctic import Library
 import pandas as pd
 import numpy as np
 
 import arcticdb as adb
+from tradingo import symbols
 
 
 logger = logging.getLogger(__name__)
 
 
+@symbols.lib_provider(
+    signals="signals",
+)
 def portfolio_construction(
+    signals: Library,
     close: pd.DataFrame,
     instruments: pd.DataFrame,
     model_weights: dict[str, float],
     multiplier: float,
     aum: float,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
     default_instrument_weight: float = 1.0,
     instrument_weights: Optional[dict] = None,
-    **model_signals: pd.DataFrame,
 ):
 
     instrument_weights = instrument_weights or {}
@@ -42,8 +49,12 @@ def portfolio_construction(
     signal_value = (
         pd.concat(
             (
-                signal * weights * model_weights[model_name]
-                for model_name, signal in model_signals.items()
+                weights
+                * signals.read(
+                    model_name,
+                    date_range=(start_date, end_date),
+                ).data
+                for model_name, weight in model_weights.items()
             ),
             keys=model_weights,
             axis=1,
