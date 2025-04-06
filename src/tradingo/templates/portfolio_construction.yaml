@@ -40,3 +40,15 @@
     - backtest/{{ name }}.instrument.net_exposure
     - backtest/{{ name }}.instrument.avg_open_price
     - backtest/{{ name }}.instrument.stop_trade
+
+"portfolio.point_in_time.{{ name }}":
+  depends_on:
+    - "portfolio.{{ name }}"
+  function: tradingo.portfolio.point_in_time_position
+  symbols_in:
+    positions: "portfolio/{{ name }}.rounded.position"
+  symbols_out:
+    - "portfolio/{{ name }}.rounded.pit_position"
+  params:
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"

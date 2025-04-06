@@ -213,25 +213,6 @@ def position_from_trades(
     )
 
 
-def calculate_trades(
-    name: str,
-    stage: str,
-    positions: pd.DataFrame,
-    previous_positions: pd.DataFrame,
-    **kwargs,
-):
+def point_in_time_position(positions: pd.DataFrame):
 
-    logger.info(
-        "Calculating %s trades for %s",
-        stage,
-        name,
-    )
-
-    return (
-        (
-            positions
-            - previous_positions.reindex_like(positions, method="ffill").fillna(0.0)
-        ).iloc[
-            -1:,
-        ],
-    )
+    return ((positions).iloc[-1:,],)
