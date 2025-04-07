@@ -1,19 +1,18 @@
+import dataclasses
 import arcticdb
+from arcticdb.version_store.library import Library
 import dateutil.tz
 import logging
-from tradingo.symbols import lib_provider, symbol_provider, symbol_publisher
 from typing import Literal, Optional
 
 from trading_ig.rest import IGService, ApiExceededException
-from trading_ig.config import config
 
 from tenacity import Retrying, wait_exponential, retry_if_exception_type
 
-from arcticdb import LibraryOptions
-from yfinance import Ticker
-
 import pandas as pd
 import numpy as np
+from tradingo.config import IGTradingConfig
+from tradingo.symbols import lib_provider
 
 
 logger = logging.getLogger(__name__)
@@ -75,6 +74,8 @@ def get_ig_service(
     acc_type: Optional[str] = None,
 ) -> IGService:
 
+    config = IGTradingConfig.from_env()
+
     retryer = Retrying(
         wait=wait_exponential(),
         retry=retry_if_exception_type(ApiExceededException),
@@ -93,15 +94,13 @@ def get_ig_service(
     return service
 
 
-@symbol_publisher("instruments/{universe}", write_pickle=True)
 def download_instruments(
-    index_col: str,
     *,
+    index_col: Optional[str] = None,
     html: Optional[str] = None,
     file: Optional[str] = None,
     tickers: Optional[list[str]] = None,
     epics: Optional[list[str]] = None,
-    **kwargs,
 ):
 
     if file:
@@ -136,14 +135,6 @@ def download_instruments(
     raise ValueError(file)
 
 
-@symbol_publisher(
-    "prices_igtrading/{epic}.bid",
-    "prices_igtrading/{epic}.ask",
-    library_options=arcticdb.LibraryOptions(
-        dynamic_schema=True,
-        dedup=True,
-    ),
-)
 def sample_instrument(
     epic: str,
     start_date: pd.Timestamp,
@@ -151,7 +142,6 @@ def sample_instrument(
     interval: str,
     wait: int = 0,
     service: Optional[IGService] = None,
-    **kwargs,
 ):
     service = service or get_ig_service()
     try:
@@ -205,20 +195,16 @@ def sample_instrument(
     )
 
 
-@symbol_provider(instruments="instruments/{universe}", no_date=True)
-@symbol_publisher(
-    template="prices/{0}.{1}",
-    symbol_prefix="{provider}.{universe}.",
-    library_options=LibraryOptions(dynamic_schema=True),
-)
-@lib_provider(pricelib="prices_igtrading")
+@lib_provider(pricelib="{raw_prices_lib}")
 def create_universe(
-    pricelib: arcticdb.library.Library,
+    pricelib: Library,
     instruments: pd.DataFrame,
     end_date: pd.Timestamp,
     start_date: pd.Timestamp,
-    **kwargs,
 ):
+
+    start_date = pd.Timestamp(start_date)
+    end_date = pd.Timestamp(end_date)
 
     def get_data(symbol: str):
         return pd.concat(
@@ -236,41 +222,27 @@ def create_universe(
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
     return (
-        (result["bid"]["Open"], ("bid", "open")),
-        (result["bid"]["High"], ("bid", "high")),
-        (result["bid"]["Low"], ("bid", "low")),
-        (result["bid"]["Close"], ("bid", "close")),
-        (result["ask"]["Open"], ("ask", "open")),
-        (result["ask"]["High"], ("ask", "high")),
-        (result["ask"]["Low"], ("ask", "low")),
-        (result["ask"]["Close"], ("ask", "close")),
-        (((result["ask"]["Open"] + result["bid"]["Open"]) / 2), ("mid", "open")),
-        (((result["ask"]["High"] + result["bid"]["High"]) / 2), ("mid", "high")),
-        (((result["ask"]["Low"] + result["bid"]["Low"]) / 2), ("mid", "low")),
-        (((result["ask"]["Close"] + result["bid"]["Close"]) / 2), ("mid", "close")),
+        result["bid"]["Open"],
+        result["bid"]["High"],
+        result["bid"]["Low"],
+        result["bid"]["Close"],
+        result["ask"]["Open"],
+        result["ask"]["High"],
+        result["ask"]["Low"],
+        result["ask"]["Close"],
+        ((result["ask"]["Open"] + result["bid"]["Open"]) / 2),
+        ((result["ask"]["High"] + result["bid"]["High"]) / 2),
+        ((result["ask"]["Low"] + result["bid"]["Low"]) / 2),
+        ((result["ask"]["Close"] + result["bid"]["Close"]) / 2),
     )
 
 
-@symbol_provider(instruments="instruments/{universe}", no_date=True)
-@symbol_publisher(
-    "prices/open",
-    "prices/high",
-    "prices/low",
-    "prices/close",
-    "prices/adj_close",
-    "prices/volume",
-    "prices/dividend",
-    # "prices/split_ratio",
-    astype=float,
-    symbol_prefix="{provider}.{universe}.",
-)
 def sample_equity(
     instruments: pd.DataFrame,
     start_date: str,
     end_date: str,
     provider: Provider,
     interval: str = "1d",
-    **kwargs,
 ):
     from openbb import obb
 
@@ -299,11 +271,6 @@ def sample_equity(
     )
 
 
-@symbol_publisher(
-    template="options/{0}.{1}",
-    symbol_prefix="{provider}.",
-    library_options=LibraryOptions(dynamic_schema=True, dedup=True),
-)
 def sample_options(
     universe: list[str], start_date: str, end_date: str, provider: Provider, **kwargs
 ):
@@ -332,11 +299,6 @@ def sample_options(
     return out
 
 
-@symbol_publisher(
-    template="futures/{0}.{1}",
-    symbol_prefix="{provider}.",
-    library_options=LibraryOptions(dynamic_schema=True, dedup=True),
-)
 def sample_futures(
     universe: list[str], start_date: str, end_date: str, provider: Provider, **kwargs
 ):

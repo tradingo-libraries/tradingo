@@ -1,77 +1,106 @@
-import pandas as pd
-import pytest
-
-from tradingo.cli import build_graph
+from tradingo.cli import DAG, Task
 
 
-PROVIDER = "ig-trading"
-UNIVERSE = "test-universe"
-PORTFOLIO = "test-portfolio"
-NAME = "test-name"
-
-
-def test_build_graph():
-
-    config = {
-        "name": NAME,
-        "universe": {
-            UNIVERSE: {
-                "provider": PROVIDER,
-                "epics": ["A", "B"],
-                "index_col": None,
-                "volatility": {
-                    "speeds": [32, 64],
+def test_dag_configuration():
+    nodes = {
+        "raw_prices": {
+            "MSFT.sample": {
+                "name": "MSFT.sample",
+                "function": "tradingo.sampling.sample_instrument",
+                "depends_on": [],
+                "symbols_in": [],
+                "symbols_out": [
+                    "ig-trading/{symbol}.mid",
+                    "ig-trading/{symbol}.bid",
+                    "ig-trading/{symbol}.ask",
+                ],
+                "params": {
+                    "symbol": "MSFT",
                 },
-            }
-        },
-        "signal_configs": {
-            "signal1": {"function": "module.function", "args": [], "kwargs": {}},
-            "signal1.capped": {
-                "depends_on": ["signal1"],
-                "function": "module.function",
-                "args": [],
-                "kwargs": {},
+            },
+            "AAPL.sample": {
+                "name": "AAPL.sample",
+                "function": "tradingo.sampling.sample_instrument",
+                "symbols_in": [],
+                "depends_on": [],
+                "symbols_out": [
+                    "ig-trading/mid",
+                    "ig-trading/bid",
+                    "ig-trading/ask",
+                ],
+                "params": {
+                    "symbol": "AAPL",
+                },
             },
         },
-        "portfolio": {
-            PORTFOLIO: {
-                "function": "module.portfolio_function",
-                "args": [],
-                "kwargs": {
-                    "signal_weights": {"signal1.capped": 1},
+        "prices": {
+            "universe.sample": {
+                "function": "tradingo.sampling.sample_universe",
+                "depends_on": ["AAPL.sample", "MSFT.sample"],
+                "symbols_in": [
+                    "ig-trading/AAPL.mid",
+                    "ig-trading/AAPL.bid",
+                    "ig-trading/AAPL.ask",
+                    "ig-trading/MSFT.mid",
+                    "ig-trading/MSFT.bid",
+                    "ig-trading/MSFT.ask",
+                ],
+                "symbols_out": [
+                    "prices/{universe}.mid.open",
+                    "prices/{universe}.mid.high",
+                    "prices/{universe}.mid.low",
+                    "prices/{universe}.mid.close",
+                    "prices/{universe}.bid.open",
+                    "prices/{universe}.bid.high",
+                    "prices/{universe}.bid.low",
+                    "prices/{universe}.bid.close",
+                    "prices/{universe}.ask.open",
+                    "prices/{universe}.ask.high",
+                    "prices/{universe}.ask.low",
+                    "prices/{universe}.ask.close",
+                ],
+                "params": {},
+            },
+        },
+        "signals": {
+            "signal.trend": {
+                "function": "tradingo.signals.trend",
+                "symbols_out": ["signals/{universe}.trend"],
+                "depends_on": ["universe.sample"],
+                "symbols_in": ["prices/{universe}.mid.close"],
+                "params": {
+                    "prices": "prices/mid.close",
+                    "library": "signals",
+                    "field": "trend",
+                    "universe": "ig-trading",
                 },
-                "universe": UNIVERSE,
-                "provider": PROVIDER,
-            }
+            },
         },
     }
 
-    tasks, eod_tasks = build_graph(
-        config, pd.Timestamp("2018-01-01"), pd.Timestamp("2024-09-18")
+    dag = DAG.from_config(
+        nodes,
+        symbol_prefix="{universe}.{source}.{field}",
     )
 
-    assert tasks[PORTFOLIO].dependencies == [
-        tasks[f"{UNIVERSE}.sample"],
-        tasks[f"{UNIVERSE}.vol"],
-        tasks[f"{UNIVERSE}.signal1.capped"],
+    assert dag.get_symbols() == [
+        "ig-trading/{symbol}.mid",
+        "ig-trading/{symbol}.bid",
+        "ig-trading/{symbol}.ask",
+        "ig-trading/mid",
+        "ig-trading/bid",
+        "ig-trading/ask",
+        "prices/{universe}.mid.open",
+        "prices/{universe}.mid.high",
+        "prices/{universe}.mid.low",
+        "prices/{universe}.mid.close",
+        "prices/{universe}.bid.open",
+        "prices/{universe}.bid.high",
+        "prices/{universe}.bid.low",
+        "prices/{universe}.bid.close",
+        "prices/{universe}.ask.open",
+        "prices/{universe}.ask.high",
+        "prices/{universe}.ask.low",
+        "prices/{universe}.ask.close",
+        "signals/{universe}.trend",
     ]
-
-    assert "A.sample" in tasks
-    assert "B.sample" in tasks
-    assert f"{UNIVERSE}.sample" in tasks
-
-    assert tasks[f"{PORTFOLIO}.backtest"].dependencies == [tasks[PORTFOLIO]]
-
-    assert tasks[f"{UNIVERSE}.sample"].dependencies == [
-        tasks["A.sample"],
-        tasks["B.sample"],
-        tasks[f"{UNIVERSE}.instruments"],
-    ]
-    assert tasks[f"{UNIVERSE}.signal1"].dependencies == [
-        tasks[f"{UNIVERSE}.sample"],
-        tasks[f"{UNIVERSE}.vol"],
-    ]
-
-
-if __name__ == "__main__":
-    pytest.main()

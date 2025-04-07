@@ -4,7 +4,6 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from tradingo.symbols import symbol_provider, symbol_publisher
 from tradingo import _backtest
 
 
@@ -23,19 +22,6 @@ BACKTEST_FIELDS = (
 )
 
 
-@symbol_provider(
-    portfolio="portfolio/{name}.{stage}",
-    bid_close="prices/close",
-    ask_close="prices/close",
-    dividends="prices/dividend",
-    symbol_prefix="{provider}.{universe}.",
-)
-@symbol_publisher(
-    "backtest/portfolio",
-    *(f"backtest/instrument.{f}" for f in BACKTEST_FIELDS if f != "date"),
-    symbol_prefix="{provider}.{universe}.{name}.{stage}.",
-    astype="float64",
-)
 def backtest(
     *,
     portfolio: pd.DataFrame,
@@ -45,7 +31,6 @@ def backtest(
     stop_limit: Optional[pd.DataFrame] = None,
     stop_loss: Optional[pd.DataFrame] = None,
     price_ffill_limit: int = 0,
-    **kwargs,
 ):
 
     bid_close = bid_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
@@ -87,8 +72,6 @@ def backtest(
             index=mid_close.index,
             columns=mid_close.columns,
         )
-
-    logger.info("running backtest for %s", kwargs)
 
     def compute_backtest(inst_trades: pd.Series):
 

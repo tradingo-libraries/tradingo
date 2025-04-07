@@ -146,7 +146,10 @@ class _Read:
         return list(
             dict.fromkeys(
                 [
-                    i.replace(f'{".".join(self._path_so_far)}.', "").split(".")[0]
+                    i.replace(
+                        f'{".".join(self._path_so_far)}.' if self._path_so_far else "",
+                        "",
+                    ).split(".")[0]
                     for i in self._library.list_symbols(*args, **kwargs)
                 ]
             )

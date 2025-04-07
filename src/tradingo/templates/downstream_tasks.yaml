@@ -1,0 +1,9 @@
+trades.{{ portfolio_name }}:
+  function: tradingo.engine.adjust_position_sizes
+  depends_on:
+    - "portfolio.{{ portfolio_name }}"
+  symbols_in:
+    target_positions: "portfolio/{{ portfolio_name }}.rounded.position"
+    instruments: "instruments/{{ universe_name }}"
+  symbols_out: []
+  params: {}

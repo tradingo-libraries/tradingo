@@ -4,6 +4,7 @@ dynamic = ["version"]
 authors = [
   { name="Rory McStay", email="rory@rorymcstay.com" },
 ]
+requires-python = ">= 3.11"
 description = "Instrument price store"
 readme = "README.md"
 classifiers = [
@@ -20,6 +21,7 @@ dependencies = [
   "pandas_market_calendars",
   "trading_ig",
   "riskfolio-lib",
+  "tenacity",
 ]
 [project.optional-dependencies]
 dev = [
@@ -37,6 +39,9 @@ research = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"tradingo.templates" = ["*.yaml"]
+
 [build-system]
 requires = [
   "cython",
@@ -45,9 +50,16 @@ requires = [
   "setuptools_scm>=8",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+]
+
 [tool.black]
 line-length = 88
 target-version = ['py311']
 
+[project.scripts]
+tradingo-cli = "tradingo.cli:main"
 
 [tool.setuptools_scm]
