@@ -243,21 +243,13 @@ def sample_equity(
     interval: str = "1d",
 ):
 
-    data = yf.download(
-        tickers,
-        start=start_date,
-        end=end_date,
-        interval=interval,
-    )
-
     return (
-        data.pivot(columns=["symbol"], values="open"),
-        data.pivot(columns=["symbol"], values="high"),
-        data.pivot(columns=["symbol"], values="low"),
-        data.pivot(columns=["symbol"], values="close"),
-        data.pivot(columns=["symbol"], values="volume"),
-        data.pivot(columns=["symbol"], values="dividend"),
-        # data.pivot(columns=["symbol"], values="split_ratio"),
+        yf.download(
+            tickers,
+            start=start_date,
+            end=end_date,
+            interval=interval,
+        ),
     )
 
 
