@@ -1,9 +1,8 @@
-import dataclasses
-import arcticdb
 from arcticdb.version_store.library import Library
 import dateutil.tz
 import logging
 from typing import Literal, Optional
+import yfinance as yf
 
 from trading_ig.rest import IGService, ApiExceededException
 
@@ -238,33 +237,24 @@ def create_universe(
 
 
 def sample_equity(
-    instruments: pd.DataFrame,
+    tickers: list[str],
     start_date: str,
     end_date: str,
-    provider: Provider,
     interval: str = "1d",
 ):
-    from openbb import obb
 
-    data = obb.equity.price.historical(  # type: ignore
-        instruments.index.to_list(),
-        start_date=start_date,
-        end_date=end_date,
-        provider=provider,
+    data = yf.download(
+        tickers,
+        start=start_date,
+        end=end_date,
         interval=interval,
-    ).to_dataframe()
-
-    data.index = pd.to_datetime(data.index)
-
-    close = data.pivot(columns=["symbol"], values="close")
-    close.index = pd.to_datetime(close.index)
+    )
 
     return (
         data.pivot(columns=["symbol"], values="open"),
         data.pivot(columns=["symbol"], values="high"),
         data.pivot(columns=["symbol"], values="low"),
-        close,
-        100 * (1 + close.pct_change()).cumprod(),
+        data.pivot(columns=["symbol"], values="close"),
         data.pivot(columns=["symbol"], values="volume"),
         data.pivot(columns=["symbol"], values="dividend"),
         # data.pivot(columns=["symbol"], values="split_ratio"),

@@ -1,0 +1,51 @@
+"download.{{ universe_name }}":
+  depends_on: []
+  function: tradingo.sampling.download_instruments
+  symbols_out:
+     - "instruments/{{ universe_name }}"
+  publish_args:
+    write_pickle: true
+  params:
+    tickers: {{ tickers }}
+  enabled: {{ TP_INCLUDE_INSTRUMENTS }}
+
+{% for ticker in tickers %}
+"sample.{{ ticker }}":
+  depends_on: []
+  symbols_out:
+   - "{{ raw_prices_lib }}/{{ ticker }}.open"
+   - "{{ raw_prices_lib }}/{{ ticker }}.high"
+   - "{{ raw_prices_lib }}/{{ ticker }}.low"
+   - "{{ raw_prices_lib }}/{{ ticker }}.close"
+   - "{{ raw_prices_lib }}/{{ ticker }}.dividend"
+  function: tradingo.sampling.sample_equity
+  params:
+    tickers: ["{{ ticker }}"]
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"
+    interval: "{{ interval }}"
+    provider: yfinance
+{% endfor %}
+
+"sample.{{ universe_name }}":
+  function: tradingo.sampling.create_universe
+  params:
+    pricelib: "{{ raw_prices_lib }}"
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"
+  depends_on:
+  {%for ticker in tickers %}
+    - "sample.{{ ticker }}"
+  {% endfor %}
+  symbols_in:
+    instruments: "instruments/{{ universe_name }}"
+  load_args:
+    no_date: true
+  publish_args:
+    astype: float,
+  symbols_out:
+  {% for field in ["ask", "mid", "bid"] %}
+  {% for occurence in ["open", "high", "low", "close"] %}
+  - prices/{{ universe_name }}.{{ field }}.{{ occurence }}
+  {% endfor %}
+  {% endfor %}

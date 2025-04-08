@@ -15,7 +15,7 @@ def test_config():
     env.to_env()
 
     out = cli.read_config_template(
-        pathlib.Path("/home/rory/dev/tradingo-plat/config/tradingo/root.yaml"),
+        pathlib.Path("/home/rory/dev/tradingo-plat/config/tradingo/yfinance.yaml"),
         variables=os.environ,
     )
 
