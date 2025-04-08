@@ -24,7 +24,6 @@
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
     interval: "{{ interval }}"
-    provider: yfinance
 {% endfor %}
 
 "sample.{{ universe_name }}":
