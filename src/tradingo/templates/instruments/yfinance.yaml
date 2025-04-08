@@ -13,14 +13,10 @@
 "sample.{{ ticker }}":
   depends_on: []
   symbols_out:
-   - "{{ raw_prices_lib }}/{{ ticker }}.open"
-   - "{{ raw_prices_lib }}/{{ ticker }}.high"
-   - "{{ raw_prices_lib }}/{{ ticker }}.low"
-   - "{{ raw_prices_lib }}/{{ ticker }}.close"
-   - "{{ raw_prices_lib }}/{{ ticker }}.dividend"
+   - "{{ raw_prices_lib }}/{{ ticker }}.ohlcv"
   function: tradingo.sampling.sample_equity
   params:
-    tickers: ["{{ ticker }}"]
+    ticker: "{{ ticker }}"
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
     interval: "{{ interval }}"

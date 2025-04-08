@@ -237,7 +237,7 @@ def create_universe(
 
 
 def sample_equity(
-    tickers: list[str],
+    ticker: str,
     start_date: str,
     end_date: str,
     interval: str = "1d",
@@ -245,11 +245,11 @@ def sample_equity(
 
     return (
         yf.download(
-            tickers,
+            [ticker],
             start=start_date,
             end=end_date,
             interval=interval,
-        ),
+        ).droplevel(0, axis=1),
     )
 
 
