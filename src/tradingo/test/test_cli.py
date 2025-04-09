@@ -1,4 +1,6 @@
-from tradingo.cli import DAG, Task
+import pytest
+
+from tradingo.cli import DAG
 
 
 def test_dag_configuration():
@@ -6,7 +8,7 @@ def test_dag_configuration():
         "raw_prices": {
             "MSFT.sample": {
                 "name": "MSFT.sample",
-                "function": "tradingo.sampling.sample_instrument",
+                "function": "tradingo.sampling.ig.sample_instrument",
                 "depends_on": [],
                 "symbols_in": [],
                 "symbols_out": [
@@ -20,7 +22,7 @@ def test_dag_configuration():
             },
             "AAPL.sample": {
                 "name": "AAPL.sample",
-                "function": "tradingo.sampling.sample_instrument",
+                "function": "tradingo.sampling.ig.sample_instrument",
                 "symbols_in": [],
                 "depends_on": [],
                 "symbols_out": [
@@ -35,7 +37,7 @@ def test_dag_configuration():
         },
         "prices": {
             "universe.sample": {
-                "function": "tradingo.sampling.sample_universe",
+                "function": "tradingo.sampling.ig.sample_universe",
                 "depends_on": ["AAPL.sample", "MSFT.sample"],
                 "symbols_in": [
                     "ig-trading/AAPL.mid",
@@ -78,10 +80,7 @@ def test_dag_configuration():
         },
     }
 
-    dag = DAG.from_config(
-        nodes,
-        symbol_prefix="{universe}.{source}.{field}",
-    )
+    dag = DAG.from_config(nodes)
 
     assert dag.get_symbols() == [
         "ig-trading/{symbol}.mid",
@@ -104,3 +103,7 @@ def test_dag_configuration():
         "prices/{universe}.ask.close",
         "signals/{universe}.trend",
     ]
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])

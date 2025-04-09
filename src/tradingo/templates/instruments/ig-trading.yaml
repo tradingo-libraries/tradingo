@@ -1,6 +1,6 @@
 "download.{{ universe_name }}":
   depends_on: []
-  function: tradingo.sampling.download_instruments
+  function: tradingo.sampling.instruments.download_instruments
   symbols_out:
      - "instruments/{{ universe_name }}"
   publish_args:
@@ -15,7 +15,7 @@
   symbols_out:
    - "{{ raw_prices_lib }}/{{ epic }}.bid"
    - "{{ raw_prices_lib }}/{{ epic }}.ask"
-  function: tradingo.sampling.sample_instrument
+  function: tradingo.sampling.ig.sample_instrument
   params:
     epic: "{{ epic }}"
     start_date: "{{ data_interval_start }}"
@@ -24,7 +24,7 @@
 {% endfor %}
 
 "sample.{{ universe_name }}":
-  function: tradingo.sampling.create_universe
+  function: tradingo.sampling.ig.create_universe
   params:
     pricelib: "{{ raw_prices_lib }}"
     start_date: "{{ data_interval_start }}"
