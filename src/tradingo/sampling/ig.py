@@ -1,69 +1,19 @@
-from arcticdb.version_store.library import Library
+"""IG data accessors"""
+
 import dateutil.tz
 import logging
-from typing import Literal, Optional
-import yfinance as yf
+from typing import Optional
 
+import numpy as np
+import pandas as pd
+from arcticdb.version_store.library import Library
+from tenacity import Retrying, wait_exponential, retry_if_exception_type
 from trading_ig.rest import IGService, ApiExceededException
 
-from tenacity import Retrying, wait_exponential, retry_if_exception_type
-
-import pandas as pd
-import numpy as np
 from tradingo.config import IGTradingConfig
-from tradingo.symbols import lib_provider
 
 
 logger = logging.getLogger(__name__)
-
-
-FUTURES_FIELDS = [
-    "expiration",
-    "price",
-]
-
-
-OPTION_FIELDS = [
-    "expiration",
-    "option_type",
-    "strike",
-    "open_interest",
-    "volume",
-    "theoretical_price",
-    "last_trade_price",
-    "tick",
-    "bid",
-    "bid_size",
-    "ask",
-    "ask_size",
-    "open",
-    "high",
-    "low",
-    "prev_close",
-    "change",
-    "change_percent",
-    "implied_volatility",
-    "delta",
-    "gamma",
-    "theta",
-    "vega",
-    "rho",
-    "last_trade_timestamp",
-    "dte",
-]
-
-
-Provider = Literal[
-    "alpha_vantage",
-    "cboe",
-    "fmp",
-    "intrinio",
-    "polygon",
-    "tiingo",
-    "tmx",
-    "tradier",
-    "yfinance",
-]
 
 
 def get_ig_service(
@@ -91,47 +41,6 @@ def get_ig_service(
 
     service.create_session()
     return service
-
-
-def download_instruments(
-    *,
-    index_col: Optional[str] = None,
-    html: Optional[str] = None,
-    file: Optional[str] = None,
-    tickers: Optional[list[str]] = None,
-    epics: Optional[list[str]] = None,
-):
-
-    if file:
-        return (
-            pd.read_csv(
-                file,
-                index_col=index_col,
-            ).rename_axis("Symbol"),
-        )
-    if html:
-        return (pd.read_html(html)[0].set_index(index_col).rename_axis("Symbol"),)
-
-    if tickers:
-
-        return (
-            (
-                pd.DataFrame({t: Ticker(t).get_info() for t in tickers})
-                .transpose()
-                .rename_axis("Symbol")
-            ),
-        )
-
-    if epics:
-
-        service = get_ig_service()
-
-        return (
-            pd.DataFrame((service.fetch_market_by_epic(e)["instrument"] for e in epics))
-            .set_index("epic")
-            .rename_axis("Symbol", axis=0),
-        )
-    raise ValueError(file)
 
 
 def sample_instrument(
@@ -194,7 +103,6 @@ def sample_instrument(
     )
 
 
-@lib_provider(pricelib="{raw_prices_lib}")
 def create_universe(
     pricelib: Library,
     instruments: pd.DataFrame,
@@ -234,74 +142,3 @@ def create_universe(
         ((result["ask"]["Low"] + result["bid"]["Low"]) / 2),
         ((result["ask"]["Close"] + result["bid"]["Close"]) / 2),
     )
-
-
-def sample_equity(
-    ticker: str,
-    start_date: str,
-    end_date: str,
-    interval: str = "1d",
-):
-
-    return (
-        yf.download(
-            [ticker],
-            start=start_date,
-            end=end_date,
-            interval=interval,
-        ).droplevel(0, axis=1),
-    )
-
-
-def sample_options(
-    universe: list[str], start_date: str, end_date: str, provider: Provider, **kwargs
-):
-    from openbb import obb
-
-    out = []
-
-    data = (
-        (
-            symbol,
-            obb.derivatives.options.chains(symbol)  # type: ignore
-            .to_dataframe()
-            .replace({"call": 1, "put": -1})
-            .astype({"expiration": "datetime64[ns]"})
-            .assign(timestamp=end_date)
-            # .set_index(["timestamp", "expiration", "strike", "option_type"])
-            .set_index(["timestamp", "contract_symbol"]).unstack(level=1),
-        )
-        for symbol in universe
-    )
-
-    for symbol, df in data:
-        df.index = pd.to_datetime(df.index)
-        out.extend((df[field], (symbol, field)) for field in OPTION_FIELDS)
-
-    return out
-
-
-def sample_futures(
-    universe: list[str], start_date: str, end_date: str, provider: Provider, **kwargs
-):
-    from openbb import obb
-
-    out = []
-
-    data = (
-        (
-            symbol,
-            obb.derivatives.futures.curve(symbol)
-            .to_dataframe()
-            .assign(timestamp=end_date)
-            .set_index(["timestamp", "symbol"])
-            .unstack("symbol"),
-        )
-        for symbol in universe
-    )
-
-    for symbol, df in data:
-        df.index = pd.to_datetime(df.index)
-        out.extend((df[field], (symbol, field)) for field in FUTURES_FIELDS)
-
-    return out

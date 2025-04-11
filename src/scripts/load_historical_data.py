@@ -14,6 +14,7 @@ from arcticdb import Arctic
 
 import pandas as pd
 
+import tradingo.sampling as sampling
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +70,9 @@ def main():
         clean=args.clean,
     )
 
-    service = sampling.get_ig_service()
+    service = sampling.ig.get_ig_service()
 
-    sampling.download_instruments(
+    sampling.instruments.download_instruments(
         index_col=None,
         epics=ASSET_MAPPING.values(),
         universe=args.universe,

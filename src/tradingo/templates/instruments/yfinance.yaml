@@ -1,6 +1,6 @@
 "download.{{ universe_name }}":
   depends_on: []
-  function: tradingo.sampling.download_instruments
+  function: tradingo.sampling.instruments.download_instruments
   symbols_out:
      - "instruments/{{ universe_name }}"
   publish_args:
@@ -14,7 +14,7 @@
   depends_on: []
   symbols_out:
    - "{{ raw_prices_lib }}/{{ ticker }}.ohlcv"
-  function: tradingo.sampling.sample_equity
+  function: tradingo.sampling.yf.sample_equity
   params:
     ticker: "{{ ticker }}"
     start_date: "{{ data_interval_start }}"
@@ -23,7 +23,7 @@
 {% endfor %}
 
 "sample.{{ universe_name }}":
-  function: tradingo.sampling.create_universe
+  function: tradingo.sampling.ig.create_universe
   params:
     pricelib: "{{ raw_prices_lib }}"
     start_date: "{{ data_interval_start }}"
