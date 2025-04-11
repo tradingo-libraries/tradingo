@@ -7,7 +7,7 @@
       "epics": [
         "IX.D.SPTRD.IFS.IP"
       ],
-      "function": "tradingo.sampling.sample_ig_instruments",
+      "function": "tradingo.sampling.ig.sample_instruments",
       "volatility": {
         "ivol": false,
         "field": "prices/bid.close",
