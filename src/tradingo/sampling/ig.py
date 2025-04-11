@@ -9,6 +9,7 @@ import pandas as pd
 from arcticdb.version_store.library import Library
 from tenacity import Retrying, wait_exponential, retry_if_exception_type
 from trading_ig.rest import IGService, ApiExceededException
+from tradingo import symbols
 
 from tradingo.config import IGTradingConfig
 
@@ -103,6 +104,7 @@ def sample_instrument(
     )
 
 
+@symbols.lib_provider(pricelib="{raw_price_lib}")
 def create_universe(
     pricelib: Library,
     instruments: pd.DataFrame,
