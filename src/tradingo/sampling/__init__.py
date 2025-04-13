@@ -1,7 +1,4 @@
-from . import instruments
-from . import ig
-from . import yf
-
+from . import ig, instruments, yf
 
 __all__ = [
     "instruments",

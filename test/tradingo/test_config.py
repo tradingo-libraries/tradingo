@@ -1,6 +1,7 @@
 import os
-import pytest
 import pathlib
+
+import pytest
 
 from tradingo import cli
 from tradingo.config import TradingoConfig
