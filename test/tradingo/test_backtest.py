@@ -1,10 +1,10 @@
+from test.tradingo.utils import close_position
+
 import numpy as np
-import pytest
 import pandas as pd
+import pytest
 
 from tradingo import backtest
-
-from tradingo.test.utils import close_position
 
 
 def test_backtest_integration(tradingo):

@@ -1,7 +1,7 @@
 from arcticdb import Arctic
+
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-
 
 library = "prices"
 symbol_regex = "^ig-trading"

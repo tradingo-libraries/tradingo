@@ -1,18 +1,17 @@
 """IG data accessors"""
 
-import dateutil.tz
 import logging
 from typing import Optional
 
+import dateutil.tz
 import numpy as np
 import pandas as pd
 from arcticdb.version_store.library import Library
-from tenacity import Retrying, wait_exponential, retry_if_exception_type
-from trading_ig.rest import IGService, ApiExceededException
+from tenacity import Retrying, retry_if_exception_type, wait_exponential
+from trading_ig.rest import ApiExceededException, IGService
+
 from tradingo import symbols
-
 from tradingo.config import IGTradingConfig
-
 
 logger = logging.getLogger(__name__)
 

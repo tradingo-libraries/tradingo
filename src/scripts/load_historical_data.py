@@ -3,16 +3,15 @@
 #
 import argparse
 import logging
-from typing import List, Optional
-import dateutil.tz
-from collections import defaultdict
-import re
 import os
+import re
+from collections import defaultdict
 from pathlib import Path
+from typing import List, Optional
 
-from arcticdb import Arctic
-
+import dateutil.tz
 import pandas as pd
+from arcticdb import Arctic
 
 import tradingo.sampling as sampling
 

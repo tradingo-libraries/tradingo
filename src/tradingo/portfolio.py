@@ -2,12 +2,11 @@ import logging
 import re
 from typing import Optional
 
-from arcticdb.arctic import Library
-import pandas as pd
 import numpy as np
+import pandas as pd
+from arcticdb.arctic import Library
 
 from tradingo import symbols
-
 
 logger = logging.getLogger(__name__)
 

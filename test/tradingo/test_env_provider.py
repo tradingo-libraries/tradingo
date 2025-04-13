@@ -1,9 +1,11 @@
 import dataclasses
 import json
-import pathlib
-import pytest
 import os
+import pathlib
 from unittest import mock
+
+import pytest
+
 from tradingo.env_provider import EnvProvider, EnvProviderError
 
 

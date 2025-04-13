@@ -19,12 +19,11 @@ jobs:
           python-version: "3.11.9"
           # Optional - x64 or x86 architecture, defaults to x64
           architecture: "x64"
-      # You can test your matrix by printing the current Python version
+      - name: Setup
+        run: pip install uv
       - name: Install Tradingo
-        run: pip install -e ./[dev]
+        run: uv sync
       - name: Test Tradingo
-        run: pytest
+        run: uv run pytest
       - name: Format Tradingo
         run: black ./ --check
-      - name: Check notebooks
-        run: nb-clean check ./notebooks

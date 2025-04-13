@@ -1,10 +1,9 @@
 """Yahoo Finance data provider."""
 
 import logging
-import yfinance as yf
 
 import pandas as pd
-
+import yfinance as yf
 
 logger = logging.getLogger(__name__)
 

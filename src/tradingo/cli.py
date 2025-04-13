@@ -1,20 +1,21 @@
 from __future__ import annotations
-import os
-import jinja2
+
+import argparse
+import importlib
 import json
 import logging
-from enum import Enum
-import importlib
-import argparse
+import os
 import pathlib
+from enum import Enum
 from typing import Any, Callable, Iterable, Optional
+
+import jinja2
 import pandas as pd
 import yaml
 
+from . import symbols
 from .api import Tradingo
 from .config import IGTradingConfig, TradingoConfig
-
-from . import symbols
 
 
 class ConfigLoadError(Exception):

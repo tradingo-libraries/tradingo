@@ -6,7 +6,6 @@ import pandas as pd
 
 from tradingo import _backtest
 
-
 logger = logging.getLogger(__name__)
 
 

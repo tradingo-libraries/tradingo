@@ -1,19 +1,16 @@
-import logging
-import operator
-import numba
-import numpy as np
-import math
 import functools
-
+import logging
+import math
+import operator
 from typing import Optional
 
-from sklearn.model_selection import train_test_split
-from sklearn.neural_network import MLPClassifier
-from sklearn.multioutput import MultiOutputClassifier
+import numba
+import numpy as np
 import pandas as pd
-
 import pandas_market_calendars as pmc
-
+from sklearn.model_selection import train_test_split
+from sklearn.multioutput import MultiOutputClassifier
+from sklearn.neural_network import MLPClassifier
 
 logger = logging.getLogger(__name__)
 

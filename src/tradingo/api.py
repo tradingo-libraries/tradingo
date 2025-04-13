@@ -1,13 +1,14 @@
 from __future__ import annotations
-import inspect
-from typing import Optional
+
 import contextlib
-import pandas as pd
+import inspect
 import re
+from typing import Optional
+
 import arcticdb as adb
+import pandas as pd
 
 import tradingo.utils
-
 
 READ_SIG = inspect.signature(adb.arctic.Library.read)
 

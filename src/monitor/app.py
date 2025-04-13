@@ -1,3 +1,4 @@
+import datetime
 import os
 import time
 
@@ -8,11 +9,9 @@ import plotly.express as px
 from dash import Dash, Input, Output, State, callback, dcc, html
 from flask import Flask
 from pandas.core.generic import weakref
-import datetime
 
 from tradingo.api import Tradingo
 from tradingo.config import TradingoConfig
-
 
 config = TradingoConfig.from_env().to_env()
 

@@ -1,5 +1,6 @@
-import pathlib
 import os
+import pathlib
+
 from tradingo import cli
 from tradingo.config import TradingoConfig
 

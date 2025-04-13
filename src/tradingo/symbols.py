@@ -1,15 +1,15 @@
 from __future__ import annotations
+
 import functools
 import inspect
 import logging
 from collections import defaultdict
 from typing import NamedTuple, Optional
+from urllib.parse import parse_qsl, urlparse
 
 import arcticdb as adb
 import pandas as pd
-from urllib.parse import urlparse, parse_qsl
 from arcticdb_ext.exceptions import InternalException
-
 
 logger = logging.getLogger(__name__)
 

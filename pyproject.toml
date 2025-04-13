@@ -23,12 +23,13 @@ dependencies = [
   "riskfolio-lib",
   "tenacity",
 ]
-[project.optional-dependencies]
+
+[dependency-groups]
 dev = [
-  "pytest",
+  "pytest>=8.3.5",
   "pytest-benchmark",
   "black",
-  "nb-clean",
+  "isort",
 ]
 research = [
   "dtale",
@@ -48,11 +49,6 @@ requires = [
   "numpy",
   "setuptools>=64",
   "setuptools_scm>=8",
-]
-
-[dependency-groups]
-dev = [
-    "pytest>=8.3.5",
 ]
 
 [tool.black]

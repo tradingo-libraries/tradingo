@@ -1,9 +1,8 @@
-from pandas.plotting._matplotlib.style import get_standard_colors
-
 from typing import List, Union
 
 import matplotlib.axes
 import pandas as pd
+from pandas.plotting._matplotlib.style import get_standard_colors
 
 
 def plot_multi(

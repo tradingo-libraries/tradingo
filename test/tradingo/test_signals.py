@@ -1,11 +1,10 @@
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pandas_market_calendars as pmc
-from tradingo.api import Tradingo
+import pytest
 
 from tradingo import signals
-
+from tradingo.api import Tradingo
 
 UNIVERSE = "test-universe"
 PROVIDER = "test-provider"

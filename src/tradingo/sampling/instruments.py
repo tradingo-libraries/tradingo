@@ -1,7 +1,7 @@
 """static instruments data accessors."""
 
 import logging
-from typing import Optional, Literal
+from typing import Literal, Optional
 
 import pandas as pd
 from yfinance import Ticker

@@ -1185,6 +1185,15 @@ wheels = [
 ]
 
 [[package]]
+name = "isort"
+version = "6.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b8/21/1e2a441f74a653a144224d7d21afe8f4169e6c7c20bb13aec3a2dc3815e0/isort-6.0.1.tar.gz", hash = "sha256:1cb5df28dfbc742e490c5e41bad6da41b805b0a8be7bc93cd0fb2a8a890ac450", size = 821955 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/11/114d0a5f4dabbdcedc1125dee0888514c3c3b16d3e9facad87ed96fad97c/isort-6.0.1-py3-none-any.whl", hash = "sha256:2dc5d7f65c9678d94c88dfc29161a320eec67328bc97aad576874cb4be1e9615", size = 94186 },
+]
+
+[[package]]
 name = "itsdangerous"
 version = "2.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1908,18 +1917,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/85/fd/484aa8bb557f97a1781f38c78b79f795a2fa320e4165c4230f679937d1e8/narwhals-1.33.0.tar.gz", hash = "sha256:6233d2457debf4b5fe4a1da54530c6fe2d84326f4a8e3bca35bbbff580a347cb", size = 262554 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/41/c1/e9bc6b67c774e7c1f939c91ea535f18f7644fedc61b20d6baa861ad52b34/narwhals-1.33.0-py3-none-any.whl", hash = "sha256:f653319112fd121a1f1c18a40cf70dada773cdacfd53e62c2aa0afae43c17129", size = 322750 },
-]
-
-[[package]]
-name = "nb-clean"
-version = "4.0.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "nbformat" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/28/81/2ef0aaf3df03ec4146a92d62ce9b9533d368431791c7e5cb8e027068794a/nb_clean-4.0.1.tar.gz", hash = "sha256:f4af1bec3f25e7b18eb09024947bcc809efc97fd68bec482d219c304d850809f", size = 24170 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3a/be/dd0d1c964fa8e2c645bb9298290c761c34b292ef4b2c113018f1b3c4cd90/nb_clean-4.0.1-py3-none-any.whl", hash = "sha256:6a673775523ad5ae18566bb0880012c169944a9357760dfcf993cdb14e2e5f82", size = 21355 },
 ]
 
 [[package]]
@@ -3375,10 +3372,10 @@ dependencies = [
     { name = "yfinance" },
 ]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
 dev = [
     { name = "black" },
-    { name = "nb-clean" },
+    { name = "isort" },
     { name = "pytest" },
     { name = "pytest-benchmark" },
 ]
@@ -3387,35 +3384,32 @@ research = [
     { name = "jupyter" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "arcticdb" },
-    { name = "black", marker = "extra == 'dev'" },
-    { name = "dtale", marker = "extra == 'research'" },
-    { name = "jupyter", marker = "extra == 'research'" },
-    { name = "nb-clean", marker = "extra == 'dev'" },
     { name = "numba" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pandas-market-calendars" },
     { name = "pandera" },
-    { name = "pytest", marker = "extra == 'dev'" },
-    { name = "pytest-benchmark", marker = "extra == 'dev'" },
     { name = "pyyaml" },
     { name = "riskfolio-lib" },
     { name = "tenacity" },
     { name = "trading-ig" },
     { name = "yfinance" },
 ]
-provides-extras = ["dev", "research"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.3.5" }]
+dev = [
+    { name = "black" },
+    { name = "isort" },
+    { name = "pytest", specifier = ">=8.3.5" },
+    { name = "pytest-benchmark" },
+]
+research = [
+    { name = "dtale" },
+    { name = "jupyter" },
+]
 
 [[package]]
 name = "traitlets"
