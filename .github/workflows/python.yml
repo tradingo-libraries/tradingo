@@ -25,9 +25,11 @@ jobs:
         run: uv sync
       - name: Test tradingo
         run: uv run pytest
-      - name: Format tradingo
+      - name: Formatting check tradingo
         run: black ./ --check --config pyproject.toml
-      - name: Import checks tradingo
+      - name: Import check tradingo
         run: isort ./ --check
       - name: Ruff check tradingo
         run: ruff check --config pyproject.toml ./
+      - name: Type check tradingo
+        run: mypy --config pyproject.toml ./src
