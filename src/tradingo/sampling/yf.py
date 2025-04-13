@@ -2,7 +2,6 @@
 
 import logging
 
-import pandas as pd
 import yfinance as yf
 
 logger = logging.getLogger(__name__)
@@ -14,7 +13,6 @@ def sample_equity(
     end_date: str,
     interval: str = "1d",
 ):
-
     return (
         yf.download(
             [ticker],

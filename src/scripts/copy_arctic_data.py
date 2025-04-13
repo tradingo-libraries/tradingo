@@ -1,8 +1,5 @@
 from arcticdb import Arctic
 
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-
 library = "prices"
 symbol_regex = "^ig-trading"
 
@@ -19,7 +16,6 @@ def sync_symbols(
     source_uri,
     target_uri,
 ):
-
     source_a = Arctic(source_uri)
     target_a = Arctic(target_uri)
 
@@ -27,6 +23,5 @@ def sync_symbols(
     target_lib = target_a.get_library(library, create_if_missing=True)
 
     for sym in source_lib.list_symbols(regex=symbol_regex):
-
         data = source_lib.read(sym)
         target_lib.write(sym, data.data)

@@ -21,9 +21,13 @@ jobs:
           architecture: "x64"
       - name: Setup
         run: pip install uv
-      - name: Install Tradingo
+      - name: Install tradingo
         run: uv sync
-      - name: Test Tradingo
+      - name: Test tradingo
         run: uv run pytest
-      - name: Format Tradingo
-        run: black ./ --check
+      - name: Format tradingo
+        run: black ./ --check --config pyproject.toml
+      - name: Import checks tradingo
+        run: isort ./ --check
+      - name: Ruff check tradingo
+        run: ruff check --config pyproject.toml ./

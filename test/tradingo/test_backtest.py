@@ -8,8 +8,7 @@ from tradingo import backtest
 
 
 def test_backtest_integration(tradingo):
-
-    bt = pd.concat(
+    pd.concat(
         backtest.backtest(
             portfolio=tradingo.portfolio.model.raw.shares(),
             bid_close=tradingo.prices.close(),

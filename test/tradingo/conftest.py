@@ -10,7 +10,6 @@ from tradingo.utils import null_instruments
 
 @pytest.fixture(scope="session")
 def prices() -> pd.DataFrame:
-
     annual_std = 0.12
 
     returns = pd.DataFrame(

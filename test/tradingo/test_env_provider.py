@@ -10,7 +10,6 @@ from tradingo.env_provider import EnvProvider, EnvProviderError
 
 
 def test_env_provider(tmp_path):
-
     @dataclasses.dataclass
     class Settings1(EnvProvider):
         parameter: int
@@ -76,7 +75,6 @@ def test_env_provider(tmp_path):
         EnvProviderError,
         match="Unused config field 'unknown' with value 'value' for prefix app_",
     ):
-
         s3 = Settings3.from_env(
             env={
                 "app_param1": 1,

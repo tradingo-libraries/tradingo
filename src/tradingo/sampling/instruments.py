@@ -32,7 +32,6 @@ def download_instruments(
     tickers: Optional[list[str]] = None,
     epics: Optional[list[str]] = None,
 ):
-
     if file:
         return (
             pd.read_csv(

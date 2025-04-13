@@ -11,7 +11,6 @@ PROVIDER = "test-provider"
 
 
 def test_buffer_signal(tradingo: Tradingo):
-
     signals.buffered(
         signal=tradingo.portfolio.model.raw.shares(),
         buffer_width=0.5,
@@ -70,7 +69,6 @@ def test_intraday_momentum(
     bid_close,
     close_offset_periods,
 ):
-
     result = pd.concat(
         signals.intraday_momentum(
             ask_close=ask_close,

@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 
 from tradingo.sampling import get_ig_service
-from tradingo.symbols import symbol_publisher
 
 
 def get_activity_history(

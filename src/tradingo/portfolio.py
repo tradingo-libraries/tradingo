@@ -24,7 +24,6 @@ def portfolio_construction(
     default_instrument_weight: float = 1.0,
     instrument_weights: Optional[dict] = None,
 ):
-
     instrument_weights = instrument_weights or {}
 
     weights = pd.Series(multiplier, index=instruments.index)
@@ -32,7 +31,6 @@ def portfolio_construction(
     instruments["Symbol"] = instruments.index
 
     for key, weights_config in instrument_weights.items():
-
         if key not in instruments.columns:
             continue
 
@@ -92,7 +90,6 @@ def portfolio_optimization(
     min_periods: int,
     aum: float,
 ):
-
     import riskfolio as rf
 
     def get_weights(
@@ -127,7 +124,6 @@ def portfolio_optimization(
 
     data = []
     for i, _ in enumerate(asset_returns.index):
-
         if i < min_periods:
             data.append(
                 pd.Series(np.nan, index=asset_returns.columns).to_frame().transpose()
@@ -164,12 +160,18 @@ def instrument_ivol(close, provider, **kwargs):
     return (pd.concat(ivols, axis=1).rename_axis("Symbol"),)
 
 
+def _parse_ticker(t: str):
+    match = re.match(r".*\(([A-Z]{4})\)", t)
+    if match is not None:
+        return match.groups()[0]
+    return t
+
+
 def position_from_trades(
     close: pd.DataFrame,
     aum: float,
     trade_file: str,
 ):
-
     trades = (
         pd.read_csv(trade_file, parse_dates=["Date"])
         .dropna(axis=0, how="all")
@@ -179,12 +181,7 @@ def position_from_trades(
         trades["Order type"].isin(["AtBest", "Quote and Deal"])
         & trades["Order status"].eq("Completed")
     ]
-    trades["Ticker"] = (
-        trades["Investment"].apply(
-            lambda t: re.match(".*\(([A-Z]{4})\)", t).groups()[0]
-        )
-        + ".L"
-    )
+    trades["Ticker"] = trades["Investment"].apply(_parse_ticker) + ".L"
     position_shares = (
         trades.set_index(["Date", "Ticker"])
         .groupby(["Date", "Ticker"])
@@ -207,5 +204,4 @@ def position_from_trades(
 
 
 def point_in_time_position(positions: pd.DataFrame):
-
     return ((positions).iloc[-1:,],)

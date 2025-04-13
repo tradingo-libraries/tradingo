@@ -253,3 +253,5 @@ cython_debug/
 src/tradingo/_backtest.c
 
 Untitled*.ipynb
+
+quickfix.txt

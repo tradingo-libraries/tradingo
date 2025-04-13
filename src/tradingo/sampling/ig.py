@@ -22,7 +22,6 @@ def get_ig_service(
     api_key: Optional[str] = None,
     acc_type: Optional[str] = None,
 ) -> IGService:
-
     config = IGTradingConfig.from_env()
 
     retryer = Retrying(
@@ -110,7 +109,6 @@ def create_universe(
     end_date: pd.Timestamp,
     start_date: pd.Timestamp,
 ):
-
     start_date = pd.Timestamp(start_date)
     end_date = pd.Timestamp(end_date)
 

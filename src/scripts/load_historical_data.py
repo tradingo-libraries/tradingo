@@ -9,7 +9,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import List, Optional
 
-import dateutil.tz
 import pandas as pd
 from arcticdb import Arctic
 
@@ -36,7 +35,6 @@ MULTIPLIERS = {
 
 
 def cli_app():
-
     app = argparse.ArgumentParser("load-historical-data")
 
     app.add_argument("--path", type=Path, required=True, nargs="+")
@@ -55,7 +53,6 @@ FILE_REGEX = r"^([A-Z0-9\.]+)_Candlestick_([0-9]+_[MDHS])_(BID|ASK)_([0-9]{2}\.[
 
 
 def main():
-
     args = cli_app().parse_args()
 
     a = Arctic(args.arctic_uri)
@@ -68,8 +65,6 @@ def main():
         provider=args.provider,
         clean=args.clean,
     )
-
-    service = sampling.ig.get_ig_service()
 
     sampling.instruments.download_instruments(
         index_col=None,
@@ -88,15 +83,11 @@ def read_backfill(
     end_date: Optional[pd.Timestamp] = None,
     **kwargs,
 ):
-
     data_files = defaultdict(list)
 
     for path in paths:
-
         for file in os.listdir(path):
-
             if match := re.match(FILE_REGEX, file):
-
                 symbol, frequency, field, start_date, end_date = match.groups()
 
                 # need to group by symbol
@@ -136,7 +127,6 @@ def read_backfill(
     result.rename(columns=ASSET_MAPPING, inplace=True)
 
     if end_date:
-
         result = result[result.index <= end_date]
 
     return (
@@ -156,7 +146,6 @@ def read_backfill(
 
 
 if __name__ == "__main__":
-
     import sys
 
     logging.getLogger(__name__).setLevel(logging.INFO)

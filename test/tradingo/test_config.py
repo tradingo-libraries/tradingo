@@ -6,7 +6,6 @@ from tradingo.config import TradingoConfig
 
 
 def test_config():
-
     env = TradingoConfig.from_env(
         env={
             "TP_CONFIG_HOME": "/home/rory/dev/tradingo-plat/config/tradingo/",
@@ -20,4 +19,4 @@ def test_config():
         variables=os.environ,
     )
 
-    dag = cli.DAG.from_config(out)
+    cli.DAG.from_config(out)

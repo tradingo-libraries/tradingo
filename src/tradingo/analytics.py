@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from pandas.core.window.rolling import window_aggregations
 
 
 def omega_ratio(returns: pd.Series, required_return=0.0):
