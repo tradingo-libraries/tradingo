@@ -294,7 +294,7 @@ def dynamic_mean_reversion(
     )
 
     X = pd.concat(
-        (z_score.shift(i).squeeze().rename(i) for i in range(1, n_lags)),
+        (z_score.shift(i).squeeze() for i in range(1, n_lags)),
         axis=1,
     ).dropna()
 

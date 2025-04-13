@@ -31,7 +31,7 @@ def backtest(
     stop_limit: Optional[pd.DataFrame] = None,
     stop_loss: Optional[pd.DataFrame] = None,
     price_ffill_limit: int = 0,
-):
+) -> tuple[pd.DataFrame]:
 
     bid_close = bid_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
     ask_close = ask_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
