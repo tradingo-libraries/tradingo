@@ -81,6 +81,7 @@ def process_includes(
 @dataclasses.dataclass
 class IGTradingConfig(EnvProvider):
     """IG Trading configuration"""
+
     password: str
     username: str
     api_key: str
@@ -91,6 +92,7 @@ class IGTradingConfig(EnvProvider):
 @dataclasses.dataclass
 class TradingoConfig(EnvProvider):
     """Tradingo configuration"""
+
     config_home: pathlib.Path
     arctic_uri: str
     templates: pathlib.Path = pathlib.Path(templates.__file__).parent
