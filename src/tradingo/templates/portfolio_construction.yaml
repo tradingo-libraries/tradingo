@@ -1,0 +1,54 @@
+"portfolio.{{ name }}":
+  depends_on:
+  {% for model in model_weights %}
+    - "signals.{{ model }}"
+  {% endfor %}
+  function: tradingo.portfolio.portfolio_construction
+  symbols_in:
+    instruments: "instruments/{{ universe_name }}"
+    close: "prices/{{ universe_name }}.mid.close"
+  symbols_out:
+    - "portfolio/{{ name }}.raw.percent"
+    - "portfolio/{{ name }}.raw.shares"
+    - "portfolio/{{ name }}.raw.position"
+    - "portfolio/{{ name }}.rounded.percent"
+    - "portfolio/{{ name }}.rounded.shares"
+    - "portfolio/{{ name }}.rounded.position"
+    - "signals/{{ name }}.raw.signal"
+  params:
+    model_weights: {{ model_weights }}
+    multiplier: {{ portfolio.multiplier }}
+    aum: {{ portfolio.aum }}
+    snapshot: "{{ name }}{% raw %}_{{ run_id }}_{{ task_instance.task_id }}{% endraw %}"
+"backtest.{{ name }}":
+  depends_on:
+    - "portfolio.{{ name }}"
+  function: "tradingo.backtest.backtest"
+  params:
+    price_ffill_limit: {{ backtest.price_ffill_limit }}
+  symbols_in:
+    portfolio: "portfolio/{{ name }}.rounded.position"
+    bid_close: "prices/{{ universe_name }}.bid.close"
+    ask_close: "prices/{{ universe_name }}.ask.close"
+  symbols_out:
+    - backtest/{{ name }}.portfolio
+    - backtest/{{ name }}.instrument.unrealised_pnl
+    - backtest/{{ name }}.instrument.realised_pnl
+    - backtest/{{ name }}.instrument.total_pnl
+    - backtest/{{ name }}.instrument.net_investment
+    - backtest/{{ name }}.instrument.net_position
+    - backtest/{{ name }}.instrument.net_exposure
+    - backtest/{{ name }}.instrument.avg_open_price
+    - backtest/{{ name }}.instrument.stop_trade
+
+"portfolio.point_in_time.{{ name }}":
+  depends_on:
+    - "portfolio.{{ name }}"
+  function: tradingo.portfolio.point_in_time_position
+  symbols_in:
+    positions: "portfolio/{{ name }}.rounded.position"
+  symbols_out:
+    - "portfolio/{{ name }}.rounded.pit_position"
+  params:
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"

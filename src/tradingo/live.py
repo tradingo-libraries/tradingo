@@ -1,16 +1,10 @@
-import pandas as pd
-import numpy as np
 import dateutil.tz
+import numpy as np
+import pandas as pd
 
-from tradingo.symbols import symbol_publisher
 from tradingo.sampling import get_ig_service
 
 
-@symbol_publisher(
-    template="live/activity.{0}",
-    symbol_prefix="{provider}.{universe}.",
-    astype={"level": "float"},
-)
 def get_activity_history(
     from_date,
     to_date,

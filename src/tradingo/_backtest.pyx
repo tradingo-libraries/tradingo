@@ -1,8 +1,8 @@
 cimport cython
-from libc.math cimport isnan, signbit
-from cython.view cimport array as cvarray
-
 cimport numpy as np
+from cython.view cimport array as cvarray
+from libc.math cimport isnan, signbit
+
 import numpy as np
 
 

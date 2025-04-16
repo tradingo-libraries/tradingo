@@ -4,12 +4,9 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-
 from trading_ig.rest import IGService
-from tradingo.api import Tradingo
-from tradingo.sampling import get_ig_service
-from tradingo.symbols import symbol_provider, symbol_publisher
 
+from tradingo.sampling.ig import get_ig_service
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +29,15 @@ def close_position(deal_id, position, svc, size=None):
 
 
 def close_all_open_position(positions, svc):
-
     epic_positions = positions
 
     for deal_id, position in epic_positions.iterrows():
-
         close_position(deal_id=deal_id, position=position, svc=svc)
 
 
 def get_current_positions(
     service: IGService,
 ):
-
     all_positions = service.fetch_open_positions().set_index(["epic", "dealId"])
     all_positions["size"] = (
         all_positions["direction"].replace({"BUY": 1, "SELL": -1})
@@ -57,13 +51,11 @@ def reduce_open_positions(
     epic: str,
     quantity: int,
 ):
-
     positions = get_current_positions(service).loc[epic]
 
     quantity_cxd = 0.0
 
     for deal_id, position in positions.sort_values("size").iterrows():
-
         to_cancel = min(position["size"], quantity - quantity_cxd)
 
         close_position(
@@ -102,34 +94,11 @@ def get_currency(instrument: pd.Series):
     return "GBP"
 
 
-# TODO: #21 - symbol_publisher
-@symbol_provider(
-    instruments="instruments/{universe}",
-    no_date=True,
-)
-@symbol_provider(
-    target_positions="portfolio/{name}.{stage}",
-    symbol_prefix="{provider}.{universe}.",
-)
 def adjust_position_sizes(
     instruments: pd.DataFrame,
     target_positions: pd.DataFrame,
-    stage: str,
-    universe: str,
-    provider: str,
-    name: str,
     service: Optional[IGService] = None,
-    **kwargs,
 ):
-
-    logger.info(
-        "Adjusting name=%s universe=%s provider=%s stage=%s",
-        name,
-        universe,
-        provider,
-        stage,
-    )
-
     service = service or get_ig_service()
     current_positions = get_current_positions(service)
 
@@ -152,7 +121,6 @@ def adjust_position_sizes(
 
         # increasing position
         if abs(current_position) < abs(latest_target):
-
             target = abs(latest_target) - abs(current_position)
             side = "BUY" if latest_target > 0 else "SELL"
 
@@ -186,7 +154,6 @@ def adjust_position_sizes(
             logger.info(result)
 
         elif abs(current_position) > abs(latest_target):
-
             reduce_by = abs(current_position - latest_target)
 
             logger.info(
@@ -208,10 +175,3 @@ def adjust_position_sizes(
                 current_position,
                 epic,
             )
-
-
-def main():
-
-    args = cli_app().parse_args()
-
-    service = get_ig_service()

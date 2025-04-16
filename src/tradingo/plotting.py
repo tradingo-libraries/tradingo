@@ -1,9 +1,8 @@
-from pandas.plotting._matplotlib.style import get_standard_colors
-
 from typing import List, Union
 
 import matplotlib.axes
 import pandas as pd
+from pandas.plotting._matplotlib.style import get_standard_colors
 
 
 def plot_multi(
@@ -36,18 +35,17 @@ def plot_multi(
     See Also:
         This code is mentioned in https://stackoverflow.com/q/11640243/2593810
     """
-    from pandas.plotting._matplotlib.style import get_standard_colors
 
     # Get default color style from pandas - can be changed to any other color list
     if y is None:
-        y = data.columns
+        y = data.columns.to_list()
 
     # remove x_col from y_cols
     if x:
         y = [col for col in y if col != x]
 
-    if len(y) == 0:
-        return
+    if not y:
+        raise ValueError("No y axis to plot")
     colors = get_standard_colors(num_colors=len(y))
 
     if "legend" not in kwargs:

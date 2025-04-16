@@ -1,31 +1,19 @@
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pandas_market_calendars as pmc
-from tradingo.api import Tradingo
+import pytest
 
 from tradingo import signals
-
+from tradingo.api import Tradingo
 
 UNIVERSE = "test-universe"
 PROVIDER = "test-provider"
 
 
 def test_buffer_signal(tradingo: Tradingo):
-
     signals.buffered(
         signal=tradingo.portfolio.model.raw.shares(),
-        thresholds=tradingo.portfolio.model.raw.shares() * 0.1,
-        dry_run=True,
-        start_date="2023-01-01",
-        end_date="2024-05-31",
-        config_name="test",
-        model_name="model",
-        library="portfolio",
         buffer_width=0.5,
-        provider="yfinance",
-        universe="etfs",
-        arctic=tradingo,
     )
 
 
@@ -80,18 +68,22 @@ def test_intraday_momentum(
     ask_close,
     bid_close,
     close_offset_periods,
-    tradingo,
 ):
-
-    result = signals.intraday_momentum(
-        ask_close=ask_close,
-        bid_close=bid_close,
-        universe=UNIVERSE,
-        provider=PROVIDER,
-        dry_run=True,
-        close_offset_periods=close_offset_periods,
-        calendar="NYSE",
-        arctic=tradingo,
+    result = pd.concat(
+        signals.intraday_momentum(
+            ask_close=ask_close,
+            bid_close=bid_close,
+            close_offset_periods=close_offset_periods,
+            calendar="NYSE",
+        ),
+        axis=1,
+        keys=(
+            "intraday_momentum",
+            "z_score",
+            "short_vol",
+            "long_vol",
+            "previous_close_px",
+        ),
     )
 
     cal = pmc.get_calendar("NYSE")
@@ -100,10 +92,10 @@ def test_intraday_momentum(
 
     subset = result.loc[trading_index]
 
-    assert subset[-(close_offset_periods + 1) :]["signals/intraday_momentum"][
+    assert subset[-(close_offset_periods + 1) :]["intraday_momentum"][
         "ABCD"
     ].to_list() == [0 for _ in range(0, 1 + close_offset_periods)]
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     pytest.main([__file__])

@@ -1,37 +1,23 @@
-import logging
-import operator
-import numba
-import numpy as np
-import math
 import functools
-
+import logging
+import math
+import operator
 from typing import Optional
 
-from sklearn.model_selection import train_test_split
-from sklearn.neural_network import MLPClassifier
-from sklearn.multioutput import MultiOutputClassifier
+import numba
+import numpy as np
 import pandas as pd
-
 import pandas_market_calendars as pmc
-
-from tradingo.symbols import symbol_provider, symbol_publisher
-
+from sklearn.model_selection import train_test_split
+from sklearn.multioutput import MultiOutputClassifier
+from sklearn.neural_network import MLPClassifier
 
 logger = logging.getLogger(__name__)
 
 
-@symbol_provider(
-    close="prices/adj_close",
-    symbol_prefix="{provider}.{universe}.",
-)
-@symbol_publisher(
-    template="signals/vol_{0}",
-    symbol_prefix="{provider}.{universe}.",
-)
 def vol(
     speeds,
     close: pd.DataFrame,
-    **kwargs,
 ):
     returns = np.log(close / close.shift())
     return tuple(
@@ -43,31 +29,11 @@ def vol(
     )
 
 
-@symbol_provider(close="prices/adj_close", symbol_prefix="{provider}.{universe}.")
-@symbol_publisher(
-    "signals/{signal_name}",
-    symbol_prefix="{provider}.{universe}.",
-)
 def ewmac_signal(
     close: pd.DataFrame,
     speed1: int,
     speed2: int,
-    provider: str,
-    config_name: str,
-    model_name="ewmac",
-    signal_name="ewmac_{speed1}_{speed2}",
-    **kwargs,
 ):
-
-    logger.info(
-        "Running %s model=%s signal=%s with %s",
-        config_name,
-        model_name,
-        signal_name,
-        provider,
-    )
-
-    returns = np.log(close / close.shift())
 
     return (
         (
@@ -77,34 +43,17 @@ def ewmac_signal(
     )
 
 
-@symbol_publisher(
-    "signals/{signal}.scaled",
-    symbol_prefix="{provider}.{universe}.{model_name}.",
-)
-@symbol_provider(
-    signal="signals/{signal}",
-    symbol_prefix="{provider}.{universe}.{model_name}.",
-)
-def scaled(signal, scale: float, **kwargs):
+def scaled(signal, scale: float):
     return ((signal / signal.abs().max()) * scale,)
 
 
-@symbol_publisher(
-    "signals/{signal}.capped",
-    symbol_prefix="{provider}.{universe}.{model_name}.",
-)
-@symbol_provider(
-    signal="signals/{signal}",
-    symbol_prefix="{provider}.{universe}.{model_name}.",
-)
-def capped(signal: pd.Series, cap: float, **kwargs):
+def capped(signal: pd.Series, cap: float):
     signal[signal.abs() >= cap] = np.sign(signal) * cap
     return (signal,)
 
 
 @numba.jit
 def _linear_buffer(signal: np.ndarray, thresholds: np.ndarray):
-
     res: np.ndarray = np.copy(signal)
     lower = signal - thresholds
     upper = signal + thresholds
@@ -128,15 +77,7 @@ def _linear_buffer(signal: np.ndarray, thresholds: np.ndarray):
     return res
 
 
-@symbol_publisher(
-    "{library}/{signal}.buffered", symbol_prefix="{provider}.{universe}.{model_name}."
-)
-@symbol_provider(
-    signal="{library}/{signal}",
-    symbol_prefix="{provider}.{universe}.{model_name}.",
-)
-def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
-
+def buffered(signal: pd.Series | pd.DataFrame, buffer_width):
     signal = signal.ffill().fillna(0.0)
 
     thresholds = signal.mul(buffer_width).abs()
@@ -146,19 +87,6 @@ def buffered(signal: pd.Series | pd.DataFrame, buffer_width, **kwargs):
     return (pd.DataFrame(buffered, index=signal.index, columns=signal.columns),)
 
 
-@symbol_publisher(
-    "signals/intraday_momentum",
-    "signals/intraday_momentum.z_score",
-    "signals/intraday_momentum.short_vol",
-    "signals/intraday_momentum.long_vol",
-    "signals/intraday_momentum.previous_close_px",
-    symbol_prefix="{provider}.{universe}.",
-)
-@symbol_provider(
-    ask_close="prices/ask.close",
-    bid_close="prices/bid.close",
-    symbol_prefix="{provider}.{universe}.",
-)
 def intraday_momentum(
     ask_close,
     bid_close,
@@ -178,9 +106,7 @@ def intraday_momentum(
     start_after: int = 0,
     close_overrides: Optional[dict[str, dict[str, int]]] = None,
     dynamic_floor: int = 0,
-    **kwargs,
 ):
-
     close = (
         ((ask_close + bid_close) / 2).groupby(ask_close.index.date).ffill(ffill_limit)
     )
@@ -239,7 +165,8 @@ def intraday_momentum(
         signal.index.to_series().dt.date.eq(signal.index.to_series().dt.date.shift()),
         0,  # make first reading 0.0 position
     ).where(
-        np.sign(signal.shift()).eq(np.sign(signal)), 0  # make changes in sign 0
+        np.sign(signal.shift()).eq(np.sign(signal)),
+        0,  # make changes in sign 0
     )
 
     def get_pre_trade_index(periods):
@@ -280,7 +207,6 @@ def intraday_momentum(
     # signal closes position at close time
 
     def periods_before_close(n):
-
         return functools.reduce(
             pd.DatetimeIndex.union,
             (
@@ -294,7 +220,6 @@ def intraday_momentum(
     close_at = periods_before_close(n=close_offset_periods)
 
     if monotonic:
-
         signal_cumabsmax = signal.abs().groupby(signal.index.date).cummax()
         is_long = np.sign(signal).groupby(signal.index.date).cummax()
         is_short = np.sign(signal).groupby(signal.index.date).cummin()
@@ -302,13 +227,11 @@ def intraday_momentum(
         signal = signal_cumabsmax * np.sign(direction)
 
     if incremental:
-
         no_trade_at = periods_before_close(n=incremental)
         signal.loc[signal.index.isin(no_trade_at)] = 0.0
         signal = signal.groupby(signal.index.date).cumsum() * 1
 
     if only_with_close:
-
         has_close = (
             close.groupby(close.index.date)
             .apply(
@@ -346,20 +269,11 @@ def intraday_momentum(
     )
 
 
-@symbol_publisher(
-    "signals/dynamic_mean_reversion",
-    symbol_prefix="{provider}.{universe}.",
-)
-@symbol_provider(
-    z_score="signals/intraday_momentum.z_score",
-    symbol_prefix="{provider}.{universe}.",
-)
 def dynamic_mean_reversion(
     z_score: pd.DataFrame,
     n_lags: int = 30,
-    **kwargs,
 ) -> tuple[pd.DataFrame]:
-    mean_reverting = y = (
+    y = (
         (
             z_score.resample(pd.offsets.BDay(1)).last().abs()
             > z_score.resample(pd.offsets.BDay(1)).first().abs()
@@ -369,7 +283,7 @@ def dynamic_mean_reversion(
     )
 
     X = pd.concat(
-        (z_score.shift(i).squeeze().rename(i) for i in range(1, n_lags)),
+        (z_score.shift(i).squeeze() for i in range(1, n_lags)),
         axis=1,
     ).dropna()
 

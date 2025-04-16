@@ -4,9 +4,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from tradingo.symbols import symbol_provider, symbol_publisher
 from tradingo import _backtest
-
 
 logger = logging.getLogger(__name__)
 
@@ -23,19 +21,6 @@ BACKTEST_FIELDS = (
 )
 
 
-@symbol_provider(
-    portfolio="portfolio/{name}.{stage}",
-    bid_close="prices/close",
-    ask_close="prices/close",
-    dividends="prices/dividend",
-    symbol_prefix="{provider}.{universe}.",
-)
-@symbol_publisher(
-    "backtest/portfolio",
-    *(f"backtest/instrument.{f}" for f in BACKTEST_FIELDS if f != "date"),
-    symbol_prefix="{provider}.{universe}.{name}.{stage}.",
-    astype="float64",
-)
 def backtest(
     *,
     portfolio: pd.DataFrame,
@@ -45,15 +30,14 @@ def backtest(
     stop_limit: Optional[pd.DataFrame] = None,
     stop_loss: Optional[pd.DataFrame] = None,
     price_ffill_limit: int = 0,
-    **kwargs,
-):
-
+) -> tuple[pd.DataFrame]:
     bid_close = bid_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
     ask_close = ask_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
 
     mid_close = (bid_close + ask_close) / 2
-    bid_close, ask_close = bid_close.reindex(mid_close.index), ask_close.reindex(
-        mid_close.index
+    bid_close, ask_close = (
+        bid_close.reindex(mid_close.index),
+        ask_close.reindex(mid_close.index),
     )
 
     # restrict position changes to where we have a price.
@@ -88,10 +72,7 @@ def backtest(
             columns=mid_close.columns,
         )
 
-    logger.info("running backtest for %s", kwargs)
-
     def compute_backtest(inst_trades: pd.Series):
-
         logger.info("Computing backtest for ticker=%s", inst_trades.name)
         inst_mids = mid_close[inst_trades.name].ffill().dropna()
         inst_asks = ask_close[inst_trades.name].reindex(inst_mids.index, method="ffill")

@@ -1,22 +1,16 @@
-import os
-import urllib.parse
+import datetime
 
 import dash
 import numpy as np
 import pandas as pd
-import plotly.express as px
-from dash import Dash, Input, Output, State, callback, dcc, html
-from flask import Flask
-from pandas.core.generic import weakref
+from dash import Dash, Input, Output, callback, dcc, html
 
 from tradingo.api import Tradingo
+from tradingo.config import TradingoConfig
 
-ARCTIC_URL = os.environ.get(
-    "TRADINGO_ARCTIC_URL",
-    "lmdb:///home/rory/dev/tradingo-plat/data/prod/tradingo.db",
-)
+config = TradingoConfig.from_env().to_env()
 
-DEFAULT_UNIVERSE = "im-multi-asset"
+ARCTIC_URL = config.arctic_uri
 
 pd.options.plotting.backend = "plotly"
 
@@ -86,7 +80,6 @@ app.layout = html.Div(
 def set_universe_options(_):
     api = Tradingo(
         uri=ARCTIC_URL,
-        provider="ig-trading",
     )
     return api.instruments._library.list_symbols()
 
@@ -100,8 +93,6 @@ def set_asset_options(universe):
         return dash.no_update
     api = Tradingo(
         uri=ARCTIC_URL,
-        provider="ig-trading",
-        universe=universe,
     )
     return api.instruments[universe]().index.to_list()
 
@@ -115,9 +106,8 @@ def set_portfolio_options(universe):
         return dash.no_update
     api = Tradingo(
         uri=ARCTIC_URL,
-        provider="ig-trading",
     )
-    return api.portfolio[universe].list()
+    return api.portfolio.list()
 
 
 @callback(
@@ -167,8 +157,6 @@ def update_graph(
 
     api = Tradingo(
         uri=ARCTIC_URL,
-        provider="ig-trading",
-        universe=universe,
     )
 
     def range_breaks(fig):
@@ -188,16 +176,16 @@ def update_graph(
         end_date or (pd.Timestamp.now().normalize() + pd.Timedelta(hours=24))
     ).normalize()
 
-    z_score = api.signals.intraday_momentum.z_score(
+    z_score = api.signals.intraday_momentum.z_score[universe](
         columns=assets,
         date_range=(date, end),
     )
 
-    short_vol = api.signals.intraday_momentum.short_vol(
+    short_vol = api.signals.intraday_momentum.short_vol[universe](
         date_range=((end or pd.Timestamp.now()) - pd.offsets.BDay(30), end),
         columns=assets,
     ).resample("B").last() * np.sqrt(252)
-    long_vol = api.signals.intraday_momentum.long_vol(
+    long_vol = api.signals.intraday_momentum.long_vol[universe](
         date_range=((end or pd.Timestamp.now()) - pd.offsets.BDay(30), end),
         columns=assets,
     ).resample("B").last() * np.sqrt(252)
@@ -302,7 +290,15 @@ def update_graph(
         .total_pnl
     )
     one_day = (
-        returns.loc[end - pd.offsets.BDay(1) : end].diff().fillna(0).cumsum().total_pnl
+        returns[
+            (returns.index.time < datetime.time.fromisoformat("21:30"))
+            & (returns.index.time > datetime.time.fromisoformat("09:30"))
+        ]
+        .loc[end - pd.offsets.BDay(1) : end]
+        .diff()
+        .fillna(0)
+        .cumsum()
+        .total_pnl
     )
 
     return (

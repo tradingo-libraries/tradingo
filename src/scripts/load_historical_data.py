@@ -3,20 +3,16 @@
 #
 import argparse
 import logging
-from typing import List, Optional
-import dateutil.tz
-from collections import defaultdict
-import re
 import os
+import re
+from collections import defaultdict
 from pathlib import Path
-
-from arcticdb import Arctic, LibraryOptions
+from typing import List, Optional
 
 import pandas as pd
+from arcticdb import Arctic
 
-from tradingo.signals import symbol_provider, symbol_publisher
-from tradingo import sampling
-
+import tradingo.sampling as sampling
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +35,6 @@ MULTIPLIERS = {
 
 
 def cli_app():
-
     app = argparse.ArgumentParser("load-historical-data")
 
     app.add_argument("--path", type=Path, required=True, nargs="+")
@@ -58,7 +53,6 @@ FILE_REGEX = r"^([A-Z0-9\.]+)_Candlestick_([0-9]+_[MDHS])_(BID|ASK)_([0-9]{2}\.[
 
 
 def main():
-
     args = cli_app().parse_args()
 
     a = Arctic(args.arctic_uri)
@@ -72,9 +66,7 @@ def main():
         clean=args.clean,
     )
 
-    service = sampling.get_ig_service()
-
-    sampling.download_instruments(
+    sampling.instruments.download_instruments(
         index_col=None,
         epics=ASSET_MAPPING.values(),
         universe=args.universe,
@@ -86,25 +78,16 @@ def main():
     print("finished")
 
 
-@symbol_publisher(
-    template="prices/{0}.{1}",
-    symbol_prefix="{provider}.{universe}.",
-    library_options=LibraryOptions(dynamic_schema=True),
-)
 def read_backfill(
     paths: List[Path],
     end_date: Optional[pd.Timestamp] = None,
     **kwargs,
 ):
-
     data_files = defaultdict(list)
 
     for path in paths:
-
         for file in os.listdir(path):
-
             if match := re.match(FILE_REGEX, file):
-
                 symbol, frequency, field, start_date, end_date = match.groups()
 
                 # need to group by symbol
@@ -144,7 +127,6 @@ def read_backfill(
     result.rename(columns=ASSET_MAPPING, inplace=True)
 
     if end_date:
-
         result = result[result.index <= end_date]
 
     return (
@@ -164,11 +146,10 @@ def read_backfill(
 
 
 if __name__ == "__main__":
-
     import sys
 
     logging.getLogger(__name__).setLevel(logging.INFO)
-    
+
     env = os.environ.get("ENVIRONMENT", "dev")
     dir = Path(f"{Path.home()}/dev/tradingo-plat/data/{env}")
     dir.mkdir(parents=True, exist_ok=True)
@@ -185,9 +166,12 @@ if __name__ == "__main__":
             str(Path.home() / "dev" / "market-data" / "COCOA"),
             # "--dry-run",
             "--clean",
-            "--provider", "ig-trading",
-            "--universe", "im-multi-asset",
-            "--end-date", "2018-10-21 00:00:00+00:00",
+            "--provider",
+            "ig-trading",
+            "--universe",
+            "im-multi-asset",
+            "--end-date",
+            "2018-10-21 00:00:00+00:00",
         ]
     )
 
