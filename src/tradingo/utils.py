@@ -59,9 +59,3 @@ def null_instruments(symbols):
             "Sustainability Characteristics (MSCI ESG Fund Ratings)",
         ],
     )
-
-
-def buffer(
-    series: pd.Series,
-):
-    pass
