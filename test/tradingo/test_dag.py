@@ -1,6 +1,6 @@
 import pytest
 
-from tradingo.cli import DAG
+from tradingo.dag import DAG
 
 
 def test_dag_configuration():
