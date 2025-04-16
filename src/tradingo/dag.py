@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import importlib
 import json
-from pathlib import Path
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from . import symbols
