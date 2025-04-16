@@ -169,12 +169,18 @@ def update_graph(
         return fig
 
     assets = assets or None
-    date = pd.Timestamp(
-        start_date or (pd.Timestamp.now() - pd.offsets.BDay(0))
-    ).normalize()
-    end = pd.Timestamp(
-        end_date or (pd.Timestamp.now().normalize() + pd.Timedelta(hours=24))
-    ).normalize()
+    date = (
+        pd.Timestamp(start_date or (pd.Timestamp.now() - pd.offsets.BDay(0)))
+        .normalize()
+        .tz_localize("utc")
+    )
+    end = (
+        pd.Timestamp(
+            end_date or (pd.Timestamp.now().normalize() + pd.Timedelta(hours=24))
+        )
+        .normalize()
+        .tz_localize("utc")
+    )
 
     z_score = api.signals.intraday_momentum.z_score[universe](
         columns=assets,
@@ -190,12 +196,12 @@ def update_graph(
         columns=assets,
     ).resample("B").last() * np.sqrt(252)
 
-    start = z_score.index[0]
-    end = z_score.index[-1] + pd.Timedelta(minutes=15)
+    start = z_score.index[0] if len(z_score.index) else date
+    end = z_score.index[-1] if len(z_score.index) else date
 
     unrealised_pnl = (
         api.backtest[portfolio]
-        .rounded.position.instrument.unrealised_pnl(
+        .instrument.unrealised_pnl(
             columns=assets,
             date_range=(start, end),
         )
@@ -206,7 +212,7 @@ def update_graph(
         .fillna(0.0)
     )
 
-    net_position = api.backtest[portfolio].rounded.position.instrument.net_position(
+    net_position = api.backtest[portfolio].instrument.net_position(
         columns=assets,
         date_range=(start, end),
     )
@@ -216,7 +222,7 @@ def update_graph(
     )
     margin = (
         api.backtest[portfolio]
-        .rounded.position.instrument.net_exposure(
+        .instrument.net_exposure(
             date_range=(start, end),
             columns=assets,
         )
@@ -225,7 +231,7 @@ def update_graph(
     )
     gross_margin = (
         api.backtest[portfolio]
-        .rounded.position.portfolio(
+        .portfolio(
             date_range=(start, end),
         )
         .gross_exposure.abs()
@@ -233,7 +239,7 @@ def update_graph(
     )
     total_pnl = (
         api.backtest[portfolio]
-        .rounded.position.portfolio(
+        .portfolio(
             date_range=(
                 start,
                 end,
@@ -247,7 +253,7 @@ def update_graph(
     )
     instrument_total_pnl = (
         api.backtest[portfolio]
-        .rounded.position.instrument.total_pnl(
+        .instrument.total_pnl(
             date_range=(
                 start - pd.offsets.YearBegin(1),
                 end,
@@ -262,7 +268,7 @@ def update_graph(
         .fillna(0.0)
     )
 
-    returns = api.backtest[portfolio].rounded.position.portfolio(
+    returns = api.backtest[portfolio].portfolio(
         date_range=(
             end - pd.offsets.BDay(252),
             end,

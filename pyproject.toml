@@ -22,6 +22,8 @@ dependencies = [
   "trading_ig",
   "riskfolio-lib",
   "tenacity",
+  "dash>=2.18.2",
+  "lightgbm>=4.6.0",
 ]
 
 [dependency-groups]
@@ -32,6 +34,7 @@ dev = [
   "isort",
   "ruff>=0.11.5",
   "mypy>=1.15.0",
+  "debugpy>=1.8.13",
 ]
 research = [
   "dtale",
