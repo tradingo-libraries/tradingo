@@ -23,12 +23,15 @@ dependencies = [
   "riskfolio-lib",
   "tenacity",
 ]
-[project.optional-dependencies]
+
+[dependency-groups]
 dev = [
-  "pytest",
+  "pytest>=8.3.5",
   "pytest-benchmark",
   "black",
-  "nb-clean",
+  "isort",
+  "ruff>=0.11.5",
+  "mypy>=1.15.0",
 ]
 research = [
   "dtale",
@@ -50,11 +53,6 @@ requires = [
   "setuptools_scm>=8",
 ]
 
-[dependency-groups]
-dev = [
-    "pytest>=8.3.5",
-]
-
 [tool.black]
 line-length = 88
 target-version = ['py311']
@@ -63,3 +61,31 @@ target-version = ['py311']
 tradingo-cli = "tradingo.cli:main"
 
 [tool.setuptools_scm]
+
+[tool.mypy]
+
+[[tool.mypy.overrides]]
+module = [
+  "pandas",
+  "pandas.*",
+  "arcticdb",
+  "arcticdb.*",
+  "arcticdb_ext",
+  "arcticdb_ext.*",
+  "dateutil",
+  "dateutil.*", 
+  "sklearn.*",
+  "yfinance",
+  "riskfolio",
+  "yaml",
+  "setuptools",
+  "numba",
+  "pandas_market_calendars",
+  "trading_ig.*",
+  "tradingo",
+  "tradingo.*",
+  "Cython.*",
+  "dash",
+]
+ignore_missing_imports = true
+

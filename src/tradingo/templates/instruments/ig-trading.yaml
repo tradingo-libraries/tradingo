@@ -1,0 +1,47 @@
+"download.{{ universe_name }}":
+  depends_on: []
+  function: tradingo.sampling.instruments.download_instruments
+  symbols_out:
+     - "instruments/{{ universe_name }}"
+  publish_args:
+    write_pickle: true
+  params:
+    epics: {{ epics }}
+  enabled: {{ TP_INCLUDE_INSTRUMENTS }}
+
+{% for epic in epics %}
+"sample.{{ epic }}":
+  depends_on: []
+  symbols_out:
+   - "{{ raw_prices_lib }}/{{ epic }}.bid"
+   - "{{ raw_prices_lib }}/{{ epic }}.ask"
+  function: tradingo.sampling.ig.sample_instrument
+  params:
+    epic: "{{ epic }}"
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"
+    interval: "{{ interval }}"
+{% endfor %}
+
+"sample.{{ universe_name }}":
+  function: tradingo.sampling.ig.create_universe
+  params:
+    pricelib: "{{ raw_prices_lib }}"
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"
+  depends_on:
+  {%for epic in epics %}
+    - "sample.{{ epic }}"
+  {% endfor %}
+  symbols_in:
+    instruments: "instruments/{{ universe_name }}"
+  load_args:
+    no_date: true
+  publish_args:
+    astype: float,
+  symbols_out:
+  {% for field in ["ask", "mid", "bid"] %}
+  {% for occurence in ["open", "high", "low", "close"] %}
+  - prices/{{ universe_name }}.{{ field }}.{{ occurence }}
+  {% endfor %}
+  {% endfor %}

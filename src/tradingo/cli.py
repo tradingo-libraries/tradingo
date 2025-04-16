@@ -1,20 +1,21 @@
 from __future__ import annotations
-import os
-import jinja2
+
+import argparse
+import importlib
 import json
 import logging
-from enum import Enum
-import importlib
-import argparse
+import os
 import pathlib
+from enum import Enum
 from typing import Any, Callable, Iterable, Optional
+
+import jinja2
 import pandas as pd
 import yaml
 
+from . import symbols
 from .api import Tradingo
 from .config import IGTradingConfig, TradingoConfig
-
-from . import symbols
 
 
 class ConfigLoadError(Exception):
@@ -22,13 +23,11 @@ class ConfigLoadError(Exception):
 
 
 def read_config_template(filepath: pathlib.Path, variables):
-
     filepath = pathlib.Path(filepath)
 
     renderedtext = jinja2.Template(filepath.read_text()).render(**variables)
 
     try:
-
         if filepath.suffix == ".json":
             return process_includes(json.loads(renderedtext), variables)
 
@@ -42,7 +41,6 @@ def read_config_template(filepath: pathlib.Path, variables):
 
 
 def process_includes(config, variables):
-
     out = {}
 
     for key, value in config.items():
@@ -96,7 +94,7 @@ def cli_app():
     entity = app.add_subparsers(dest="entity", required=True)
     universe = entity.add_parser("universe")
     universe_subparsers = universe.add_subparsers(dest="universe_action", required=True)
-    uni_list = universe_subparsers.add_parser("list")
+    _ = universe_subparsers.add_parser("list")
     uni_show = universe_subparsers.add_parser("show")
 
     uni_show.add_argument("name")
@@ -112,19 +110,17 @@ def cli_app():
     run_tasks.add_argument("--force-rerun", action="store_true", default=True)
     run_tasks.add_argument("--dry-run", action="store_true")
 
-    list_tasks = task_subparsers.add_parser("list")
+    _ = task_subparsers.add_parser("list")
     return app
 
 
 class TaskState(Enum):
-
     PENDING = "PENDING"
     FAILED = "FAILED"
     SUCCESS = "SUCCESS"
 
 
 class Task:
-
     def __init__(
         self,
         function,
@@ -140,7 +136,7 @@ class Task:
         self.task_args = task_args
         self.task_kwargs = task_kwargs
         self._dependencies = list(dependencies)
-        self._resolved_dependencies = []
+        self._resolved_dependencies: list[Task] = []
         self.state = TaskState.PENDING
         self.symbols_out = symbols_out
         self.symbols_in = symbols_in
@@ -180,11 +176,8 @@ class Task:
         return task_kwargs
 
     def run(self, *args, run_dependencies=False, force_rerun=False, **kwargs):
-
         if run_dependencies:
-
             for dependency in self.dependencies:
-
                 dependency.run(
                     *args,
                     run_dependencies=run_dependencies,
@@ -221,11 +214,9 @@ class Task:
 
 
 def collect_task_configs(config, _tasks: Optional[dict[str, Any]] = None):
-
     tasks = _tasks or {}
 
     for key, value in config.items():
-
         if isinstance(value, dict) and "depends_on" in value:
             # its a task, collect it
             tasks[key] = value
@@ -237,10 +228,8 @@ def collect_task_configs(config, _tasks: Optional[dict[str, Any]] = None):
 
 
 class DAG(dict[str, Task]):
-
     @classmethod
-    def from_config(cls, config):
-
+    def from_config(cls, config: dict[str, Any]):
         task_configs = collect_task_configs(config)
 
         tasks: dict[str, Task] = {}
@@ -274,7 +263,6 @@ class DAG(dict[str, Task]):
         return cls(tasks)
 
     def print(self):
-
         for task_name, task in self.items():
             print(f"{task_name}:")
             if task:
@@ -285,7 +273,6 @@ class DAG(dict[str, Task]):
             print()
 
     def get_symbols(self):
-
         return [
             task
             for subl in (task.symbols_out for task in self.values())
@@ -296,18 +283,15 @@ class DAG(dict[str, Task]):
         return self[task_name].run(**kwargs)
 
     def update_dag(self):
-
         dag_state = pathlib.Path.home() / ".tradingo/dag-state.json"
 
         if not dag_state.exists():
-
             return
 
         else:
             dag_state = json.loads(dag_state.read_text())
 
             for k, v in dag_state.items():
-
                 if k not in self:
                     continue
                 state = TaskState[v]
@@ -317,7 +301,6 @@ class DAG(dict[str, Task]):
                 )
 
     def serialise_dag(self):
-
         dag_state = pathlib.Path.home() / ".tradingo/dag-state.json"
 
         dag_state.parent.mkdir(parents=True, exist_ok=True)
@@ -327,7 +310,6 @@ class DAG(dict[str, Task]):
 
 
 def handle_tasks(args, arctic):
-
     if args.list_action == "list":
         graph = DAG.from_config(
             args.config,
@@ -363,32 +345,25 @@ def handle_tasks(args, arctic):
             graph.serialise_dag()
 
     else:
-
         raise ValueError(args.list_action)
 
 
 def handle_universes(args, api: Tradingo):
-
     if args.universe_action == "list":
-
         for item in api.instruments.list():
             print(item)
 
     elif args.universe_action == "show":
-
         print(api.instruments[args.name]())
 
     elif args.universe_action == "prices":
-
         print(api.instruments[args.name]())
 
     else:
-
         ValueError(args.universe_action)
 
 
 def main():
-
     envconfig = TradingoConfig.from_env().to_env()
     args = cli_app().parse_args()
     IGTradingConfig.from_env().to_env()
@@ -397,11 +372,9 @@ def main():
     arctic = Tradingo(envconfig.arctic_uri)
 
     if args.entity == "task":
-
         handle_tasks(args, arctic)
 
     elif args.entity == "universe":
-
         handle_universes(args, api=arctic)
 
     else:
@@ -409,6 +382,5 @@ def main():
 
 
 if __name__ == "__main__":
-
     logging.getLogger("tradingo").setLevel(logging.INFO)
     main()

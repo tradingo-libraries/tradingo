@@ -23,14 +23,20 @@ jobs:
           # Optional - x64 or x86 architecture, defaults to x64
           architecture: "x64"
       # You can test your matrix by printing the current Python version
-      - name: Install Tradingo
-        run: pip install -e ./[dev]
-      - name: Test Tradingo
-        run: pytest
-      - name: Format Tradingo
-        run: black ./ --check
-      - name: Check notebooks
-        run: nb-clean check ./notebooks
+      - name: Setup
+        run: pip install uv
+      - name: Install tradingo
+        run: uv sync
+      - name: Test tradingo
+        run: uv run pytest
+      - name: Formatting check tradingo
+        run: uv run black ./ --check --config pyproject.toml
+      - name: Import check tradingo
+        run: uv run isort ./ --check
+      - name: Ruff check tradingo
+        run: uv run ruff check --config pyproject.toml ./
+      - name: Type check tradingo
+        run: uv run mypy --config pyproject.toml ./src
 
       - name: Install build
         run: python -m pip install build

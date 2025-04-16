@@ -1,16 +1,15 @@
 """Module for handling environment variables"""
 
-from typing import Optional
-import yaml
-import jinja2
-import pandas as pd
 import dataclasses
 import json
 import os
 import pathlib
-from typing import Any
 import typing
+from typing import Any, Optional
 
+import jinja2
+import pandas as pd
+import yaml
 from jinja2 import Environment, select_autoescape
 
 env = Environment(autoescape=select_autoescape())
@@ -71,7 +70,6 @@ def _read_dict(cls, val):
 
 
 def type_shed(field: dataclasses.Field, val, prefix, env) -> Any:
-
     cls = get_cls(field.type)
 
     if isinstance(cls, tuple):
@@ -96,7 +94,7 @@ def type_shed(field: dataclasses.Field, val, prefix, env) -> Any:
             env=env,
         )
 
-    if isinstance(cls, typing.Callable):
+    if callable(cls):
         return cls(val)
 
     raise EnvProviderError(f"Unhandled type {cls} in config")
@@ -104,7 +102,6 @@ def type_shed(field: dataclasses.Field, val, prefix, env) -> Any:
 
 @dataclasses.dataclass
 class EnvProvider:
-
     app_prefix: Optional[str]
 
     @classmethod
@@ -160,7 +157,6 @@ class EnvProvider:
         app_prefix: str | None = None,
         env: dict[str, Any] | None = None,
     ):
-
         try:
             app_prefix = app_prefix or getattr(cls, "app_prefix")
         except AttributeError as ex:

@@ -6,7 +6,6 @@ import pandas as pd
 
 from tradingo import _backtest
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -31,14 +30,14 @@ def backtest(
     stop_limit: Optional[pd.DataFrame] = None,
     stop_loss: Optional[pd.DataFrame] = None,
     price_ffill_limit: int = 0,
-):
-
+) -> tuple[pd.DataFrame]:
     bid_close = bid_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
     ask_close = ask_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
 
     mid_close = (bid_close + ask_close) / 2
-    bid_close, ask_close = bid_close.reindex(mid_close.index), ask_close.reindex(
-        mid_close.index
+    bid_close, ask_close = (
+        bid_close.reindex(mid_close.index),
+        ask_close.reindex(mid_close.index),
     )
 
     # restrict position changes to where we have a price.
@@ -74,7 +73,6 @@ def backtest(
         )
 
     def compute_backtest(inst_trades: pd.Series):
-
         logger.info("Computing backtest for ticker=%s", inst_trades.name)
         inst_mids = mid_close[inst_trades.name].ffill().dropna()
         inst_asks = ask_close[inst_trades.name].reindex(inst_mids.index, method="ffill")

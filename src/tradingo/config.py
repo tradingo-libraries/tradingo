@@ -1,9 +1,8 @@
 import dataclasses
 import pathlib
 
-from .env_provider import EnvProvider
-
 from . import templates
+from .env_provider import EnvProvider
 
 
 @dataclasses.dataclass

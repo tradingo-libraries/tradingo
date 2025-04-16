@@ -1,19 +1,19 @@
 from __future__ import annotations
-import inspect
-from typing import Optional
+
 import contextlib
-import pandas as pd
+import inspect
 import re
+from typing import Any, Optional
+
 import arcticdb as adb
+import pandas as pd
 
 import tradingo.utils
-
 
 READ_SIG = inspect.signature(adb.arctic.Library.read)
 
 
 class _Read:
-
     def __init__(
         self,
         path_so_far,
@@ -70,11 +70,10 @@ class _Read:
         callback_kwargs = {}
 
         def get_callback(operation):
-
             for i in (pd.DataFrame, tradingo.utils, pd):
                 try:
                     return getattr(i, operation)
-                except AttributeError as ex:
+                except AttributeError:
                     continue
             raise AttributeError(operation)
 
@@ -85,8 +84,7 @@ class _Read:
                 k: v for k, v in kwargs.items() if k in callback_sig.parameters.keys()
             }
 
-        def get_data_at_path(path, kw):
-
+        def get_data_at_path(path, kw) -> pd.DataFrame:
             kw.setdefault(
                 "columns",
                 (
@@ -109,7 +107,11 @@ class _Read:
         lhs = get_data_at_path(part_one_path, lib_kwargs)
 
         if operation:
-            callback_args = (lhs,)
+            callback_args: (
+                tuple[pd.DataFrame]
+                | tuple[pd.DataFrame, pd.DataFrame]
+                | tuple[tuple[pd.DataFrame, pd.DataFrame]]
+            ) = (lhs,)
             if part_two_path:
                 callback_lib = part_two_path[0]
                 callback_args = (
@@ -128,7 +130,7 @@ class _Read:
                 )
 
             if operation == "concat":
-                callback_args = (callback_args,)
+                callback_args = (callback_args,)  # type: ignore
 
             callback = get_callback(operation)
             callback_sig = inspect.signature(pd.DataFrame)
@@ -139,7 +141,6 @@ class _Read:
         self._library.update(self._path, *args, **kwargs)
 
     def list(self, *args, **kwargs):
-
         if self._path_so_far:
             regex = re.escape(".".join((self._path_so_far)) + ".")
             kwargs["regex"] = regex + kwargs.setdefault("regex", "")
@@ -147,7 +148,7 @@ class _Read:
             dict.fromkeys(
                 [
                     i.replace(
-                        f'{".".join(self._path_so_far)}.' if self._path_so_far else "",
+                        f"{'.'.join(self._path_so_far)}." if self._path_so_far else "",
                         "",
                     ).split(".")[0]
                     for i in self._library.list_symbols(*args, **kwargs)
@@ -167,7 +168,6 @@ class _Read:
 
 
 class Tradingo(adb.Arctic):
-
     def __init__(
         self,
         *args,
@@ -179,7 +179,7 @@ class Tradingo(adb.Arctic):
         self._provider = provider
         self._universe = universe
         self._context_args = ()
-        self._context_kwargs = {}
+        self._context_kwargs: dict[str, Any] = {}
 
     @contextlib.contextmanager
     def common_args(self, *args, **kwargs):
@@ -202,7 +202,6 @@ class Tradingo(adb.Arctic):
         return path_so_far
 
     def __getattr__(self, library):
-
         if library in self.list_libraries():
             path_so_far = self._get_path_so_far(library)
             if library == "instruments":
@@ -235,7 +234,6 @@ class Tradingo(adb.Arctic):
 
 
 class VolSurface(Tradingo):
-
     def get(
         self,
         symbol: str,
@@ -243,9 +241,7 @@ class VolSurface(Tradingo):
         end_date: pd.Timestamp = pd.Timestamp.now("utc"),
         **kwargs,
     ):
-
         with self.common_args(date_range=(start_date, end_date)):
-
             futures = (
                 pd.concat(
                     (self.futures.cboe.VX.expiration(), self.futures.cboe.VX.price()),

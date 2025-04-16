@@ -1,37 +1,36 @@
 "download.{{ universe_name }}":
   depends_on: []
-  function: tradingo.sampling.download_instruments
+  function: tradingo.sampling.instruments.download_instruments
   symbols_out:
      - "instruments/{{ universe_name }}"
   publish_args:
     write_pickle: true
   params:
-    epics: {{ epics }}
+    tickers: {{ tickers }}
   enabled: {{ TP_INCLUDE_INSTRUMENTS }}
 
-{% for epic in epics %}
-"sample.{{ epic }}":
+{% for ticker in tickers %}
+"sample.{{ ticker }}":
   depends_on: []
   symbols_out:
-   - "{{ raw_prices_lib }}/{{ epic }}.bid"
-   - "{{ raw_prices_lib }}/{{ epic }}.ask"
-  function: tradingo.sampling.sample_instrument
+   - "{{ raw_prices_lib }}/{{ ticker }}.ohlcv"
+  function: tradingo.sampling.yf.sample_equity
   params:
-    epic: "{{ epic }}"
+    ticker: "{{ ticker }}"
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
     interval: "{{ interval }}"
 {% endfor %}
 
 "sample.{{ universe_name }}":
-  function: tradingo.sampling.create_universe
+  function: tradingo.sampling.ig.create_universe
   params:
     pricelib: "{{ raw_prices_lib }}"
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
   depends_on:
-  {%for epic in epics %}
-    - "sample.{{ epic }}"
+  {%for ticker in tickers %}
+    - "sample.{{ ticker }}"
   {% endfor %}
   symbols_in:
     instruments: "instruments/{{ universe_name }}"
