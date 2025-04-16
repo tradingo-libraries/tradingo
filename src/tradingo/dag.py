@@ -78,7 +78,9 @@ class Task:
         return function
 
     @staticmethod
-    def prepare_kwargs(task_kwargs, global_kwargs) -> dict[str, Any]:
+    def prepare_kwargs(
+        task_kwargs: dict[str, Any], global_kwargs: dict[str, Any]
+    ) -> dict[str, Any]:
         """prepare kwargs to be passed to the function"""
         task_kwargs.update(global_kwargs)
         return task_kwargs
@@ -213,7 +215,7 @@ class DAG(dict[str, Task]):
         """run a specific task of this DAG."""
         return self[task_name].run(**kwargs)
 
-    def update(self) -> None:
+    def update_state(self) -> None:
         """update the local json file which keeps the DAG state."""
 
         if not self._state_filepath.exists():
@@ -228,7 +230,7 @@ class DAG(dict[str, Task]):
 
             self[k].state = state if state == TaskState.SUCCESS else TaskState.PENDING
 
-    def serialise(self) -> None:
+    def serialise_state(self) -> None:
         """write the DAG state into a local json file."""
 
         self._state_filepath.parent.mkdir(parents=True, exist_ok=True)

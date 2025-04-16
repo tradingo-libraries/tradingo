@@ -16,9 +16,7 @@ class ConfigLoadError(Exception):
     """raised when loading config incorrectly."""
 
 
-def read_config_template(
-    filepath: pathlib.Path, variables: dict[str, Any]
-) -> dict[str, Any]:
+def read_config_template(filepath: pathlib.Path, variables) -> dict[str, Any]:
     """read a config template and populate it with values"""
     filepath = pathlib.Path(filepath)
 
@@ -39,9 +37,7 @@ def read_config_template(
     raise ValueError(f"Unhandled file type: '{filepath.suffix}'")
 
 
-def process_includes(
-    config: dict[str, Any], variables: dict[str, Any]
-) -> dict[str, Any]:
+def process_includes(config: dict[str, Any], variables) -> dict[str, Any]:
     """bake nested configs via 'include' pattern."""
 
     out = {}

@@ -71,7 +71,7 @@ def handle_tasks(args, arctic):
             args.config,
         )
 
-        graph.update()
+        graph.update_state()
 
         try:
             extra_kwargs = {}
@@ -90,7 +90,7 @@ def handle_tasks(args, arctic):
             if args.dry_run:
                 print(out)
         finally:
-            graph.serialise()
+            graph.serialise_state()
 
     else:
         raise ValueError(args.list_action)
