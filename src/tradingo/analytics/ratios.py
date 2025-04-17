@@ -1,8 +1,12 @@
+"""Typical financial ratios."""
+
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 
 
-def omega_ratio(returns: pd.Series, required_return=0.0):
+def omega_ratio(returns: pd.Series, required_return: Optional[float] = 0.0) -> float:
     """
     Calculate the Omega ratio of a strategy.
 
@@ -17,8 +21,8 @@ def omega_ratio(returns: pd.Series, required_return=0.0):
         return of 0.018.
 
     :returns omega_ratio : float
-
     """
+
     return_threshold = (1 + required_return) ** (1 / 252) - 1
     returns_less_thresh = returns - return_threshold
     numer = sum(returns_less_thresh[returns_less_thresh > 0.0])
@@ -29,7 +33,7 @@ def omega_ratio(returns: pd.Series, required_return=0.0):
         return np.nan
 
 
-def sharpe_ratio(returns: pd.Series, required_return=0.0):
+def sharpe_ratio(returns: pd.Series, required_return: Optional[float] = 0.0) -> float:
     """
     Calculate the Sharpe ratio of a strategy.
     """
