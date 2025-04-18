@@ -1,19 +1,17 @@
 """Typical financial ratios."""
 
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 
 
-def omega_ratio(returns: pd.Series, required_return: Optional[float] = 0.0) -> float:
+def omega_ratio(returns: pd.Series, required_return: float = 0.0) -> float:
     """
     Calculate the Omega ratio of a strategy.
 
     :param returns: pd.Series or np.ndarray
         Daily returns of the strategy, noncumulative.
 
-    :param required_return: float, optional
+    :param required_return: float
         Minimum acceptance return of the investor. Threshold over which to
         consider positive vs negative returns. It will be converted to a
         value appropriate for the period of the returns. E.g. An annual minimum
@@ -33,7 +31,7 @@ def omega_ratio(returns: pd.Series, required_return: Optional[float] = 0.0) -> f
         return np.nan
 
 
-def sharpe_ratio(returns: pd.Series, required_return: Optional[float] = 0.0) -> float:
+def sharpe_ratio(returns: pd.Series, required_return: float = 0.0) -> float:
     """
     Calculate the Sharpe ratio of a strategy.
     """
