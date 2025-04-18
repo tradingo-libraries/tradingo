@@ -23,14 +23,6 @@ def expectation(
     how : str
         The method of calculating expectation, either "exponential" or "rolling",
         by default "exponential".
-    warmup_threshold : Optional[float]
-        The threshold for the warmup window, by default None.
-    warmup_since : Optional[str]
-        The starting point for the warmup window, by default "any".
-    downsample_window : Optional[int]
-        The window size for downsampling, by default None.
-    downsample_fillna : Optional[float]
-        The value to fill NaN values after downsampling, by default None.
     **kwargs : keyword arguments
         Additional arguments for the ewm (exponentially weighted mean) method.
         For rolling expectation, the window size must be specified in kwargs.
