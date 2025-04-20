@@ -5,11 +5,13 @@ from tradingo.analytics import cov
 
 
 STDS = np.array([0.1, 0.2, 0.15])
-CORRELATIONS = np.array([
-    [1.0, 0.3, 0.2],
-    [0.3, 1.0, 0.4],
-    [0.2, 0.4, 1.0],
-])
+CORRELATIONS = np.array(
+    [
+        [1.0, 0.3, 0.2],
+        [0.3, 1.0, 0.4],
+        [0.2, 0.4, 1.0],
+    ]
+)
 
 
 def excel_columns(size):
@@ -69,7 +71,7 @@ def correlated_returns(
     :returns: the correlated returns dataframe
     """
 
-    vol_scale = (target_vol ** 2) / np.sqrt(cov_mtx.sum().sum())
+    vol_scale = (target_vol**2) / np.sqrt(cov_mtx.sum().sum())
     cov_mtx = vol_scale * cov_mtx
     mean = mean or [0 for _ in range(len(cov_mtx))]
 
