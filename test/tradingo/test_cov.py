@@ -3,7 +3,6 @@ import pandas as pd
 
 from tradingo.analytics import cov
 
-
 STDS = np.array([0.1, 0.2, 0.15])
 CORRELATIONS = np.array(
     [
