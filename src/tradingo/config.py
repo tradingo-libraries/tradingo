@@ -1,15 +1,11 @@
 """Tradingo config."""
 
-import dataclasses
 import json
 import pathlib
 from typing import Any
 
 import jinja2
 import yaml
-
-from . import templates
-from .env_provider import EnvProvider
 
 
 class ConfigLoadError(Exception):
@@ -72,25 +68,3 @@ def process_includes(config: dict[str, Any], variables) -> dict[str, Any]:
         out[key] = value
 
     return out
-
-
-@dataclasses.dataclass
-class IGTradingConfig(EnvProvider):
-    """IG Trading configuration"""
-
-    password: str
-    username: str
-    api_key: str
-    acc_type: str
-    app_prefix = "IG_SERVICE"
-
-
-@dataclasses.dataclass
-class TradingoConfig(EnvProvider):
-    """Tradingo configuration"""
-
-    config_home: pathlib.Path
-    arctic_uri: str
-    templates: pathlib.Path = pathlib.Path(templates.__file__).parent
-    include_instruments: bool = False
-    app_prefix = "TP"

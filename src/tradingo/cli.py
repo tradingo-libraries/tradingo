@@ -10,8 +10,9 @@ import pathlib
 import pandas as pd
 
 from .api import Tradingo
-from .config import IGTradingConfig, TradingoConfig, read_config_template
+from .config import read_config_template
 from .dag import DAG
+from .settings import IGTradingConfig, TradingoConfig
 
 
 def cli_app() -> argparse.ArgumentParser:

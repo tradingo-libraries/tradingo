@@ -4,7 +4,7 @@ import pathlib
 import pytest
 
 from tradingo import dag
-from tradingo.config import TradingoConfig
+from tradingo.settings import TradingoConfig
 
 
 @pytest.mark.skip
