@@ -27,8 +27,8 @@ def omega_ratio(returns: pd.Series, required_return: float = 0.0) -> float:
     denom = -1.0 * sum(returns_less_thresh[returns_less_thresh < 0.0])
     if denom > 0.0:
         return numer / denom
-    else:
-        return np.nan
+
+    return np.nan
 
 
 def sharpe_ratio(returns: pd.Series, required_return: float = 0.0) -> float:

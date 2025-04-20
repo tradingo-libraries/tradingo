@@ -4,7 +4,8 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
-from pandas.core.window.rolling import BaseWindow
+
+from .expectation import safe_dataframe_window
 
 
 def _kronecker_product(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -51,14 +52,7 @@ def cov(
 
     dataframe = dataframe if demean else _kronecker_product(dataframe)
 
-    try:
-        agg_buffer: Callable = getattr(dataframe, how)
-        agg_buffer: BaseWindow = agg_buffer(**kwargs)
-        isinstance(agg_buffer, BaseWindow)
-    except AttributeError as ex:
-        raise NotImplementedError(f"how={how}") from ex
-    except AssertionError as ex:
-        raise ValueError(f"how={how} is not a dataframe BaseWindow aggregator") from ex
+    agg_buffer = safe_dataframe_window(dataframe, how, kwargs)
 
     agg_method = "cov" if demean else "mean"
     cov_: Callable = getattr(agg_buffer, agg_method)

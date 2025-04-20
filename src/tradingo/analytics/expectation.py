@@ -2,7 +2,23 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 import pandas as pd
+from pandas.core.window.rolling import BaseWindow
+
+
+def safe_dataframe_window(dataframe, how, kwargs) -> BaseWindow:
+    """get a dataframe aggergation window safely"""
+    try:
+        aggregator: Callable = getattr(dataframe, how)
+        agg_buffer: BaseWindow = aggregator(**kwargs)
+        assert isinstance(agg_buffer, BaseWindow)
+    except AttributeError as ex:
+        raise NotImplementedError(f"how={how}") from ex
+    except AssertionError as ex:
+        raise ValueError(f"how={how} is not a dataframe BaseWindow aggregator") from ex
+    return agg_buffer
 
 
 def expectation(
@@ -28,15 +44,5 @@ def expectation(
     :returns: The expectation of the data.
     """
 
-    if how not in {"exponential", "rolling"}:
-        raise ValueError(f"'how' must be 'exponential' or 'simple', got {how}")
-
-    if how == "exponential":
-        mean = annualisation * dataframe.ewm(**kwargs).mean()
-
-    elif how == "rolling":
-        window = kwargs.pop("window", None)
-        assert window and window > 0, "Window size must be greater than 0"
-        mean = annualisation * dataframe.rolling(window=window, **kwargs).mean()
-
-    return mean
+    agg_buffer = safe_dataframe_window(dataframe, how, kwargs)
+    return annualisation * agg_buffer.mean()
