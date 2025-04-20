@@ -1,38 +1,40 @@
 """Covariance calculation module."""
 
+from typing import Callable
+
 import numpy as np
 import pandas as pd
+from pandas.core.window.rolling import BaseWindow
 
 
-def _kronecker_product(dataframe):
+def _kronecker_product(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """row-by-row outer product"""
     return pd.DataFrame(
         dataframe.apply(lambda x: np.kron(x, x), axis=1, result_type="expand"),
         index=dataframe.index,
-        columns=pd.MultiIndex.from_product(
-            [dataframe.columns, dataframe.columns]
-        ),
+        columns=pd.MultiIndex.from_product([dataframe.columns, dataframe.columns]),
     )
 
 
 def cov(
     dataframe: pd.DataFrame,
     annualisation: int = 260,
-    how: str = "exponential",
+    how: str = "ewm",
     demean: bool = True,
     **kwargs,
 ) -> pd.DataFrame:
     """
     Calculate the covariance of a given DataFrame.
 
-    Parameters
-    ----------
     :param dataframe: DataFrame containing the data.
     :param annualisation: The annualisation factor, by default 260.
-    :param how: The method of calculating covariance, either "exponential" or "rolling",
-        by default "exponential".
+    :param how: A DataFrame method which returns a BaseWindow [pandas.core.window.rolling]
+        for calculating covariance: { ewm | rolling | expanding }
     :param demean: Whether to demean the data, by default True.
-        When False, it is the Kronecker's product (product of all the pairs),
-        from which we calc the mean. In a non-timeseries format is E[X * Y].
+            - True -> E[(X - E[X]) * (Y - E[Y])]
+            - False -> E[X * Y]
+        When True, it is the covariance.
+        When False, we use Kronecker's product (row-wise pairs), from which we calc the mean.
         The result is the second moments, useful for raw signal magnitude, co-movement
         including mean shifts, or feeding into models where you handle the mean explicitly.
         NOTE: because of returns being "somewhere around zero", this '(co)variance'
@@ -47,23 +49,18 @@ def cov(
     :returns: The covariance of the data.
     """
 
-    if how == "exponential":
-        if demean:
-            covar = dataframe.ewm(**kwargs).cov()
-        else:
-            square_returns = _kronecker_product(dataframe)
-            covar = square_returns.ewm(**kwargs).mean()
+    dataframe = dataframe if demean else _kronecker_product(dataframe)
 
-    elif how == "rolling":
-        window = kwargs.pop("window", None)
-        assert window and window > 0, "Window size must be greater than 0"
-        if demean:
-            covar = dataframe.rolling(window=window, **kwargs).cov()
-        else:
-            square_returns = _kronecker_product(dataframe)
-            covar = square_returns.rolling(window=window, **kwargs).mean()
+    try:
+        agg_buffer: Callable = getattr(dataframe, how)
+        agg_buffer: BaseWindow = agg_buffer(**kwargs)
+        isinstance(agg_buffer, BaseWindow)
+    except AttributeError as ex:
+        raise NotImplementedError(f"how={how}") from ex
+    except AssertionError as ex:
+        raise ValueError(f"how={how} is not a dataframe BaseWindow aggregator") from ex
 
-    else:
-        raise NotImplementedError(f"how={how}")
+    agg_method = "cov" if demean else "mean"
+    cov_: Callable = getattr(agg_buffer, agg_method)
 
-    return annualisation * covar
+    return annualisation * cov_()
