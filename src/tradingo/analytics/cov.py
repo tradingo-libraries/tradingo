@@ -4,6 +4,16 @@ import numpy as np
 import pandas as pd
 
 
+def _kronecker_product(dataframe):
+    return pd.DataFrame(
+        dataframe.apply(lambda x: np.kron(x, x), axis=1, result_type="expand"),
+        index=dataframe.index,
+        columns=pd.MultiIndex.from_product(
+            [dataframe.columns, dataframe.columns]
+        ),
+    )
+
+
 def cov(
     dataframe: pd.DataFrame,
     annualisation: int = 260,
@@ -38,25 +48,23 @@ def cov(
     :returns: The covariance of the data.
     """
 
-    if how not in {"exponential", "rolling"}:
-        raise ValueError(f"'how' must be 'exponential' or 'simple', got {how}")
-
     if how == "exponential":
         if demean:
-            covar = annualisation * dataframe.ewm(**kwargs).cov()
+            covar = dataframe.ewm(**kwargs).cov()
         else:
-            square_returns = pd.DataFrame(
-                dataframe.apply(lambda x: np.kron(x, x), axis=1, result_type="expand"),
-                index=dataframe.index,
-                columns=pd.MultiIndex.from_product(
-                    [dataframe.columns, dataframe.columns]
-                ),
-            )
-            covar = annualisation * square_returns.ewm(**kwargs).mean()
+            square_returns = _kronecker_product(dataframe)
+            covar = square_returns.ewm(**kwargs).mean()
 
     elif how == "rolling":
         window = kwargs.pop("window", None)
         assert window and window > 0, "Window size must be greater than 0"
-        covar = annualisation * dataframe.rolling(window=window, **kwargs).cov()
+        if demean:
+            covar = dataframe.rolling(window=window, **kwargs).cov()
+        else:
+            square_returns = _kronecker_product(dataframe)
+            covar = square_returns.rolling(window=window, **kwargs).mean()
 
-    return covar
+    else:
+        raise NotImplementedError(f"how={how}")
+
+    return annualisation * covar

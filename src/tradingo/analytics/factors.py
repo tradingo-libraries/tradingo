@@ -2,7 +2,7 @@
 Factor model and risk decomposition.
 """
 
-__all__ = ["factor_betas", "idio_alphas", "idio_residuals", "factor_model"]
+__all__ = ["factor_betas", "idiosyncratic_alpha", "idiosyncratic_residuals", "factor_model"]
 
 import logging
 
@@ -78,7 +78,7 @@ def factor_betas(
     return betas, factor_covs
 
 
-def idio_alphas(
+def idiosyncratic_alpha(
     asset_returns: pd.DataFrame,
     factor_returns: pd.DataFrame,
     betas: pd.DataFrame = None,
@@ -164,7 +164,7 @@ def idio_alphas(
     return alphas, means
 
 
-def idio_residuals(
+def idiosyncratic_residuals(
     asset_returns: pd.DataFrame,
     factor_returns: pd.DataFrame,
     betas: pd.DataFrame,
@@ -224,14 +224,14 @@ def factor_model(
         **kwargs,
     )
 
-    alphas, means_returns = idio_alphas(
+    alphas, means_returns = idiosyncratic_alpha(
         asset_returns,
         factor_returns,
         **kwargs,
     )
 
     # model confidence
-    residuals = idio_residuals(
+    residuals = idiosyncratic_residuals(
         asset_returns,
         factor_returns,
         betas,
