@@ -32,14 +32,13 @@ def cov(
         by default "exponential".
     :param demean: Whether to demean the data, by default True.
         When False, it is the Kronecker's product (product of all the pairs),
-        from which we calc the mean from a ewm. In a non-ewm format is E[X * Y].
-        The result is the second moments, useful for raw signal magnitude,
-        co-movement including mean shifts, or feeding into models where you handle
-        the mean explicitly.
+        from which we calc the mean. In a non-timeseries format is E[X * Y].
+        The result is the second moments, useful for raw signal magnitude, co-movement
+        including mean shifts, or feeding into models where you handle the mean explicitly.
         NOTE: because of returns being "somewhere around zero", this '(co)variance'
         accounts for the implicit bias within a timeseries (e.g. a typical long position)
 
-    :param **kwargs: Additional arguments for the ewm (exponentially weighted mean) method.
+    :param **kwargs: Additional arguments for rolling/ewm/... pandas methods.
         For rolling covariance, the window size must be specified in kwargs.
         For example, `window=10` for a 10-period rolling covariance.
         For exponential covariance, the halflife can be specified in kwargs.
