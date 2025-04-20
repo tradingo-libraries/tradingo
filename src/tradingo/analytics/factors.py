@@ -2,7 +2,12 @@
 Factor model and risk decomposition.
 """
 
-__all__ = ["factor_betas", "idiosyncratic_alpha", "idiosyncratic_residuals", "factor_model"]
+__all__ = [
+    "factor_betas",
+    "idiosyncratic_alpha",
+    "idiosyncratic_residuals",
+    "factor_model",
+]
 
 import logging
 
