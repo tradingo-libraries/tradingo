@@ -14,26 +14,18 @@ def expectation(
     """
     Calculate the expectation of a given DataFrame.
 
-    Parameters
-    ----------
-    dataframe : pd.DataFrame
-        DataFrame containing the data.
-    annualisation : int
-        The annualisation factor, by default 260.
-    how : str
-        The method of calculating expectation, either "exponential" or "rolling",
+    :param dataframe: DataFrame containing the data.
+    :param annualisation: The annualisation factor, by default 260.
+    :param how: The method of calculating expectation, either "exponential" or "rolling",
         by default "exponential".
-    **kwargs : keyword arguments
+    :param **kwargs: keyword arguments
         Additional arguments for the ewm (exponentially weighted mean) method.
         For rolling expectation, the window size must be specified in kwargs.
         For example, `window=10` for a 10-period rolling expectation.
         For exponential expectation, the halflife can be specified in kwargs.
         For example, `halflife=10` for a 10-period halflife.
 
-    Returns
-    -------
-    pd.DataFrame
-        The expectation of the data.
+    :returns: The expectation of the data.
     """
 
     if how not in {"exponential", "rolling"}:
