@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from pandas.testing import assert_frame_equal
 
 from tradingo.analytics import cov
 
@@ -84,9 +85,42 @@ def correlated_returns(
 
 
 def test_cov():
+    columns = ["A", "B", "C"]
     cov_mtx = cov_from_corr(CORRELATIONS, STDS, deannualisation=260)
     df = correlated_returns(1000, cov_mtx, target_vol=0.1)
 
-    actual_ewa = cov(df, how="ewm", halflife=100)
+    actual_ewm = cov(df, how="ewm", halflife=100)
+    expected_ewm = pd.DataFrame(
+        [
+            [0.00439475, 0.00281318, 0.00079727],
+            [0.00281318, 0.01817437, 0.00548258],
+            [0.00079727, 0.00548258, 0.0115796],
+        ],
+        index=pd.MultiIndex.from_product([[pd.Timestamp(2023, 11, 1)], columns]),
+        columns=columns,
+    )
+    assert_frame_equal(actual_ewm.tail(3), expected_ewm)
+
     actual_rolling = cov(df, how="rolling", window=100)
+    expected_rolling = pd.DataFrame(
+        [
+            [0.00421997, 0.00285151, 0.00144046],
+            [0.00285151, 0.01600372, 0.00633751],
+            [0.00144046, 0.00633751, 0.01300069],
+        ],
+        index=pd.MultiIndex.from_product([[pd.Timestamp(2023, 11, 1)], columns]),
+        columns=columns,
+    )
+    assert_frame_equal(actual_rolling.tail(3), expected_rolling)
+
     actual_expanding = cov(df, how="expanding")
+    expected_expanding = pd.DataFrame(
+        [
+            [0.00444099, 0.00259191, 0.00116196],
+            [0.00259191, 0.01852227, 0.00611158],
+            [0.00116196, 0.00611158, 0.01096141],
+        ],
+        index=pd.MultiIndex.from_product([[pd.Timestamp(2023, 11, 1)], columns]),
+        columns=columns,
+    )
+    assert_frame_equal(actual_expanding.tail(3), expected_expanding)
