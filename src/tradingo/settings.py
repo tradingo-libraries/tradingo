@@ -12,6 +12,8 @@ import pandas as pd
 import yaml
 from jinja2 import Environment, select_autoescape
 
+from tradingo import templates
+
 env = Environment(autoescape=select_autoescape())
 
 
@@ -193,3 +195,25 @@ class EnvProvider:
         if variables.suffix == ".yaml":
             return cls.from_env(env=yaml.safe_load(rendered))
         raise ValueError(variables.suffix)
+
+
+@dataclasses.dataclass
+class IGTradingConfig(EnvProvider):
+    """IG Trading configuration"""
+
+    password: str
+    username: str
+    api_key: str
+    acc_type: str
+    app_prefix = "IG_SERVICE"
+
+
+@dataclasses.dataclass
+class TradingoConfig(EnvProvider):
+    """Tradingo configuration"""
+
+    config_home: pathlib.Path
+    arctic_uri: str
+    templates: pathlib.Path = pathlib.Path(templates.__file__).parent
+    include_instruments: bool = False
+    app_prefix = "TP"

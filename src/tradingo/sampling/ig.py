@@ -11,7 +11,7 @@ from tenacity import Retrying, retry_if_exception_type, wait_exponential
 from trading_ig.rest import ApiExceededException, IGService
 
 from tradingo import symbols
-from tradingo.config import IGTradingConfig
+from tradingo.settings import IGTradingConfig
 
 logger = logging.getLogger(__name__)
 

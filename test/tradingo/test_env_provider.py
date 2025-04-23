@@ -6,7 +6,7 @@ from unittest import mock
 
 import pytest
 
-from tradingo.env_provider import EnvProvider, EnvProviderError
+from tradingo.settings import EnvProvider, EnvProviderError
 
 
 def test_env_provider(tmp_path):

@@ -6,7 +6,7 @@ import pandas as pd
 from dash import Dash, Input, Output, callback, dcc, html
 
 from tradingo.api import Tradingo
-from tradingo.config import TradingoConfig
+from tradingo.settings import TradingoConfig
 
 config = TradingoConfig.from_env().to_env()
 
