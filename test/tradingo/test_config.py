@@ -3,8 +3,8 @@ import pathlib
 
 import pytest
 
-from tradingo import cli
-from tradingo.config import TradingoConfig
+from tradingo import dag
+from tradingo.settings import TradingoConfig
 
 
 @pytest.mark.skip
@@ -17,9 +17,9 @@ def test_config():
     )
     env.to_env()
 
-    out = cli.read_config_template(
+    out = dag.read_config_template(
         pathlib.Path("/home/rory/dev/tradingo-plat/config/tradingo/yfinance.yaml"),
         variables=os.environ,
     )
 
-    cli.DAG.from_config(out)
+    dag.DAG.from_config(out)
