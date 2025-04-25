@@ -15,7 +15,7 @@
   symbols_out:
    - "{{ raw_prices_lib }}/{{ epic }}.bid"
    - "{{ raw_prices_lib }}/{{ epic }}.ask"
-  function: tradingo.sampling.ig.sample_instrument
+  function: "{{ samplingFunction }}"
   params:
     epic: "{{ epic }}"
     start_date: "{{ data_interval_start }}"
