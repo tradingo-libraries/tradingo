@@ -51,6 +51,7 @@ def cli_app() -> argparse.ArgumentParser:
     run_tasks.add_argument("--end-date", type=pd.Timestamp, required=False)
     run_tasks.add_argument("--force-rerun", action="store_true", default=True)
     run_tasks.add_argument("--dry-run", action="store_true")
+    run_tasks.add_argument("--clean", action="store_true")
 
     _ = task_subparsers.add_parser("list")
 
@@ -80,6 +81,8 @@ def handle_tasks(args, arctic):
                 extra_kwargs["start_date"] = args.start_date
             if args.end_date:
                 extra_kwargs["end_date"] = args.end_date
+            if args.clean:
+                extra_kwargs["clean"] = args.clean
             out = graph.run(
                 args.task,
                 run_dependencies=args.with_deps,

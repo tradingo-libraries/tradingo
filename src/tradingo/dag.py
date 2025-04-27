@@ -213,6 +213,8 @@ class DAG(dict[str, Task]):
 
     def run(self, task_name, **kwargs) -> None:
         """run a specific task of this DAG."""
+        if task_name not in self:
+            raise ValueError(f"{task_name} is not a task in the DAG.")
         return self[task_name].run(**kwargs)
 
     def update_state(self) -> None:

@@ -5,8 +5,7 @@
   {% endfor %}
   function: tradingo.portfolio.portfolio_construction
   symbols_in:
-    instruments: "instruments/{{ universe_name }}"
-    close: "prices/{{ universe_name }}.mid.close"
+    close: "{{ close }}"
   symbols_out:
     - "portfolio/{{ name }}.raw.percent"
     - "portfolio/{{ name }}.raw.shares"
@@ -28,8 +27,8 @@
     price_ffill_limit: {{ backtest.price_ffill_limit }}
   symbols_in:
     portfolio: "portfolio/{{ name }}.rounded.position"
-    bid_close: "prices/{{ universe_name }}.bid.close"
-    ask_close: "prices/{{ universe_name }}.ask.close"
+    bid_close: {{ bid_close }}
+    ask_close: {{ ask_close }}
   symbols_out:
     - backtest/{{ name }}.portfolio
     - backtest/{{ name }}.instrument.unrealised_pnl
