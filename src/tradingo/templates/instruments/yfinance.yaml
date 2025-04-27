@@ -13,7 +13,7 @@
 "sample.{{ ticker }}":
   depends_on: []
   symbols_out:
-   - "{{ raw_prices_lib }}/{{ ticker }}.ohlcv"
+   - "{{ raw_prices_lib }}/{{ ticker }}"
   function: tradingo.sampling.yf.sample_equity
   params:
     ticker: "{{ ticker }}"
@@ -30,7 +30,7 @@
     end_date: "{{ data_interval_end }}"
   depends_on:
   {%for ticker in tickers %}
-    - "sample.{{ ticker }}.ohlcv"
+    - "sample.{{ ticker }}"
   {% endfor %}
   symbols_in:
     instruments: "instruments/{{ universe_name }}"

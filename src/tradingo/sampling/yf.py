@@ -65,7 +65,7 @@ def create_universe(
     end_date = pd.Timestamp(end_date)
 
     def get_data(symbol: str):
-        return pricelib.read(f"{symbol}.ohlcv", date_range=(start_date, end_date)).data
+        return pricelib.read(symbol, date_range=(start_date, end_date)).data
 
     result = pd.concat(
         ((get_data(symbol) for symbol in instruments.index.to_list())),
