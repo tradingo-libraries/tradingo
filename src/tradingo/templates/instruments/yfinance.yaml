@@ -23,24 +23,22 @@
 {% endfor %}
 
 "sample.{{ universe_name }}":
-  function: tradingo.sampling.ig.create_universe
+  function: tradingo.sampling.yf.create_universe
   params:
     pricelib: "{{ raw_prices_lib }}"
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
   depends_on:
   {%for ticker in tickers %}
-    - "sample.{{ ticker }}"
+    - "sample.{{ ticker }}.ohlcv"
   {% endfor %}
   symbols_in:
     instruments: "instruments/{{ universe_name }}"
   load_args:
     no_date: true
   publish_args:
-    astype: float,
+    astype: float
   symbols_out:
-  {% for field in ["ask", "mid", "bid"] %}
-  {% for occurence in ["open", "high", "low", "close"] %}
-  - prices/{{ universe_name }}.{{ field }}.{{ occurence }}
-  {% endfor %}
+  {% for occurence in ["open", "high", "low", "close", "volume"] %}
+  - prices/{{ universe_name }}.mid.{{ occurence }}
   {% endfor %}
