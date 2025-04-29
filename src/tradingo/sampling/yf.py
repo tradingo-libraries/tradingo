@@ -8,7 +8,6 @@ from arcticdb.version_store.library import Library
 
 from tradingo import symbols
 
-
 logger = logging.getLogger(__name__)
 
 
