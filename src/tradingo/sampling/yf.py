@@ -24,7 +24,10 @@ def sample_equity(
 
     logger.info(
         "querying yfinance ticker=%s start=%s end=%s interval=%s",
-        ticker, start_date, end_date, interval,
+        ticker,
+        start_date,
+        end_date,
+        interval,
     )
 
     if not end_date:
