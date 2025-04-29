@@ -217,5 +217,5 @@ Set the following env vars:
 And run
 
 ```bash
-tradingo-cli --config ./config.yaml task run backtest --end-date "2025-04-04 00:00:00+00:00"
+tradingo-cli --auth --config "<path/to/config.yaml>" task run "<task-name>" --end-date "<date>"
 ```
