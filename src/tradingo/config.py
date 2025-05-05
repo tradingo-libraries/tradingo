@@ -2,7 +2,6 @@
 
 import json
 import pathlib
-from copy import copy
 from typing import Any, Optional
 
 import jinja2
@@ -83,7 +82,7 @@ def process_includes(
                 except ConfigLoadError as ex:
                     raise ConfigLoadError(
                         f"Error processing include at '{value}' {path_so_far=}"
-                    )
+                    ) from ex
 
             else:
                 raise ValueError(

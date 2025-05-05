@@ -1,6 +1,7 @@
-from arcticdb.version_store.library import Library
-import pandas as pd
 import pathlib
+
+import pandas as pd
+from arcticdb.version_store.library import Library
 
 from tradingo import symbols
 
