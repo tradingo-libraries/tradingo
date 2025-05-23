@@ -37,6 +37,7 @@ def symbol_to_currency(symbol: str) -> str:
         return symbol[:-2]
     return symbol
 
+
 def _get_ticker(ticker: str) -> str:
     if (ticker_ := currency_to_symbol(ticker)) != ticker:
         logger.info("converting currency ticker %s to %s", ticker, ticker_)

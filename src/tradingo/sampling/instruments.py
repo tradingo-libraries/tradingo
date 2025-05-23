@@ -47,7 +47,9 @@ def download_instruments(
     if tickers:
         return (
             (
-                pd.DataFrame({t: Ticker(currency_to_symbol(t)).get_info() for t in tickers})
+                pd.DataFrame(
+                    {t: Ticker(currency_to_symbol(t)).get_info() for t in tickers}
+                )
                 .transpose()
                 .rename_axis("Symbol")
             ),
