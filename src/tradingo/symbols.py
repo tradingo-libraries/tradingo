@@ -129,7 +129,16 @@ def symbol_provider(
                 if symbol in kwargs and kwargs[symbol] is None:
                     requested_symbols.pop(symbol)
 
-            def get_symbol_data(v, with_no_date=False):
+            def get_symbol_data(v: str | list[str], with_no_date=False) -> pd.DataFrame:
+                if isinstance(v, list):
+                    return pd.concat(
+                        (
+                            get_symbol_data(item, with_no_date=with_no_date)
+                            for item in v
+                        ),
+                        axis=1,
+                        keys=v,
+                    )
                 symbol = Symbol.parse(v, kwargs, symbol_prefix=symbol_prefix)
                 try:
                     return (
