@@ -244,9 +244,6 @@ def symbol_publisher(
             out = envoke_symbology_function(func, args, kwargs, arctic)
             logger.info("Publishing %s to %s", symbols or template, arctic)
 
-            # yf kws:
-            #    kwdout = out.pop(-1)
-            #
             if template:
                 out, symbols_ = tuple(zip(*out))
                 formatted_symbols = tuple(template.format(*s) for s in symbols_)
