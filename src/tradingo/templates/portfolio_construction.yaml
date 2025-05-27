@@ -36,11 +36,11 @@
     portfolio: "portfolio/{{ name }}.rounded.position"
     bid_close:
     {% for model in model_weights %}
-      - "prices/{{ model }}.bid.close"
+      - "prices/{{ model }}.{{ bid_field if bid_field is not none else 'bid' }}.close"
     {% endfor %}
     ask_close:
     {% for model in model_weights %}
-      - "prices/{{ model }}.ask.close"
+      - "prices/{{ model }}.{{ ask_field if ask_field is not none else 'ask' }}.close"
     {% endfor %}
   symbols_out:
     - backtest/{{ name }}.portfolio
