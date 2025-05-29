@@ -130,6 +130,11 @@ def symbol_provider(
                     requested_symbols.pop(symbol)
 
             def get_symbol_data(v: str | list[str], with_no_date=False) -> pd.DataFrame:
+                if isinstance(v, dict):
+                    return {
+                        key: get_symbol_data(item, with_no_date=with_no_date)
+                        for key, item in v.items()
+                    }
                 if isinstance(v, list):
                     multidata = pd.concat(
                         (
