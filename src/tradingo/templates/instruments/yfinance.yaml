@@ -42,3 +42,33 @@
   {% for occurence in ["open", "high", "low", "close", "volume"] %}
   - prices/{{ universe_name }}.mid.{{ occurence }}
   {% endfor %}
+
+{% if currency and fx_universe_name %}
+"sample.{{ universe_name }}.{{ currency }}":
+  function: tradingo.sampling.yf.convert_prices_to_ccy
+  params:
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"
+    currency: {{ currency }}
+  depends_on:
+    - "sample.{{ universe_name }}"
+    - "sample.{{ fx_universe_name }}"
+  symbols_in:
+    instruments: "instruments/{{ universe_name }}"
+    prices:
+      {% for occurence in ["open", "high", "low", "close"] %}
+      {{ occurence }}: prices/{{ universe_name }}.mid.{{ occurence }}
+      {% endfor %}
+    fx_series:
+      {% for occurence in ["open", "high", "low", "close"] %}
+      {{ occurence }}:  prices/{{ fx_universe_name }}.mid.{{ occurence }}
+      {% endfor %}
+  load_args:
+    no_date: true
+  publish_args:
+    astype: float
+  symbols_out:
+  {% for occurence in ["open", "high", "low", "close"] %}
+  - prices/{{ universe_name }}.mid.{{ occurence }}.{{ currency }}
+  {% endfor %}
+{% endif %}
