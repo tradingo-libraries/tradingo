@@ -83,6 +83,38 @@ def create_universe(
     )
 
 
+@symbols.lib_provider(pricelib="{raw_price_lib}")
+def create_universe(
+    pricelib: Library,
+    instruments: pd.DataFrame,
+    end_date: pd.Timestamp,
+    start_date: pd.Timestamp,
+):
+    """
+    Create one arctic symbol for each OHLCV prices from yahoo finance.
+    Each symbol contains all tickers defined for the universe.
+    """
+
+    start_date = pd.Timestamp(start_date)
+    end_date = pd.Timestamp(end_date)
+
+    def get_data(symbol: str):
+        return pricelib.read(symbol, date_range=(start_date, end_date)).data
+
+    result = pd.concat(
+        ((get_data(symbol) for symbol in instruments.index.to_list())),
+        axis=1,
+        keys=instruments.index.to_list(),
+    ).reorder_levels([1, 0], axis=1)
+    return (
+        result["Open"],
+        result["High"],
+        result["Low"],
+        result["Close"],
+        result["Volume"],
+    )
+
+
 def adjust_fx_series(
     fx_series: pd.DataFrame,
     ref_ccy: str,
