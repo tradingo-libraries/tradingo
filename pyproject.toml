@@ -24,6 +24,7 @@ dependencies = [
   "tenacity",
   "dash>=2.18.2",
   "lightgbm>=4.6.0",
+  "pycountry",
 ]
 
 [dependency-groups]

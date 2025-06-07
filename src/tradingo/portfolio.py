@@ -45,7 +45,7 @@ def portfolio_construction(
     signal_value = (
         pd.concat(
             (
-                weights
+                weight
                 * signals.read(
                     model_name,
                     date_range=(start_date, end_date),

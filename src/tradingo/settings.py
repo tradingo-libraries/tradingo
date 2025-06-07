@@ -217,3 +217,14 @@ class TradingoConfig(EnvProvider):
     templates: pathlib.Path = pathlib.Path(templates.__file__).parent
     include_instruments: bool = False
     app_prefix = "TP"
+
+
+@dataclasses.dataclass
+class SMTPConfig(EnvProvider):
+    """SMTP server configuration"""
+
+    server_uri: str
+    port: int
+    username: str
+    password: str
+    app_prefix = "SMTP"
