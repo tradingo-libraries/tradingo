@@ -5,7 +5,7 @@ import json
 import os
 import pathlib
 import typing
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 import jinja2
 import pandas as pd
@@ -107,7 +107,11 @@ class EnvProvider:
     app_prefix: Optional[str]
 
     @classmethod
-    def _resolve_args(cls, env, app_prefix):
+    def _resolve_args(
+        cls,
+        env: Mapping[str, str],
+        app_prefix: str,
+    ):
         out = {}
         for k, v in env.items():
             if not (k.lower().startswith(app_prefix)):
@@ -158,7 +162,9 @@ class EnvProvider:
         *,
         app_prefix: str | None = None,
         env: dict[str, Any] | None = None,
+        override_default_env: bool = True,
     ):
+
         try:
             app_prefix = app_prefix or getattr(cls, "app_prefix")
         except AttributeError as ex:
@@ -171,6 +177,13 @@ class EnvProvider:
         env = env or dict(os.environ)
 
         resolved_args = cls._resolve_args(env, app_prefix)
+
+        default_env = cls._resolve_args(os.environ, app_prefix)
+
+        if override_default_env:
+            resolved_args.update(
+                (k, v) for k, v in default_env.items() if k in resolved_args
+            )
 
         try:
             return cls(**resolved_args, app_prefix=app_prefix)

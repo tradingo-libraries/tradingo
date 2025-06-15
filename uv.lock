@@ -3443,7 +3443,7 @@ name = "tradingo"
 source = { editable = "." }
 dependencies = [
     { name = "arcticdb" },
-    { name = "dash" },
+    { name = "ipython" },
     { name = "lightgbm" },
     { name = "numba" },
     { name = "numpy" },
@@ -3468,6 +3468,9 @@ dev = [
     { name = "pytest-benchmark" },
     { name = "ruff" },
 ]
+monitor = [
+    { name = "dash" },
+]
 research = [
     { name = "dtale" },
     { name = "jupyter" },
@@ -3476,7 +3479,7 @@ research = [
 [package.metadata]
 requires-dist = [
     { name = "arcticdb" },
-    { name = "dash", specifier = ">=2.18.2" },
+    { name = "ipython", specifier = ">=9.1.0" },
     { name = "lightgbm", specifier = ">=4.6.0" },
     { name = "numba" },
     { name = "numpy" },
@@ -3501,6 +3504,7 @@ dev = [
     { name = "pytest-benchmark" },
     { name = "ruff", specifier = ">=0.11.5" },
 ]
+monitor = [{ name = "dash", specifier = ">=2.18.2" }]
 research = [
     { name = "dtale" },
     { name = "jupyter" },

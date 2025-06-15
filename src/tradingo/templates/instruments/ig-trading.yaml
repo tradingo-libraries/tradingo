@@ -38,7 +38,7 @@
   load_args:
     no_date: true
   publish_args:
-    astype: float,
+    astype: float
   symbols_out:
   {% for field in ["ask", "mid", "bid"] %}
   {% for occurence in ["open", "high", "low", "close"] %}

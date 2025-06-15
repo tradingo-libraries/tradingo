@@ -22,9 +22,9 @@ dependencies = [
   "trading_ig",
   "riskfolio-lib",
   "tenacity",
-  "dash>=2.18.2",
   "lightgbm>=4.6.0",
   "pycountry",
+  "ipython>=9.1.0",
 ]
 
 [dependency-groups]
@@ -40,6 +40,9 @@ dev = [
 research = [
   "dtale",
   "jupyter",
+]
+monitor = [
+  "dash>=2.18.2",
 ]
 
 
