@@ -23,9 +23,12 @@ def read_config_template(
     path_so_far = path_so_far or []
 
     # TODO:  undefined=jinja2.StrictUndefined
-    renderedtext = jinja2.Template(filepath.read_text(encoding="utf-8")).render(
-        **variables
-    )
+    try:
+        renderedtext = jinja2.Template(filepath.read_text(encoding="utf-8")).render(
+            **variables
+        )
+    except Exception as ex:
+        raise ex
 
     try:
         if filepath.suffix == ".json":
