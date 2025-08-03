@@ -45,6 +45,11 @@ def download_instruments(
         return (pd.read_html(html)[0].set_index(index_col).rename_axis("Symbol"),)
 
     if tickers:
+        if isinstance(tickers, str) and tickers.startswith("http"):
+            tickers = pd.read_html(tickers)[0][index_col]
+        if isinstance(tickers, str) and tickers.startswith("file"):
+            breakpoint()
+            tickers = pd.read_csv(tickers.split("://")[-1])[index_col]
         return (
             (
                 pd.DataFrame(
