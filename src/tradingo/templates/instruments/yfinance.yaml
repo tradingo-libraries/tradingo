@@ -1,3 +1,8 @@
+# vars
+# 1. tickers
+# 2. raw_prices_lib
+# 3. universe_name
+# 4. fx_universe_name
 "download.{{ universe_name }}":
   depends_on: []
   function: tradingo.sampling.instruments.download_instruments
@@ -7,6 +12,7 @@
     write_pickle: true
   params:
     tickers: {{ tickers }}
+    index_col: "{{ index_col }}"
   enabled: {{ TP_INCLUDE_INSTRUMENTS }}
 
 {% for ticker in tickers %}
@@ -20,6 +26,7 @@
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
     interval: "{{ interval }}"
+
 {% endfor %}
 
 "sample.{{ universe_name }}":

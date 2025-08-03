@@ -21,6 +21,8 @@
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
     interval: "{{ interval }}"
+  publish_args:
+    astype: float
 {% endfor %}
 
 "sample.{{ universe_name }}":

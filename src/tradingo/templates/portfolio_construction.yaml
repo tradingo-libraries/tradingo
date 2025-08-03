@@ -30,7 +30,6 @@
     model_weights: {{ model_weights }}
     multiplier: {{ portfolio.multiplier }}
     aum: {{ portfolio.aum }}
-    snapshot: "{{ name }}{% raw %}_{{ run_id }}_{{ task_instance.task_id }}{% endraw %}"
 "backtest.{{ name }}":
   depends_on:
     - "portfolio.{{ name }}"
@@ -38,9 +37,9 @@
   params:
     price_ffill_limit: {{ backtest.price_ffill_limit }}
   symbols_in:
-    portfolio: "portfolio/{{ name }}.rounded.position"
-    bid_close: "prices/{{ universe_name }}.bid.close"
-    ask_close: "prices/{{ universe_name }}.ask.close"
+    portfolio: "{{ position }}"
+    bid_close: "{{ bid_close }}"
+    ask_close: "{{ bid_close }}"
   symbols_out:
     - backtest/{{ name }}.portfolio
     - backtest/{{ name }}.instrument.unrealised_pnl
