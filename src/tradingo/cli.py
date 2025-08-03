@@ -1,7 +1,7 @@
 """Tradingo CLI"""
 
 from __future__ import annotations
-
+import re
 import argparse
 import logging
 import os
@@ -13,6 +13,9 @@ from tradingo.api import Tradingo
 from tradingo.config import read_config_template
 from tradingo.dag import DAG
 from tradingo.settings import IGTradingConfig, TradingoConfig
+
+
+logger = logging.getLogger(__name__)
 
 
 def cli_app() -> argparse.ArgumentParser:
@@ -54,6 +57,7 @@ def cli_app() -> argparse.ArgumentParser:
     run_tasks.add_argument("--force-rerun", action="store_true", default=True)
     run_tasks.add_argument("--dry-run", action="store_true")
     run_tasks.add_argument("--clean", action="store_true")
+    run_tasks.add_argument("--skip-deps", type=re.compile)
 
     _ = task_subparsers.add_parser("list")
 
@@ -91,6 +95,7 @@ def handle_tasks(args, arctic):
                 force_rerun=args.force_rerun,
                 arctic=arctic,
                 dry_run=args.dry_run,
+                skip_deps=args.skip_deps,
                 **extra_kwargs,
             )
             if args.dry_run:
@@ -128,7 +133,6 @@ def main():
     envconfig.to_env()
 
     arctic = Tradingo(envconfig.arctic_uri)
-
     if args.entity == "task":
         handle_tasks(args, arctic)
 

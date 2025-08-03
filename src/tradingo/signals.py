@@ -29,18 +29,58 @@ def vol(
     )
 
 
+def log_returns(close, base_capital: int | None = None):
+    if base_capital:
+        close += base_capital
+    return np.log(close / close.shift())
+
+
 def ewmac_signal(
     close: pd.DataFrame,
     speed1: int,
     speed2: int,
 ):
 
-    return (
-        (
-            close.ewm(halflife=speed2, min_periods=speed2).mean()
-            - close.ewm(halflife=speed1, min_periods=speed1).mean()
-        ),
-    )
+    log_rets = log_returns(close)
+    rar_returns = (log_rets - log_rets.ewm(64).mean()) / log_rets.ewm(64).std()
+
+    return (rar_returns).ewm(
+        halflife=speed1, min_periods=speed1
+    ).mean() - rar_returns.ewm(halflife=speed2, min_periods=speed2).mean()
+
+
+def long_only(signal: pd.DataFrame):
+    return signal.where(signal > 0.0, 0.0)
+
+
+def vol_scaled(
+    signal: pd.DataFrame,
+    close: pd.DataFrame,
+    halflife: int,
+    min_periods: int,
+    annualisation_factor: int = 252,
+    vol_floor_window: int | None = None,
+    vol_floor_quantile: int | None = None,
+):
+    """
+    Args:
+        signal: the signal to scale
+        close: the close prices to compute vol with
+        halflife: the halflife of vol estimation
+        min_periods: the minimum number of periods before observations are valid.
+    """
+    vol_measure = log_returns(close).resample("B").last().ewm(
+        halflife=halflife,
+        min_periods=min_periods,
+    ).std() * np.sqrt(annualisation_factor)
+
+    if vol_floor_window is not None:
+
+        vol_measure = vol_measure.rolling(vol_floor_window, min_periods=1).quantile(
+            q=vol_floor_quantile
+        )
+
+    return signal / vol_measure.reindex_like(signal)
 
 
 def scaled(signal, scale: float):
@@ -302,4 +342,12 @@ def dynamic_mean_reversion(
         model.predict(X_test),
         index=z_score.index,
         columns=z_score.columns,
+    )
+
+
+def monthly(signal: pd.DataFrame):
+    return (
+        signal.resample(pd.offsets.MonthEnd(1))
+        .median()
+        .reindex(signal.index, method="ffill")
     )

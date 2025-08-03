@@ -4,6 +4,8 @@ import json
 import pathlib
 from typing import Any, Optional
 
+import pandas as pd
+
 import jinja2
 import yaml
 
@@ -22,7 +24,6 @@ def read_config_template(
 
     path_so_far = path_so_far or []
 
-    # TODO:  undefined=jinja2.StrictUndefined
     try:
         renderedtext = jinja2.Template(filepath.read_text(encoding="utf-8")).render(
             **variables
@@ -72,7 +73,9 @@ def process_includes(
 
             protocol, path = value["include"].split("://")
 
-            if protocol == "file":
+            if protocol == "file" and (
+                path.endswith(".json") or path.endswith(".yaml")
+            ):
                 try:
                     incvalue = read_config_template(
                         pathlib.Path(path),
@@ -82,19 +85,34 @@ def process_includes(
                         },
                         path_so_far=path_so_far,
                     )
+                    value = value.copy()
+                    value.update(incvalue)
+                    value.pop("include", None)
+                    value.pop("variables", None)
                 except ConfigLoadError as ex:
                     raise ConfigLoadError(
                         f"Error processing include at '{value}' {path_so_far=}"
                     ) from ex
+            elif protocol == "file" and (
+                path.endswith(".csv") or path.endswith(".parquet")
+            ):
+                df = pd.read_csv(path)
+                if query := value.get("query"):
+                    df = df.query(query)
+                incvalue = df[value["column"]].to_list()
+                value = incvalue
+
+            elif protocol.startswith("http"):
+                df = pd.read_html(value["include"])[0]
+                if query := value.get("query"):
+                    df = df.query(query)
+                incvalue = df[value["column"]].to_list()
+                value = incvalue
 
             else:
                 raise ValueError(
                     f"Unsupported protocol: '{protocol}' at '{key}' for '{path}'"
                 )
-            value = value.copy()
-            value.update(incvalue)
-            value.pop("include", None)
-            value.pop("variables", None)
 
         elif isinstance(value, dict):
             value = process_includes(value, variables, path_so_far)
