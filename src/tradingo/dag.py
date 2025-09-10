@@ -91,13 +91,15 @@ class Task:
     def run(
         self,
         *args,
-        run_dependencies=False,
+        run_dependencies: bool | int = False,
         skip_deps: re.Pattern | None = None,
         force_rerun=False,
         **kwargs,
     ) -> None:
         """run this task. optinally run also dependency tasks"""
         if run_dependencies:
+            if isinstance(run_dependencies, int):
+                run_dependencies -= 1
             for dependency in self.dependencies:
                 if skip_deps and skip_deps.match(dependency.name):
                     continue

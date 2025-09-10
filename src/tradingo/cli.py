@@ -51,7 +51,7 @@ def cli_app() -> argparse.ArgumentParser:
     task_subparsers = task.add_subparsers(dest="list_action", required=True)
     run_tasks = task_subparsers.add_parser("run")
     run_tasks.add_argument("task")
-    run_tasks.add_argument("--with-deps", action="store_true")
+    run_tasks.add_argument("--with-deps", default=0, type=int)
     run_tasks.add_argument("--start-date", type=pd.Timestamp, required=False)
     run_tasks.add_argument("--end-date", type=pd.Timestamp, required=False)
     run_tasks.add_argument("--force-rerun", action="store_true", default=True)

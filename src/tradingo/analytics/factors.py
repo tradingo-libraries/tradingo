@@ -70,14 +70,14 @@ def factor_betas(
                 .sort_index(level=0)
                 .unstack(level=1)
                 .divide(cov_mtx.loc[(slice(None), factor), factor].to_numpy(), axis=0)
-                .stack(dropna=False)
+                .stack(future_stack=True)
                 for factor in factor_returns.columns
             ),
             axis=1,
             keys=factor_returns.columns,
         )
         .unstack(level=1)
-        .stack(level=0)
+        .stack(level=0, future_stack=True)
     ).reindex(index=factor_returns.columns, level=1)
 
     return betas, factor_covs

@@ -124,7 +124,7 @@ def buffered(signal: pd.Series | pd.DataFrame, buffer_width):
 
     buffered = _linear_buffer(signal.to_numpy(), thresholds.to_numpy())
 
-    return (pd.DataFrame(buffered, index=signal.index, columns=signal.columns),)
+    return pd.DataFrame(buffered, index=signal.index, columns=signal.columns)
 
 
 def intraday_momentum(

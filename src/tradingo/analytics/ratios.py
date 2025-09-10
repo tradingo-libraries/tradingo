@@ -31,9 +31,17 @@ def omega_ratio(returns: pd.Series, required_return: float = 0.0) -> float:
     return np.nan
 
 
-def sharpe_ratio(returns: pd.Series, required_return: float = 0.0) -> float:
+def sharpe_ratio(
+    returns: pd.Series,
+    required_return: float = 0.0,
+    rolling: int | None = None,
+) -> float | pd.Series:
     """
     Calculate the Sharpe ratio of a strategy.
     """
+    if rolling:
+        return returns.rolling(rolling).apply(
+            lambda i: sharpe_ratio(i, required_return)
+        )
     return_threshold = (1 + required_return) ** (1 / 252) - 1
     return (returns.mean() * 252 - return_threshold) / (returns.std() * np.sqrt(252))
