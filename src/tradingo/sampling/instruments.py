@@ -7,6 +7,7 @@ import pandas as pd
 from yfinance import Ticker
 
 from tradingo.sampling.ig import get_ig_service
+from tradingo.sampling.yf import currency_to_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ def download_instruments(
     if tickers:
         return (
             (
-                pd.DataFrame({t: Ticker(t).get_info() for t in tickers})
+                pd.DataFrame({t: Ticker(currency_to_symbol(t)).get_info() for t in tickers})
                 .transpose()
                 .rename_axis("Symbol")
             ),

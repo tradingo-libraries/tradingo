@@ -129,10 +129,27 @@ def symbol_provider(
                 if symbol in kwargs and kwargs[symbol] is None:
                     requested_symbols.pop(symbol)
 
-            def get_symbol_data(v, with_no_date=False):
+            def get_symbol_data(v: str | list[str], with_no_date=False) -> pd.DataFrame:
+                if isinstance(v, dict):
+                    return {
+                        key: get_symbol_data(item, with_no_date=with_no_date)
+                        for key, item in v.items()
+                    }
+                if isinstance(v, list):
+                    multidata = pd.concat(
+                        (
+                            get_symbol_data(item, with_no_date=with_no_date)
+                            for item in v
+                        ),
+                        axis=1,
+                        keys=v,
+                    )
+                    columns = multidata.columns.get_level_values(1).drop_duplicates(keep="first")
+                    multidata = multidata.transpose().groupby(level=1).last().transpose()
+                    return multidata[columns]
                 symbol = Symbol.parse(v, kwargs, symbol_prefix=symbol_prefix)
                 try:
-                    return (
+                    data = (
                         arctic.get_library(
                             symbol.library,
                             create_if_missing=True,
@@ -151,6 +168,13 @@ def symbol_provider(
                         )
                         .data
                     )
+                    if (
+                        not with_no_date
+                        and isinstance(data.index, pd.DatetimeIndex)
+                        and not data.index.tz
+                    ):
+                        data.index = data.index.tz_localize("UTC")
+                    return data
                 except InternalException as ex:
                     if "The data for this symbol is pickled" in ex.args[0]:
                         return get_symbol_data(v, with_no_date=True)
@@ -225,9 +249,6 @@ def symbol_publisher(
             out = envoke_symbology_function(func, args, kwargs, arctic)
             logger.info("Publishing %s to %s", symbols or template, arctic)
 
-            # yf kws:
-            #    kwdout = out.pop(-1)
-            #
             if template:
                 out, symbols_ = tuple(zip(*out))
                 formatted_symbols = tuple(template.format(*s) for s in symbols_)
