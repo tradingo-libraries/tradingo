@@ -5,8 +5,18 @@
   {% endfor %}
   function: tradingo.portfolio.portfolio_construction
   symbols_in:
-    instruments: "instruments/{{ universe_name }}"
-    close: "prices/{{ universe_name }}.mid.close"
+    instruments:
+    {% for model in model_weights %}
+      - "instruments/{{ model }}"
+    {% endfor %}
+    close:
+    {% for model in model_weights %}
+    {% if portfolio.currency is defined %}
+      - "prices/{{ model }}.mid.close.{{ portfolio.currency }}"
+    {% else %}
+      - "prices/{{ model }}.mid.close"
+    {% endif %}
+    {% endfor %}
   symbols_out:
     - "portfolio/{{ name }}.raw.percent"
     - "portfolio/{{ name }}.raw.shares"
@@ -28,8 +38,14 @@
     price_ffill_limit: {{ backtest.price_ffill_limit }}
   symbols_in:
     portfolio: "portfolio/{{ name }}.rounded.position"
-    bid_close: "prices/{{ universe_name }}.bid.close"
-    ask_close: "prices/{{ universe_name }}.ask.close"
+    bid_close:
+    {% for model in model_weights %}
+      - "prices/{{ model }}.{{ bid_field if bid_field is not none else 'bid' }}.close"
+    {% endfor %}
+    ask_close:
+    {% for model in model_weights %}
+      - "prices/{{ model }}.{{ ask_field if ask_field is not none else 'ask' }}.close"
+    {% endfor %}
   symbols_out:
     - backtest/{{ name }}.portfolio
     - backtest/{{ name }}.instrument.unrealised_pnl
