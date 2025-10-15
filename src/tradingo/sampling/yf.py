@@ -103,6 +103,7 @@ def create_universe(
     end_date = pd.Timestamp(end_date)
 
     def get_data(symbol: str):
+        symbol = _get_ticker(symbol)
         return pricelib.read(symbol, date_range=(start_date, end_date)).data
 
     result = pd.concat(
@@ -210,7 +211,6 @@ def convert_prices_to_ccy(
 
     converted = []
     for name, df in prices.items():
-        cols: list = df.columns.to_list()
         df_fx = adjust_fx_series(
             fx_series[name], currency, add_self=True, add_cent=True
         )

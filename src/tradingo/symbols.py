@@ -144,8 +144,12 @@ def symbol_provider(
                         axis=1,
                         keys=v,
                     )
-                    columns = multidata.columns.get_level_values(1).drop_duplicates(keep="first")
-                    multidata = multidata.transpose().groupby(level=1).last().transpose()
+                    columns = multidata.columns.get_level_values(1).drop_duplicates(
+                        keep="first"
+                    )
+                    multidata = (
+                        multidata.transpose().groupby(level=1).last().transpose()
+                    )
                     return multidata[columns]
                 symbol = Symbol.parse(v, kwargs, symbol_prefix=symbol_prefix)
                 try:
