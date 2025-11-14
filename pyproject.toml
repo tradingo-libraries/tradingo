@@ -63,7 +63,8 @@ tradingo-cli = "tradingo.cli:main"
 
 [tool.setuptools_scm]
 
-[tool.mypy]
+[tool.isort]
+profile = "black"
 
 [[tool.mypy.overrides]]
 module = [
@@ -89,4 +90,3 @@ module = [
   "dash",
 ]
 ignore_missing_imports = true
-
