@@ -6,8 +6,6 @@ dev_checks() {
     # Run local development checks: tests, format, lint, typecheck
     # Mirrors CI steps without consuming CI minutes.
 
-    echo Pytest tradingo
-    uv run pytest
     echo Formatting check tradingo
     uv run black ./ --check --config pyproject.toml
     echo Import check tradingo
@@ -16,6 +14,8 @@ dev_checks() {
     uv run ruff check --config pyproject.toml ./
     echo Type check tradingo
     uv run mypy --config pyproject.toml ./src
+    echo Pytest tradingo
+    uv run pytest
 }
 
 dev_checks
