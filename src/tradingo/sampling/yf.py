@@ -196,7 +196,7 @@ def convert_prices_to_ccy(
 
     :param instruments: DataFrame with instrument symbols and their currencies
     :param prices: DataFrame with prices indexed by instrument symbols
-    :param fx_series: DataFrame with FX rates indexed by currency pairs (e.g., 'EURUSD=X')
+    :param fx_series: DataFrame with FX rates indexed by currency pairs (e.g., 'EURUSD')
     :param currency: Target currency to convert prices to
     :return: List of DataFrames with prices converted to the target currency
     """
