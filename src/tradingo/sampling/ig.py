@@ -95,6 +95,9 @@ def sample_instrument(
             # raise SkipException after return
         else:
             raise ex
+    finally:
+        # TODO: need to make this session management RAII
+        service.session.close()
 
     return (
         result["bid"],

@@ -18,6 +18,16 @@ from tradingo.settings import IGTradingConfig, TradingoConfig
 logger = logging.getLogger(__name__)
 
 
+def int_or_bool(val: str) -> int | bool:
+    if val.lower() in {"true", "yes"}:
+        return True
+    if val.lower() == {"false", "no"}:
+        return False
+    if not val.isnumeric():
+        raise ValueError("Invalid value for int or bool: {val}")
+    return int(val)
+
+
 def cli_app() -> argparse.ArgumentParser:
     """Tradingo CLI app."""
 
@@ -51,7 +61,7 @@ def cli_app() -> argparse.ArgumentParser:
     task_subparsers = task.add_subparsers(dest="list_action", required=True)
     run_tasks = task_subparsers.add_parser("run")
     run_tasks.add_argument("task")
-    run_tasks.add_argument("--with-deps", default=0, type=int)
+    run_tasks.add_argument("--with-deps", default=False, type=int_or_bool)
     run_tasks.add_argument("--start-date", type=pd.Timestamp, required=False)
     run_tasks.add_argument("--end-date", type=pd.Timestamp, required=False)
     run_tasks.add_argument("--force-rerun", action="store_true", default=True)

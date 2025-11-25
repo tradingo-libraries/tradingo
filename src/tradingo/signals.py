@@ -312,7 +312,7 @@ def intraday_momentum(
 def dynamic_mean_reversion(
     z_score: pd.DataFrame,
     n_lags: int = 30,
-) -> tuple[pd.DataFrame]:
+) -> pd.DataFrame:
     y = (
         (
             z_score.resample(pd.offsets.BDay(1)).last().abs()
@@ -345,7 +345,7 @@ def dynamic_mean_reversion(
     )
 
 
-def monthly(signal: pd.DataFrame):
+def monthly(signal: pd.DataFrame) -> pd.DataFrame:
     return (
         signal.resample(pd.offsets.MonthEnd(1))
         .median()

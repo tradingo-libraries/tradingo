@@ -2,14 +2,14 @@ import dateutil.tz
 import numpy as np
 import pandas as pd
 
+from trading_ig.rest import IGService
 from tradingo.sampling import get_ig_service
 
 
 def get_activity_history(
     from_date,
     to_date,
-    svc=None,
-    **kwargs,
+    svc: IGService = None,
 ):
     """
     get activtiy history and return dataframe per asset
@@ -21,6 +21,7 @@ def get_activity_history(
         from_date=pd.Timestamp(from_date),
         to_date=pd.Timestamp(to_date),
     )
+    svc.session.close()
     act["DateTime"] = (
         pd.to_datetime(act["date"] + " " + act["time"])
         .dt.tz_localize(dateutil.tz.tzlocal())

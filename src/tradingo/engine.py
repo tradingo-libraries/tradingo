@@ -175,3 +175,4 @@ def adjust_position_sizes(
                 current_position,
                 epic,
             )
+    service.session.close()
