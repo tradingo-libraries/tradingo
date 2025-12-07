@@ -39,7 +39,6 @@ def cli_app() -> argparse.ArgumentParser:
             env=read_config_template(pathlib.Path(i), os.environ),
             override_default_env=False,
         ).to_env(),
-        default=IGTradingConfig.from_env().to_env(),
         required=False,
     )
     app.add_argument(
