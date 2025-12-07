@@ -8,8 +8,8 @@ from typing import DefaultDict, NamedTuple, Optional
 from urllib.parse import parse_qsl, urlparse
 
 import arcticdb as adb
-from arcticdb.exceptions import NoSuchVersionException
 import pandas as pd
+from arcticdb.exceptions import NoSuchVersionException
 from arcticdb_ext.exceptions import InternalException
 
 logger = logging.getLogger(__name__)

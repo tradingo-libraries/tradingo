@@ -1,11 +1,12 @@
 """Tradingo CLI"""
 
 from __future__ import annotations
-import re
+
 import argparse
 import logging
 import os
 import pathlib
+import re
 
 import pandas as pd
 
@@ -13,7 +14,6 @@ from tradingo.api import Tradingo
 from tradingo.config import read_config_template
 from tradingo.dag import DAG
 from tradingo.settings import IGTradingConfig, TradingoConfig
-
 
 logger = logging.getLogger(__name__)
 

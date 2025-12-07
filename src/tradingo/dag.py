@@ -1,10 +1,10 @@
 """DAG generation logic."""
 
 from __future__ import annotations
-import re
 
 import importlib
 import json
+import re
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional

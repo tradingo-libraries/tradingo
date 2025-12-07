@@ -52,7 +52,7 @@ def config_home(tmp_path):
     (tmp_path / "configs" / "signals" / "mysignals.yaml").write_text(
         textwrap.dedent(
             """\
-            "intraday_momentum.{{ universe_name }}": 
+            "signals.intraday_momentum.myuniverse": 
                 function: func
                 symbols_in: []
                 symbols_out: []

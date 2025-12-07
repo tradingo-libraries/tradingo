@@ -4,7 +4,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from tradingo import _backtest
+from tradingo import _backtest  # type: ignore
 
 logger = logging.getLogger(__name__)
 
