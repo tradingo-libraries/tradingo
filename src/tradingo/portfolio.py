@@ -24,6 +24,20 @@ def portfolio_construction(
     default_instrument_weight: float = 1.0,
     instrument_weights: Optional[dict] = None,
 ):
+    """Catch all portfolio construction function for basic
+    portfolio construction routines
+
+    :param signals: library of where to find signals
+    :param close: dataframe of close prices
+    :param model_weights: dictionary of model weights. Keys correspond
+        to a symbol in the library
+    :param multiplier: some scalar to multiply weights by
+    :param aum: notional aum value
+    :param start_date: the start date to use
+    :param end_date: the end date to use
+    :param instruments: optional dataframe of instruments for asset type weights
+    :param instrument_weights: loading to apply to instruments
+    """
     instrument_weights = instrument_weights or {}
 
     weights = pd.Series(multiplier, index=close.columns)

@@ -1,3 +1,7 @@
+# 1. portfolio_name: the name of the portfolio (as per a portfolio
+#   setup with portfolio_construction template
+# 2. universe_name: the name of the universe
+# 3. tradingEnabled: If true, enable trading tasks
 trades.{{ portfolio_name }}:
   function: tradingo.engine.adjust_position_sizes
   depends_on:
