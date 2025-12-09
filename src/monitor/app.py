@@ -47,7 +47,7 @@ app.layout = html.Div(
                     options=[],
                     placeholder="Portfolio",
                     id="portfolio-selection",
-                    multi=True,
+                    multi=False,
                 ),
             ]
         ),
