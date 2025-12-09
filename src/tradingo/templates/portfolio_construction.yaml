@@ -1,3 +1,17 @@
+# Template setsup portfolio constructor, backtester and
+# PIT position tasks.
+#
+# 1. name: the name of the portfolio
+# 2. model_weights: the model weights dictionary
+# 3. portfolio: Some params releavant to pf constuction function
+#   1. currency: Optional - the currency of the portfolio
+#   2. multiplier: the multiplier to apply
+#   3. aum: the aum value
+# 4. position: the position type to use, e.g rounded.shares
+# 5. bid_close: the bid close symbol to use
+# 6. ask_close: the ask close symbol to use
+# 7. data_interval_start: the start of interval for PIT construction
+# 7. data_interval_end: the end of interval for PIT construction
 "portfolio.{{ name }}":
   depends_on:
     #{% for model in model_weights %}
@@ -38,7 +52,7 @@
   symbols_in:
     portfolio: "{{ position }}"
     bid_close: "{{ bid_close }}"
-    ask_close: "{{ bid_close }}"
+    ask_close: "{{ ask_close }}"
   symbols_out:
     - backtest/{{ name }}.portfolio
     - backtest/{{ name }}.instrument.unrealised_pnl

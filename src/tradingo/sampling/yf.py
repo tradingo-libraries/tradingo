@@ -83,7 +83,8 @@ def sample_equity(
         progress=False,
         keepna=True,
     )
-    assert prices is not None
+    if prices is None:
+        raise ProviderDataError(f"Yahoo Finance returned no data for {ticker=}")
 
     if not isinstance(prices.index, pd.DatetimeIndex):
         prices.index = pd.to_datetime(prices.index, utc=True)

@@ -1,3 +1,9 @@
+# 1. universe_name: descriptive name of the universe
+# 2. epics: list of symbols (epics in IG parlance)
+# 3. interval the minute interval
+# 4. samplingFunction: the fully qualified name of the sampling function
+# 5. data_interval_end: end date for sampling
+# 6. data_interval_start: start date for sampling interval
 "download.{{ universe_name }}":
   depends_on: []
   function: tradingo.sampling.instruments.download_instruments
@@ -9,7 +15,7 @@
     epics: {{ epics }}
   enabled: {{ TP_INCLUDE_INSTRUMENTS }}
 
-{% for epic in epics %}
+#{% for epic in epics %}
 "sample.{{ epic }}":
   depends_on: []
   symbols_out:
@@ -23,7 +29,7 @@
     interval: "{{ interval }}"
   publish_args:
     astype: float
-{% endfor %}
+#{% endfor %}
 
 "sample.{{ universe_name }}":
   function: tradingo.sampling.ig.create_universe
@@ -32,9 +38,9 @@
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
   depends_on:
-  {%for epic in epics %}
+  #{%for epic in epics %}
     - "sample.{{ epic }}"
-  {% endfor %}
+  #{% endfor %}
   symbols_in:
     instruments: "instruments/{{ universe_name }}"
   load_args:
@@ -42,8 +48,8 @@
   publish_args:
     astype: float
   symbols_out:
-  {% for field in ["ask", "mid", "bid"] %}
-  {% for occurence in ["open", "high", "low", "close"] %}
+  #{% for field in ["ask", "mid", "bid"] %}
+  #{% for occurence in ["open", "high", "low", "close"] %}
   - prices/{{ universe_name }}.{{ field }}.{{ occurence }}
-  {% endfor %}
-  {% endfor %}
+  #{% endfor %}
+  #{% endfor %}
