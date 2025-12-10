@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 _CCY_CODES = {c.alpha_3 for c in pycountry.currencies}
 
 
+class ProviderDataError(Exception):
+    """Raised if there is an issue with data availability
+    or gathering from provider."""
+
+
 def currency_to_symbol(maybe_currency: str) -> str:
     """Convert a currency pair to a YF currency symbol, prepending '=X'."""
     if (
