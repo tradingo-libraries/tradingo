@@ -1,22 +1,36 @@
+# Template setsup portfolio constructor, backtester and
+# PIT position tasks.
+#
+# 1. name: the name of the portfolio
+# 2. model_weights: the model weights dictionary
+# 3. portfolio: Some params releavant to pf constuction function
+#   1. currency: Optional - the currency of the portfolio
+#   2. multiplier: the multiplier to apply
+#   3. aum: the aum value
+# 4. position: the position type to use, e.g rounded.shares
+# 5. bid_close: the bid close symbol to use
+# 6. ask_close: the ask close symbol to use
+# 7. data_interval_start: the start of interval for PIT construction
+# 7. data_interval_end: the end of interval for PIT construction
 "portfolio.{{ name }}":
   depends_on:
-  {% for model in model_weights %}
+    #{% for model in model_weights %}
     - "signals.{{ model }}"
-  {% endfor %}
+  #{% endfor %}
   function: tradingo.portfolio.portfolio_construction
   symbols_in:
     instruments:
-    {% for model in model_weights %}
-      - "instruments/{{ model }}"
-    {% endfor %}
+      #{% for model in model_weights %}
+      - "instruments/{{ universe_name }}"
+    #{% endfor %}
     close:
-    {% for model in model_weights %}
-    {% if portfolio.currency is defined %}
+      #{% for model in model_weights %}
+      #{% if portfolio.currency is defined %}
       - "prices/{{ model }}.mid.close.{{ portfolio.currency }}"
-    {% else %}
-      - "prices/{{ model }}.mid.close"
-    {% endif %}
-    {% endfor %}
+      #{% else %}
+      - "prices/{{ universe_name }}.mid.close"
+    #{% endif %}
+    #{% endfor %}
   symbols_out:
     - "portfolio/{{ name }}.raw.percent"
     - "portfolio/{{ name }}.raw.shares"
@@ -29,7 +43,6 @@
     model_weights: {{ model_weights }}
     multiplier: {{ portfolio.multiplier }}
     aum: {{ portfolio.aum }}
-    snapshot: "{{ name }}{% raw %}_{{ run_id }}_{{ task_instance.task_id }}{% endraw %}"
 "backtest.{{ name }}":
   depends_on:
     - "portfolio.{{ name }}"
@@ -37,15 +50,9 @@
   params:
     price_ffill_limit: {{ backtest.price_ffill_limit }}
   symbols_in:
-    portfolio: "portfolio/{{ name }}.rounded.position"
-    bid_close:
-    {% for model in model_weights %}
-      - "prices/{{ model }}.{{ bid_field if bid_field is not none else 'bid' }}.close"
-    {% endfor %}
-    ask_close:
-    {% for model in model_weights %}
-      - "prices/{{ model }}.{{ ask_field if ask_field is not none else 'ask' }}.close"
-    {% endfor %}
+    portfolio: "{{ position }}"
+    bid_close: "{{ bid_close }}"
+    ask_close: "{{ ask_close }}"
   symbols_out:
     - backtest/{{ name }}.portfolio
     - backtest/{{ name }}.instrument.unrealised_pnl

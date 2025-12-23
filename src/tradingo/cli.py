@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import pathlib
+import re
 
 import pandas as pd
 
@@ -13,6 +14,18 @@ from tradingo.api import Tradingo
 from tradingo.config import read_config_template
 from tradingo.dag import DAG
 from tradingo.settings import IGTradingConfig, TradingoConfig
+
+logger = logging.getLogger(__name__)
+
+
+def int_or_bool(val: str) -> int | bool:
+    if val.lower() in {"true", "yes"}:
+        return True
+    if val.lower() == {"false", "no"}:
+        return False
+    if not val.isnumeric():
+        raise ValueError("Invalid value for int or bool: {val}")
+    return int(val)
 
 
 def cli_app() -> argparse.ArgumentParser:
@@ -23,9 +36,10 @@ def cli_app() -> argparse.ArgumentParser:
     app.add_argument(
         "--auth",
         type=lambda i: IGTradingConfig.from_env(
-            env=read_config_template(pathlib.Path(i), os.environ)
+            env=read_config_template(pathlib.Path(i), os.environ),
+            override_default_env=False,
         ).to_env(),
-        required=True,
+        required=False,
     )
     app.add_argument(
         "--config",
@@ -46,11 +60,13 @@ def cli_app() -> argparse.ArgumentParser:
     task_subparsers = task.add_subparsers(dest="list_action", required=True)
     run_tasks = task_subparsers.add_parser("run")
     run_tasks.add_argument("task")
-    run_tasks.add_argument("--with-deps", action="store_true")
+    run_tasks.add_argument("--with-deps", default=False, type=int_or_bool)
     run_tasks.add_argument("--start-date", type=pd.Timestamp, required=False)
     run_tasks.add_argument("--end-date", type=pd.Timestamp, required=False)
     run_tasks.add_argument("--force-rerun", action="store_true", default=True)
     run_tasks.add_argument("--dry-run", action="store_true")
+    run_tasks.add_argument("--clean", action="store_true")
+    run_tasks.add_argument("--skip-deps", type=re.compile)
 
     _ = task_subparsers.add_parser("list")
 
@@ -80,12 +96,15 @@ def handle_tasks(args, arctic):
                 extra_kwargs["start_date"] = args.start_date
             if args.end_date:
                 extra_kwargs["end_date"] = args.end_date
+            if args.clean:
+                extra_kwargs["clean"] = args.clean
             out = graph.run(
                 args.task,
                 run_dependencies=args.with_deps,
                 force_rerun=args.force_rerun,
                 arctic=arctic,
                 dry_run=args.dry_run,
+                skip_deps=args.skip_deps,
                 **extra_kwargs,
             )
             if args.dry_run:
@@ -123,7 +142,6 @@ def main():
     envconfig.to_env()
 
     arctic = Tradingo(envconfig.arctic_uri)
-
     if args.entity == "task":
         handle_tasks(args, arctic)
 

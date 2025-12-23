@@ -1,26 +1,33 @@
+# vars
+# 1. tickers
+# 2. raw_prices_lib
+# 3. universe_name
+# 4. fx_universe_name
 "download.{{ universe_name }}":
   depends_on: []
   function: tradingo.sampling.instruments.download_instruments
   symbols_out:
-     - "instruments/{{ universe_name }}"
+    - "instruments/{{ universe_name }}"
   publish_args:
     write_pickle: true
   params:
     tickers: {{ tickers }}
+    index_col: "{{ index_col }}"
   enabled: {{ TP_INCLUDE_INSTRUMENTS }}
 
-{% for ticker in tickers %}
+# {% for ticker in tickers %}
 "sample.{{ ticker }}":
   depends_on: []
   symbols_out:
-   - "{{ raw_prices_lib }}/{{ ticker }}"
+    - "{{ raw_prices_lib }}/{{ ticker }}"
   function: tradingo.sampling.yf.sample_equity
   params:
     ticker: "{{ ticker }}"
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
     interval: "{{ interval }}"
-{% endfor %}
+
+# {% endfor %}
 
 "sample.{{ universe_name }}":
   function: tradingo.sampling.yf.create_universe
@@ -29,9 +36,9 @@
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
   depends_on:
-  {%for ticker in tickers %}
+    #  {%for ticker in tickers %}
     - "sample.{{ ticker }}"
-  {% endfor %}
+  #  {% endfor %}
   symbols_in:
     instruments: "instruments/{{ universe_name }}"
   load_args:
@@ -39,36 +46,36 @@
   publish_args:
     astype: float
   symbols_out:
-  {% for occurence in ["open", "high", "low", "close", "volume"] %}
-  - prices/{{ universe_name }}.mid.{{ occurence }}
-  {% endfor %}
+    #  {% for occurence in ["open", "high", "low", "close", "volume"] %}
+    - prices/{{ universe_name }}.mid.{{ occurence }}
+#  {% endfor %}
 
-{% if currency and fx_universe_name %}
+# {% if currency and fx_universe_name %}
 "sample.{{ universe_name }}.{{ currency }}":
   function: tradingo.sampling.yf.convert_prices_to_ccy
   params:
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
-    currency: {{ currency }}
+    currency: "{{ currency }}"
   depends_on:
     - "sample.{{ universe_name }}"
     - "sample.{{ fx_universe_name }}"
   symbols_in:
     instruments: "instruments/{{ universe_name }}"
     prices:
-      {% for occurence in ["open", "high", "low", "close"] %}
-      {{ occurence }}: prices/{{ universe_name }}.mid.{{ occurence }}
-      {% endfor %}
+      #      {% for occurence in ["open", "high", "low", "close"] %}
+      "{{ occurence }}": "prices/{{ universe_name }}.mid.{{ occurence }}"
+    #      {% endfor %}
     fx_series:
-      {% for occurence in ["open", "high", "low", "close"] %}
-      {{ occurence }}:  prices/{{ fx_universe_name }}.mid.{{ occurence }}
-      {% endfor %}
+      #      {% for occurence in ["open", "high", "low", "close"] %}
+      "{{ occurence }}": "prices/{{ fx_universe_name }}.mid.{{ occurence }}"
+  #      {% endfor %}
   load_args:
     no_date: true
   publish_args:
     astype: float
   symbols_out:
-  {% for occurence in ["open", "high", "low", "close"] %}
-  - prices/{{ universe_name }}.mid.{{ occurence }}.{{ currency }}
-  {% endfor %}
-{% endif %}
+    #  {% for occurence in ["open", "high", "low", "close"] %}
+    - prices/{{ universe_name }}.mid.{{ occurence }}.{{ currency }}
+#  {% endfor %}
+# {% endif %}

@@ -9,6 +9,7 @@ from urllib.parse import parse_qsl, urlparse
 
 import arcticdb as adb
 import pandas as pd
+from arcticdb.exceptions import NoSuchVersionException
 from arcticdb_ext.exceptions import InternalException
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,11 @@ class Symbol(NamedTuple):
 
     @classmethod
     def parse(
-        cls, base: str, kwargs: dict, symbol_prefix: str = "", symbol_postfix: str = ""
+        cls,
+        base: str,
+        kwargs: dict,
+        symbol_prefix: str = "",
+        symbol_postfix: str = "",
     ) -> Symbol:
         """
         Parse a symbol string and return a Symbol object.
@@ -73,6 +78,8 @@ class Symbol(NamedTuple):
                     kwargs[key] = int(value)
                 except TypeError:
                     continue
+            if key == "columns":
+                kwargs[key] = list(kwargs[key].split(","))
 
         return cls(lib, symbol_prefix + sym + symbol_postfix, kwargs)
 
@@ -114,6 +121,7 @@ def symbol_provider(
             arctic: adb.Arctic,
             start_date=None,
             end_date=None,
+            raise_if_missing: bool = True,
             **kwargs,
         ):
             orig_symbol_data = {}
@@ -183,9 +191,13 @@ def symbol_provider(
                     if "The data for this symbol is pickled" in ex.args[0]:
                         return get_symbol_data(v, with_no_date=True)
                     raise ex
+                except NoSuchVersionException as ex:
+                    if not raise_if_missing:
+                        return None
+                    raise ex
 
             symbols_data = {
-                k: get_symbol_data(v, with_no_date=no_date)
+                k: get_symbol_data(v, with_no_date=no_date) if v is not None else v
                 for k, v in requested_symbols.items()
                 if k not in orig_symbol_data
             }
@@ -251,6 +263,8 @@ def symbol_publisher(
             **kwargs,
         ):
             out = envoke_symbology_function(func, args, kwargs, arctic)
+            if not isinstance(out, (tuple, list)):
+                out = (out,)
             logger.info("Publishing %s to %s", symbols or template, arctic)
 
             if template:
@@ -261,7 +275,7 @@ def symbol_publisher(
 
             libraries: DefaultDict[str, dict] = defaultdict(dict)
 
-            for data, symbol in zip(out, formatted_symbols):
+            for data, symbol in zip(out, formatted_symbols, strict=True):
                 if data.empty:
                     continue
 

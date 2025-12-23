@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -29,6 +30,7 @@ class Task:
 
     def __init__(
         self,
+        name,
         function,
         task_args,
         task_kwargs,
@@ -39,6 +41,7 @@ class Task:
         dependencies: Iterable[str] = (),
     ) -> None:
         self._function = function
+        self.name = name
         self.task_args = task_args
         self.task_kwargs = task_kwargs
         self._dependencies = list(dependencies)
@@ -51,7 +54,7 @@ class Task:
 
     def __repr__(self) -> str:
         return (
-            f"Task(function='{self._function}',"
+            f"Task(name='{self.name}', function='{self._function}',"
             f" task_args={self.task_args},"
             f" task_kwargs={self.task_kwargs},"
             f" dependcies={self._dependencies}, "
@@ -85,10 +88,21 @@ class Task:
         task_kwargs.update(global_kwargs)
         return task_kwargs
 
-    def run(self, *args, run_dependencies=False, force_rerun=False, **kwargs) -> None:
+    def run(
+        self,
+        *args,
+        run_dependencies: bool | int = False,
+        skip_deps: re.Pattern | None = None,
+        force_rerun=False,
+        **kwargs,
+    ) -> None:
         """run this task. optinally run also dependency tasks"""
         if run_dependencies:
+            if isinstance(run_dependencies, int):
+                run_dependencies -= 1
             for dependency in self.dependencies:
+                if skip_deps and skip_deps.match(dependency.name):
+                    continue
                 dependency.run(
                     *args,
                     run_dependencies=run_dependencies,
@@ -162,6 +176,7 @@ class DAG(dict[str, Task]):
             params = task_config["params"]
             try:
                 tasks[task_name] = Task(
+                    name=task_name,
                     function=task_config["function"],
                     task_args=(),
                     task_kwargs=params,
@@ -211,9 +226,11 @@ class DAG(dict[str, Task]):
             for task in subl
         ]
 
-    def run(self, task_name, **kwargs) -> None:
+    def run(self, task_name, skip_deps: re.Pattern[str], **kwargs) -> None:
         """run a specific task of this DAG."""
-        return self[task_name].run(**kwargs)
+        if task_name not in self:
+            raise ValueError(f"{task_name} is not a task in the DAG.")
+        return self[task_name].run(**kwargs, skip_deps=skip_deps)
 
     def update_state(self) -> None:
         """update the local json file which keeps the DAG state."""

@@ -18,11 +18,16 @@ dependencies = [
   "arcticdb",
   "PyYAML",
   "yfinance",
+  "lxml",
   "pandas_market_calendars",
   "trading_ig",
   "riskfolio-lib",
   "tenacity",
+  "lightgbm>=4.6.0",
   "pycountry",
+  "ipython>=9.1.0",
+  "tabula>=1.0.5",
+  "tabula-py>=2.10.0",
 ]
 
 [dependency-groups]
@@ -33,10 +38,14 @@ dev = [
   "isort",
   "ruff>=0.11.5",
   "mypy>=1.15.0",
+  "debugpy>=1.8.13",
 ]
 research = [
   "dtale",
   "jupyter",
+]
+monitor = [
+  "dash>=2.18.2",
 ]
 
 

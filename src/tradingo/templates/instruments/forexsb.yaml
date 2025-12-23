@@ -1,0 +1,57 @@
+# Template to load backfill of data downloaded from this website
+# https://forexsb.com/historical-forex-data
+# 1. universe_name: the name of the universe.
+# 2. TP_INCLUDE_INSTRUMENTS: include instrument download task or not
+# 3. epics: a list of symbol names
+# 4. interval: integer minutes of bar granularity
+# 5. data_dir: the path to where the data is stored/downloaded from forexsb
+# 6. raw_prices_lib: where to store raw prices
+# 7. data_interval_end: the end date of the sample data
+# 8. data_interval_start: the start date of the sample data
+"download.{{ universe_name }}":
+  depends_on: []
+  function: tradingo.sampling.instruments.download_instruments
+  symbols_out:
+     - "instruments/{{ universe_name }}"
+  publish_args:
+    write_pickle: true
+  params:
+    epics: {{ epics }}
+  enabled: {{ TP_INCLUDE_INSTRUMENTS }}
+
+#{% for epic in epics %}
+"sample.{{ epic }}":
+  depends_on: []
+  symbols_out:
+   - "{{ raw_prices_lib }}/{{ epic }}.{{ interval }}MIN"
+  function: "tradingo.backfill.forexsb.load_backfill"
+  params:
+    symbol: "{{ epic }}"
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"
+    interval: "{{ interval }}"
+    data_dir: "{{ data_dir }}"
+#{% endfor %}
+
+"sample.{{ universe_name }}":
+  function: tradingo.backfill.forexsb.create_universe
+  params:
+    pricelib: "{{ raw_prices_lib }}"
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"
+    symbols:
+    #{% for epic in epics %}
+      - "{{ epic }}.{{ interval }}MIN"
+    #{% endfor %}
+  depends_on:
+  #{%for epic in epics %}
+    - "sample.{{ epic }}"
+  #{% endfor %}
+  load_args:
+    no_date: true
+  publish_args:
+    astype: float
+  symbols_out:
+  #{% for occurence in ["open", "high", "low", "close"] %}
+  - prices/{{ universe_name }}.mid.{{ occurence }}.{{ interval }}MIN
+  #{% endfor %}

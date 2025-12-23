@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 _CCY_CODES = {c.alpha_3 for c in pycountry.currencies}
 
 
+class ProviderDataError(Exception):
+    """Raised if there is an issue with data availability
+    or gathering from provider."""
+
+
 def currency_to_symbol(maybe_currency: str) -> str:
     """Convert a currency pair to a YF currency symbol, prepending '=X'."""
     if (
@@ -68,23 +73,30 @@ def sample_equity(
     if not end_date:
         raise ValueError("end_date must be defined")
 
-    return (
-        yf.download(
-            [ticker],
-            start=pd.Timestamp(start_date) if start_date else None,
-            end=pd.Timestamp(end_date),
-            interval=interval,
-            actions=actions,
-            repair=repair,
-            multi_level_index=False,
-            threads=False,
-            group_by="ticker",
-            auto_adjust=True,
-            prepost=True,
-            progress=False,
-            keepna=True,
-        ),
+    prices = yf.download(
+        [ticker],
+        start=pd.Timestamp(start_date) if start_date else None,
+        end=pd.Timestamp(end_date),
+        interval=interval,
+        actions=actions,
+        repair=repair,
+        multi_level_index=False,
+        threads=False,
+        group_by="ticker",
+        auto_adjust=True,
+        prepost=True,
+        progress=False,
+        keepna=True,
     )
+    if prices is None:
+        raise ProviderDataError(f"Yahoo Finance returned no data for {ticker=}")
+
+    if not isinstance(prices.index, pd.DatetimeIndex):
+        prices.index = pd.to_datetime(prices.index, utc=True)
+    if not prices.index.tz:
+        prices = prices.tz_localize("utc")
+
+    return (prices.tz_convert("utc"),)
 
 
 @symbols.lib_provider(pricelib="{raw_price_lib}")
@@ -105,8 +117,16 @@ def create_universe(
     def get_data(symbol: str):
         return pricelib.read(symbol, date_range=(start_date, end_date)).data
 
+    symbols = pricelib.list_symbols()
+
     result = pd.concat(
-        ((get_data(symbol) for symbol in instruments.index.to_list())),
+        (
+            (
+                get_data(symbol)
+                for symbol in instruments.index.to_list()
+                if _get_ticker(symbol) in f"sample.{symbols}"
+            )
+        ),
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 0], axis=1)
