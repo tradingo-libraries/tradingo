@@ -1,0 +1,31 @@
+repos:
+  - repo: local
+    hooks:
+      - id: black
+        name: black
+        entry: black
+        language: system
+        types: [python]
+        args: [--config=pyproject.toml]
+      - id: isort
+        name: isort
+        entry: isort
+        language: system
+        types: [python]
+      - id: ruff
+        name: ruff
+        entry: ruff
+        language: system
+        types: [python]
+        args: [check, --config=pyproject.toml]
+      - id: mypy
+        name: mypy type check
+        entry: mypy
+        language: system
+        types: [python]
+        args:
+          - --config=pyproject.toml
+          - --explicit-package-bases
+          - ./src
+        pass_filenames: false
+        always_run: true
