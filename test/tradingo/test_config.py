@@ -197,7 +197,7 @@ def config_home_two_models(tmp_path):
             universe_name: fx-universe
             raw_prices_lib: fx_prices_lib
             tickers:
-                - EURUSD
+                - EURGBP
                 - GBPUSD
             interval: 30min
             start_date: "2017-01-01 00:00:00+00:00"
