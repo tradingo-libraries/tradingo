@@ -7,6 +7,15 @@ from tradingo import config, dag
 from tradingo.settings import TradingoConfig
 
 
+@pytest.fixture(autouse=True)
+def isolated_env(monkeypatch):
+    """Ensure environment variables are isolated between tests."""
+    old_env = os.environ.copy()
+    yield
+    os.environ.clear()
+    os.environ.update(old_env)
+
+
 @pytest.fixture
 def config_home(tmp_path):
     (tmp_path / "configs").mkdir(exist_ok=True)
