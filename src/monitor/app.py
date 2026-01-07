@@ -53,6 +53,7 @@ app.layout = html.Div(
         ),
         html.Div(
             [
+                dcc.Graph(id="instrument-returns"),
                 dcc.Graph(id="day-to-date"),
                 dcc.Graph(id="week-to-date"),
                 dcc.Graph(id="month-to-date"),
@@ -78,9 +79,7 @@ app.layout = html.Div(
     Input("url", "pathname"),
 )
 def set_universe_options(_):
-    api = Tradingo(
-        uri=ARCTIC_URL,
-    )
+    api = Tradingo(uri=ARCTIC_URL)
     return api.instruments._library.list_symbols()
 
 
@@ -91,9 +90,7 @@ def set_universe_options(_):
 def set_asset_options(universe):
     if not universe:
         return dash.no_update
-    api = Tradingo(
-        uri=ARCTIC_URL,
-    )
+    api = Tradingo(uri=ARCTIC_URL)
     return api.instruments[universe]().index.to_list()
 
 
@@ -104,9 +101,7 @@ def set_asset_options(universe):
 def set_portfolio_options(universe):
     if not universe:
         return dash.no_update
-    api = Tradingo(
-        uri=ARCTIC_URL,
-    )
+    api = Tradingo(uri=ARCTIC_URL)
     return api.portfolio.list()
 
 
@@ -133,6 +128,8 @@ def set_portfolio_value(options):
         Output("short_vol", "figure"),
         Output("long_vol", "figure"),
         Output("day-to-date", "figure"),
+        Output("instrument-returns", "figure"),
+        Output("instrument-returns", "figure"),
         Output("week-to-date", "figure"),
         Output("month-to-date", "figure"),
         Output("year-to-date", "figure"),
@@ -306,6 +303,9 @@ def update_graph(
         .cumsum()
         .total_pnl
     )
+    instrument_returns = (
+        api.prices[universe].mid.close(date_range=(start, end)).pct_change().cumsum()
+    )
 
     return (
         range_breaks(z_score.plot(title="z_score")),
@@ -322,6 +322,7 @@ def update_graph(
         short_vol.plot(title="short_vol"),
         long_vol.plot(title="long_vol"),
         one_day.plot(title="DTD"),
+        instrument_returns.plot(title="instrument-returns"),
         one_week.plot(title="WTD"),
         one_month.plot(title="MTD"),
         one_year.plot(title="YTD"),

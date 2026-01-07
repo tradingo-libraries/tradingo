@@ -39,6 +39,7 @@ dev = [
   "ruff>=0.11.5",
   "mypy>=1.15.0",
   "debugpy>=1.8.13",
+  "pandas-stubs>=2.3.3.251219",
 ]
 research = [
   "dtale",
@@ -47,7 +48,6 @@ research = [
 monitor = [
   "dash>=2.18.2",
 ]
-
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -77,8 +77,6 @@ profile = "black"
 
 [[tool.mypy.overrides]]
 module = [
-  "pandas",
-  "pandas.*",
   "arcticdb",
   "arcticdb.*",
   "arcticdb_ext",

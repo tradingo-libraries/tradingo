@@ -4,7 +4,8 @@ import functools
 import inspect
 import logging
 from collections import defaultdict
-from typing import DefaultDict, NamedTuple, Optional
+from typing import Any, DefaultDict, NamedTuple, Optional, ParamSpec, TypeVar
+from collections.abc import Callable
 from urllib.parse import parse_qsl, urlparse
 
 import arcticdb as adb
@@ -109,22 +110,27 @@ def lib_provider(**libs):
     return decorator
 
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
 def symbol_provider(
-    symbol_prefix="",
-    no_date=False,
-    **symbols,
-):
-    def decorator(func):
+    symbol_prefix: str = "",
+    no_date: bool = False,
+    **symbols: str,
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
+
+    def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @functools.wraps(func)
         def wrapper(
-            *args,
             arctic: adb.Arctic,
-            start_date=None,
-            end_date=None,
+            start_date: pd.Timestamp | None = None,
+            end_date: pd.Timestamp | None = None,
             raise_if_missing: bool = True,
-            **kwargs,
-        ):
-            orig_symbol_data = {}
+            *args: P.args,
+            **kwargs: P.kwargs,
+        ) -> object:
+            orig_symbol_data: dict[str, Any] = {}
             requested_symbols = symbols.copy()
 
             for symbol in symbols:
@@ -133,11 +139,15 @@ def symbol_provider(
                 ):
                     orig_symbol_data[symbol] = kwargs.pop(symbol)
                 if symbol in kwargs and isinstance(kwargs[symbol], str):
-                    requested_symbols[symbol] = kwargs[symbol]
+                    assert isinstance(kwargs[symbol], str)
+                    requested_symbols[symbol] = str(kwargs[symbol])
                 if symbol in kwargs and kwargs[symbol] is None:
                     requested_symbols.pop(symbol)
 
-            def get_symbol_data(v: str | list[str], with_no_date=False) -> pd.DataFrame:
+            def get_symbol_data(
+                v: str | list[str],
+                with_no_date=False,
+            ) -> pd.DataFrame | None:
                 if isinstance(v, dict):
                     return {
                         key: get_symbol_data(item, with_no_date=with_no_date)
@@ -224,13 +234,13 @@ def symbol_provider(
 
 
 def envoke_symbology_function(
-    function,
-    args,
-    kwargs,
-    arctic,
+    function: Callable[P, R],
+    args: P.args,
+    kwargs: P.kwargs,
+    arctic: adb.Arctic,
     start_date=None,
     end_date=None,
-):
+) -> tuple[pd.DataFrame, ...] | pd.DataFrame:
     sig = inspect.signature(function)
 
     if "start_date" in sig.parameters:
@@ -263,7 +273,7 @@ def symbol_publisher(
             **kwargs,
         ):
             out = envoke_symbology_function(func, args, kwargs, arctic)
-            if not isinstance(out, (tuple, list)):
+            if isinstance(out, pd.DataFrame):
                 out = (out,)
             logger.info("Publishing %s to %s", symbols or template, arctic)
 
@@ -273,9 +283,10 @@ def symbol_publisher(
             else:
                 formatted_symbols = symbols
 
-            libraries: DefaultDict[str, dict] = defaultdict(dict)
+            libraries: DefaultDict[str, dict[str, int]] = defaultdict(dict)
 
             for data, symbol in zip(out, formatted_symbols, strict=True):
+                assert isinstance(data, pd.DataFrame)
                 if data.empty:
                     continue
 
