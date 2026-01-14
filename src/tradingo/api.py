@@ -1,168 +1,130 @@
 from __future__ import annotations
-
-import contextlib
-import inspect
 import re
-from typing import Any, Optional
+
+from typing import Any
 
 import arcticdb as adb
+from arcticdb.version_store.library import AsOf
 import pandas as pd
-
-import tradingo.utils
-
-READ_SIG = inspect.signature(adb.arctic.Library.read)
 
 
 class _Read:
     def __init__(
         self,
-        path_so_far,
+        path_so_far: tuple[str, ...],
         library: adb.library.Library,
-        assets,
-        common_args,
-        common_kwargs,
+        assets: list[str],
         root: Tradingo,
     ):
         self._path_so_far = path_so_far
         self._library = library
         self._assets = assets
         self._path = ".".join(self._path_so_far)
-        self._common_args = common_args
-        self._common_kwargs = common_kwargs
         self._root = root
 
-    def __dir__(self):
+    def __dir__(self) -> list[str]:
         return [*self.list(), *super().__dir__()]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'Namespace("{self._path}")'
 
-    def __getattr__(self, symbol):
+    def __getattr__(self, symbol: str) -> _Read:
         return self.__class__(
             (*self._path_so_far, symbol),
             library=self._library,
             assets=self._assets,
-            common_args=self._common_args,
-            common_kwargs=self._common_kwargs,
             root=self._root,
         )
 
-    def __getitem__(self, symbol):
+    def __getitem__(self, symbol: str) -> _Read:
         return self.__getattr__(symbol)
 
-    def __call__(self, *args, **kwargs) -> pd.DataFrame:
-        operations = ["merge", "transpose", "concat", "with_instrument_details"]
-        operation, index = next(
-            (
-                (elem, i)
-                for i, elem in enumerate(self._path_so_far)
-                if elem in operations
-            ),
-            (None, len(self._path_so_far)),
+    def __call__(
+        self,
+        as_of: AsOf | None = None,
+        date_range: tuple[pd.Timestamp | None, pd.Timestamp | None] | None = None,
+        row_range: tuple[int, int] | None = None,
+        columns: list[str] | None = None,
+        query_builder: adb.QueryBuilder | None = None,
+    ) -> pd.DataFrame:
+        result = self._library.read(
+            symbol=".".join(self._path_so_far),
+            as_of=as_of,
+            date_range=date_range,
+            row_range=row_range,
+            columns=columns,
+            query_builder=query_builder,
+            lazy=False,
         )
-        part_one_path = self._path_so_far[0:index]
-        part_two_path = self._path_so_far[index + 1 :]
+        assert isinstance(result, adb.VersionedItem)
+        return result.data
 
-        lib_kwargs = {
-            k: v for k, v in kwargs.items() if k in READ_SIG.parameters.keys()
-        }
+    def update(
+        self,
+        data: pd.DataFrame | pd.Series,
+        metadata: Any = None,
+        upsert: bool = False,
+        date_range: tuple[pd.Timestamp | None, pd.Timestamp | None] | None = None,
+        prune_previous_versions: bool = False,
+    ) -> None:
 
-        callback_kwargs = {}
+        self._library.update(
+            self._path,
+            data,
+            metadata,
+            upsert,
+            date_range,
+            prune_previous_versions,
+        )
 
-        def get_callback(operation):
-            for i in (pd.DataFrame, tradingo.utils, pd):
-                try:
-                    return getattr(i, operation)
-                except AttributeError:
-                    continue
-            raise AttributeError(operation)
+    def list_symbols(
+        self,
+        snapshot_name: str | None = None,
+        regex: str = "",
+    ) -> list[str]:
+        sub_symbol = re.escape(".".join(self._path_so_far))
+        if regex and sub_symbol:
+            sub_symbol = re.escape(".").join((sub_symbol, regex))
+        elif regex:
+            sub_symbol = regex
 
-        if operation:
-            callback = get_callback(operation)
-            callback_sig = inspect.signature(callback)
-            callback_kwargs = {
-                k: v for k, v in kwargs.items() if k in callback_sig.parameters.keys()
-            }
-
-        def get_data_at_path(path, kw) -> pd.DataFrame:
-            kw.setdefault(
-                "columns",
-                (
-                    self._assets
-                    if all(i in path for i in ("backtest", "portfolio"))
-                    else None
-                ),
-            )
-
-            for k in self._common_kwargs:
-                kw.pop(k, None)
-            return self._library.read(
-                ".".join(path),
-                *args,
-                *self._common_args,
-                **kw,
-                **self._common_kwargs,
-            ).data
-
-        lhs = get_data_at_path(part_one_path, lib_kwargs)
-
-        if operation:
-            callback_args: (
-                tuple[pd.DataFrame]
-                | tuple[pd.DataFrame, pd.DataFrame]
-                | tuple[tuple[pd.DataFrame, pd.DataFrame]]
-            ) = (lhs,)
-            if part_two_path:
-                callback_lib = part_two_path[0]
-                callback_args = (
-                    lhs,
-                    self.__class__(
-                        (
-                            *self._root._get_path_so_far(callback_lib),
-                            *part_two_path[1:],
-                        ),
-                        getattr(self._root, (callback_lib))._library,
-                        self._assets,
-                        self._common_args,
-                        self._common_kwargs,
-                        self._root,
-                    )(*args, **kwargs),
-                )
-
-            if operation == "concat":
-                callback_args = (callback_args,)  # type: ignore
-
-            callback = get_callback(operation)
-            callback_sig = inspect.signature(pd.DataFrame)
-            return callback(*callback_args, **callback_kwargs)
-        return lhs
-
-    def update(self, *args, **kwargs):
-        self._library.update(self._path, *args, **kwargs)
-
-    def list(self, *args, **kwargs):
-        if self._path_so_far:
-            regex = re.escape(".".join((self._path_so_far)) + ".")
-            kwargs["regex"] = regex + kwargs.setdefault("regex", "")
         return list(
             dict.fromkeys(
                 [
                     i.replace(
-                        f"{'.'.join(self._path_so_far)}." if self._path_so_far else "",
+                        f"{sub_symbol}." if sub_symbol else "",
                         "",
-                    ).split(".")[0]
-                    for i in self._library.list_symbols(*args, **kwargs)
+                    )
+                    for i in self._library.list_symbols(
+                        regex=sub_symbol, snapshot_name=snapshot_name
+                    )
                 ]
             )
         )
 
-    def head(self, *args, **kwargs):
-        return self._library.head(self._path, *args, **kwargs).data
+    def head(
+        self,
+        n: int = 5,
+        as_of: AsOf | None = None,
+        columns: list[str] | None = None,
+    ) -> pd.DataFrame:
+        columns = columns or []
+        result = self._library.head(self._path, n, as_of, columns, lazy=False)
+        assert isinstance(result, adb.VersionedItem)
+        return result.data
 
-    def tail(self, *args, **kwargs):
-        return self._library.tail(self._path, *args, **kwargs).data
+    def tail(
+        self,
+        n: int = 5,
+        as_of: int | str| None = None,
+        columns: list[str] | None = None,
+    ) -> pd.DataFrame:
+        columns = columns or []
+        result = self._library.tail(self._path, n, as_of, columns, lazy=False)
+        assert isinstance(result, adb.VersionedItem)
+        return result.data
 
-    def exists(self):
+    def exists(self) -> bool:
         """Return true if symbol exists"""
         return bool(self._library.list_symbols(regex=f"^{re.escape(self._path)}$"))
 
@@ -171,27 +133,15 @@ class Tradingo(adb.Arctic):
     def __init__(
         self,
         *args,
-        provider: Optional[str] = None,
-        universe: Optional[str] = None,
+        provider: str | None = None,
+        universe: str | None = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self._provider = provider
         self._universe = universe
-        self._context_args = ()
-        self._context_kwargs: dict[str, Any] = {}
 
-    @contextlib.contextmanager
-    def common_args(self, *args, **kwargs):
-        try:
-            self._context_args = args
-            self._context_kwargs = kwargs
-            yield self
-        finally:
-            self._context_args = ()
-            self._context_kwargs = {}
-
-    def _get_path_so_far(self, library):
+    def _get_path_so_far(self, library: str) -> list[str]:
         path_so_far = []
         if library == "instruments":
             return path_so_far
@@ -205,12 +155,9 @@ class Tradingo(adb.Arctic):
         if library in self.list_libraries():
             path_so_far = self._get_path_so_far(library)
             if library == "instruments":
-                return _Read(
-                    library=self.get_library(library),
+
                     path_so_far=path_so_far,
                     assets=[],
-                    common_args=(),
-                    common_kwargs={},
                     root=self,
                 )
 
@@ -222,8 +169,6 @@ class Tradingo(adb.Arctic):
                 library=self.get_library(library),
                 path_so_far=path_so_far,
                 assets=assets,
-                common_args=self._context_args,
-                common_kwargs=self._context_kwargs,
                 root=self,
             )
 
@@ -239,51 +184,52 @@ class VolSurface(Tradingo):
         symbol: str,
         start_date: pd.Timestamp = pd.Timestamp("1970-01-01 00:00+00:00"),
         end_date: pd.Timestamp = pd.Timestamp.now("utc"),
-        **kwargs,
     ):
-        with self.common_args(date_range=(start_date, end_date)):
-            futures = (
-                pd.concat(
-                    (self.futures.cboe.VX.expiration(), self.futures.cboe.VX.price()),
-                    axis=1,
-                    keys=("expiration", "price"),
-                )
-                .stack()
-                .astype({"expiration": "datetime64[ns]"})
-                .reset_index()
-                .set_index(["timestamp", "symbol"])
-            )
-
-            library = getattr(self.options.cboe, symbol)
-            option_chains = pd.concat(
+        futures = (
+            pd.concat(
                 (
-                    library.expiration(),
-                    library.option_type(),
-                    library.strike(),
-                    library.bid(),
-                    library.ask(),
-                    library.implied_volatility(),
-                    library.delta(),
-                    library.vega(),
-                    library.gamma(),
-                    library.theta(),
-                    library.rho(),
+                    self.futures.cboe.VX.expiration(date_range=(start_date, end_date)),
+                    self.futures.cboe.VX.price(date_range=(start_date, end_date)),
                 ),
                 axis=1,
-                keys=(
-                    "expiration",
-                    "option_type",
-                    "strike",
-                    "bid",
-                    "ask",
-                    "implied_volatility",
-                    "delta",
-                    "vega",
-                    "gamma",
-                    "theta",
-                    "rho",
-                ),
-            ).stack(future_stack=True)
+                keys=("expiration", "price"),
+            )
+            .stack()
+            .astype({"expiration": "datetime64[ns]"})
+            .reset_index()
+            .set_index(["timestamp", "symbol"])
+        )
+
+        library = getattr(self.options.cboe, symbol)
+        option_chains = pd.concat(
+            (
+                library.expiration(date_range=(start_date, end_date)),
+                library.option_type(date_range=(start_date, end_date)),
+                library.strike(date_range=(start_date, end_date)),
+                library.bid(date_range=(start_date, end_date)),
+                library.ask(date_range=(start_date, end_date)),
+                library.implied_volatility(date_range=(start_date, end_date)),
+                library.delta(date_range=(start_date, end_date)),
+                library.vega(date_range=(start_date, end_date)),
+                library.gamma(date_range=(start_date, end_date)),
+                library.theta(date_range=(start_date, end_date)),
+                library.rho(date_range=(start_date, end_date)),
+            ),
+            axis=1,
+            keys=(
+                "expiration",
+                "option_type",
+                "strike",
+                "bid",
+                "ask",
+                "implied_volatility",
+                "delta",
+                "vega",
+                "gamma",
+                "theta",
+                "rho",
+            ),
+        ).stack(future_stack=True)
 
         return option_chains.merge(
             futures, on=["timestamp", "expiration"], how="left"

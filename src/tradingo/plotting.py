@@ -1,6 +1,7 @@
-from typing import List, Union
+from typing import Any, List, Union
 
 import matplotlib.axes
+from numpy import isin
 import pandas as pd
 from pandas.plotting._matplotlib.style import get_standard_colors
 
@@ -10,7 +11,7 @@ def plot_multi(
     x: Union[str, None] = None,
     y: Union[List[str], None] = None,
     spacing: float = 0.1,
-    **kwargs,
+    **kwargs: Any,
 ) -> matplotlib.axes.Axes:
     """Plot multiple Y axes on the same chart with same x axis.
 
@@ -68,5 +69,6 @@ def plot_multi(
         lines += line
         labels += label
 
+    assert isinstance(ax, matplotlib.axes.Axes)
     ax.legend(lines, labels, loc=0)
     return ax

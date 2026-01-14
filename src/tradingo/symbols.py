@@ -4,11 +4,22 @@ import functools
 import inspect
 import logging
 from collections import defaultdict
-from typing import Any, DefaultDict, NamedTuple, Optional, ParamSpec, TypeVar
 from collections.abc import Callable
+from typing import (
+    Any,
+    Concatenate,
+    DefaultDict,
+    NamedTuple,
+    Optional,
+    ParamSpec,
+    Protocol,
+    TypeVar,
+    overload,
+)
 from urllib.parse import parse_qsl, urlparse
 
 import arcticdb as adb
+import numpy as np
 import pandas as pd
 from arcticdb.exceptions import NoSuchVersionException
 from arcticdb_ext.exceptions import InternalException
@@ -16,38 +27,43 @@ from arcticdb_ext.exceptions import InternalException
 logger = logging.getLogger(__name__)
 
 
+P = ParamSpec("P")
+Q = ParamSpec("Q")
+R = TypeVar("R", pd.DataFrame, tuple[pd.DataFrame, ...])
+
+
 class SymbolParseError(Exception):
     """raised when cant parse symbol"""
 
 
-def add_params(function, *args):
-    origsig = inspect.signature(function)
-    orig_params = list(origsig.parameters.values())
-    for arg in args:
-        if arg in origsig.parameters:
-            continue
-        else:
-            orig_params.insert(
-                0,
-                inspect.Parameter(
-                    arg,
-                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                ),
-            )
-
-    function.__signature__ = origsig.replace(parameters=orig_params)
+# def add_params(function: Callable[P, R], *args: str) -> None:
+#     origsig = inspect.signature(function)
+#     orig_params = list(origsig.parameters.values())
+#     for arg in args:
+#         if arg in origsig.parameters:
+#             continue
+#         else:
+#             orig_params.insert(
+#                 0,
+#                 inspect.Parameter(
+#                     arg,
+#                     inspect.Parameter.POSITIONAL_OR_KEYWORD,
+#                 ),
+#             )
+#
+#     function.__signature__ = origsig.replace(parameters=orig_params)
 
 
 class Symbol(NamedTuple):
     library: str
     symbol: str
-    kwargs: dict
+    kwargs: dict[str, Any]
 
     @classmethod
     def parse(
         cls,
         base: str,
-        kwargs: dict,
+        kwargs: dict[str, Any],
         symbol_prefix: str = "",
         symbol_postfix: str = "",
     ) -> Symbol:
@@ -85,51 +101,97 @@ class Symbol(NamedTuple):
         return cls(lib, symbol_prefix + sym + symbol_postfix, kwargs)
 
 
-def lib_provider(**libs):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, arctic: adb.Arctic, **kwargs):
+Ret = TypeVar("Ret", pd.DataFrame, tuple[pd.DataFrame, ...], covariant=True)
+
+
+class LibProvided(Protocol[P, Ret]):
+
+    def __call__(
+        self,
+        arctic: adb.Arctic,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Ret: ...
+
+
+def lib_provider(
+    **libs: str,
+) -> Callable[[Callable[P, R]], LibProvided[P, R]]:
+    def decorator(
+        func: Callable[P, R],
+    ) -> LibProvided[P, R]:
+        @functools.wraps(
+            func,
+            assigned=(
+                "__module__",
+                "__name__",
+                "__qualname__",
+                "__doc__",
+            ),
+        )
+        def wrapper(
+            arctic: adb.Arctic,
+            *args: P.args,
+            **kwargs: P.kwargs,
+        ) -> R:
             libs_ = {
-                k: arctic.get_library(kwargs.get(k, v), create_if_missing=True)
+                k: arctic.get_library(str(kwargs.get(k, v)), create_if_missing=True)
                 for k, v in libs.items()
             }
             kwargs.update(libs_)
-            return envoke_symbology_function(
+            return _envoke_symbology_function(
                 func,
-                args,
-                kwargs,
                 arctic,
+                *args,
+                **kwargs,
             )
 
-        setattr(wrapper, "lib_provided", None)
-
-        add_params(wrapper, "arctic")
+        # add_params(wrapper, "arctic")
 
         return wrapper
 
     return decorator
 
 
-P = ParamSpec("P")
-R = TypeVar("R")
+class SymbolProvided(Protocol[P, Ret]):
+
+    def __call__(
+        self,
+        arctic: adb.Arctic,
+        raise_if_missing: bool = True,
+        start_date: pd.Timestamp | None = None,
+        end_date: pd.Timestamp | None = None,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Ret: ...
 
 
 def symbol_provider(
     symbol_prefix: str = "",
     no_date: bool = False,
     **symbols: str,
-) -> Callable[[Callable[P, R]], Callable[P, R]]:
+) -> Callable[[Callable[P, R]], SymbolProvided[P, R]]:
 
-    def decorator(func: Callable[P, R]) -> Callable[P, R]:
-        @functools.wraps(func)
+    def decorator(
+        func: Callable[P, R],
+    ) -> SymbolProvided[P, R]:
+        @functools.wraps(
+            func,
+            assigned=(
+                "__module__",
+                "__name__",
+                "__qualname__",
+                "__doc__",
+            ),
+        )
         def wrapper(
             arctic: adb.Arctic,
+            raise_if_missing: bool = True,
             start_date: pd.Timestamp | None = None,
             end_date: pd.Timestamp | None = None,
-            raise_if_missing: bool = True,
             *args: P.args,
             **kwargs: P.kwargs,
-        ) -> object:
+        ) -> R:
             orig_symbol_data: dict[str, Any] = {}
             requested_symbols = symbols.copy()
 
@@ -144,10 +206,22 @@ def symbol_provider(
                 if symbol in kwargs and kwargs[symbol] is None:
                     requested_symbols.pop(symbol)
 
+            @overload
+            def get_symbol_data(
+                v: dict[str, str],
+                with_no_date: bool = False,
+            ) -> dict[str, pd.DataFrame | None]: ...
+
+            @overload
             def get_symbol_data(
                 v: str | list[str],
-                with_no_date=False,
-            ) -> pd.DataFrame | None:
+                with_no_date: bool = False,
+            ) -> pd.DataFrame | None: ...
+
+            def get_symbol_data(
+                v: str | list[str] | dict[str, str],
+                with_no_date: bool = False,
+            ) -> pd.DataFrame | dict[str, pd.DataFrame | None] | None:
                 if isinstance(v, dict):
                     return {
                         key: get_symbol_data(item, with_no_date=with_no_date)
@@ -190,6 +264,7 @@ def symbol_provider(
                         )
                         .data
                     )
+                    assert isinstance(data, pd.DataFrame)
                     if (
                         not with_no_date
                         and isinstance(data.index, pd.DatetimeIndex)
@@ -216,31 +291,31 @@ def symbol_provider(
 
             logger.info("Providing %s symbols from %s", symbols_data.keys(), arctic)
 
-            return envoke_symbology_function(
+            return _envoke_symbology_function(
                 func,
-                args,
-                kwargs,
-                arctic=arctic,
-                start_date=start_date,
-                end_date=end_date,
+                arctic,
+                start_date,
+                end_date,
+                *args,
+                **kwargs,
             )
 
         setattr(wrapper, "is_provided", None)
-        add_params(wrapper, "arctic", "start_date", "end_date")
+        # add_params(wrapper, "arctic", "start_date", "end_date")
 
         return wrapper
 
     return decorator
 
 
-def envoke_symbology_function(
+def _envoke_symbology_function(
     function: Callable[P, R],
-    args: P.args,
-    kwargs: P.kwargs,
     arctic: adb.Arctic,
-    start_date=None,
-    end_date=None,
-) -> tuple[pd.DataFrame, ...] | pd.DataFrame:
+    start_date: pd.Timestamp | None = None,
+    end_date: pd.Timestamp | None = None,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> R:
     sig = inspect.signature(function)
 
     if "start_date" in sig.parameters:
@@ -253,28 +328,54 @@ def envoke_symbology_function(
     return function(*args, **kwargs)
 
 
+class PublishedFunction(Protocol[P, Ret]):
+
+    def __call__(
+        self,
+        arctic: adb.Arctic,
+        dry_run: bool = True,
+        snapshot: str | None = None,
+        clean: bool = False,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> pd.DataFrame | None: ...
+
+
 def symbol_publisher(
-    *symbols,
-    symbol_prefix="",
-    symbol_postfix="",
-    astype=None,
-    template=None,
-    library_options=None,
-    write_pickle=False,
-):
-    def decorator(func):
-        @functools.wraps(func)
+    *symbols: str,
+    symbol_prefix: str = "",
+    symbol_postfix: str = "",
+    astype: np.dtype[Any] | None | dict[str, np.dtype[Any]] = None,
+    template: str | None = None,
+    library_options: adb.LibraryOptions | None = None,
+    write_pickle: bool = False,
+) -> Callable[[Callable[P, R]], PublishedFunction[P, R]]:
+    def decorator(
+        func: Callable[P, R],
+    ) -> PublishedFunction[P, R]:
+        # @functools.wraps(
+        #     func,
+        #     assigned=(
+        #         "__module__",
+        #         "__name__",
+        #         "__qualname__",
+        #         "__doc__",
+        #     ),
+        # )
         def wrapper(
-            *args,
             arctic: adb.Arctic,
-            dry_run=True,
+            dry_run: bool = True,
             snapshot: Optional[str] = None,
             clean: bool = False,
-            **kwargs,
-        ):
-            out = envoke_symbology_function(func, args, kwargs, arctic)
-            if isinstance(out, pd.DataFrame):
+            *args: P.args,
+            **kwargs: P.kwargs,
+        ) -> pd.DataFrame | None:
+            out: tuple[pd.DataFrame, ...] | pd.DataFrame = _envoke_symbology_function(
+                func, arctic, *args, **kwargs
+            )
+            if not isinstance(out, tuple):
                 out = (out,)
+
             logger.info("Publishing %s to %s", symbols or template, arctic)
 
             if template:
@@ -345,12 +446,12 @@ def symbol_publisher(
                     lib.snapshot(snapshot_name=snapshot, versions=versions)
 
             if dry_run:
+                assert isinstance(out, tuple)
                 return pd.concat(out, keys=formatted_symbols, axis=1)
 
             return None
 
-        setattr(wrapper, "is_publisher", None)
-        add_params(wrapper, "arctic", "dry_run", "snapshot", "clean")
+        # add_params(wrapper, "arctic", "dry_run", "snapshot", "clean")
         return wrapper
 
     return decorator

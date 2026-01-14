@@ -2,7 +2,7 @@
 
 import json
 import pathlib
-from typing import Any, MutableMapping, Optional
+from typing import Any, Mapping, Optional
 
 import jinja2
 import pandas as pd
@@ -15,8 +15,8 @@ class ConfigLoadError(Exception):
 
 def read_config_template(
     filepath: pathlib.Path,
-    variables: dict[str, Any] | MutableMapping,
-    path_so_far: Optional[list[str]] = None,
+    variables: dict[str, str],
+    path_so_far: list[str] | None = None,
 ) -> dict[str, Any]:
     """read a config template and populate it with values"""
     filepath = pathlib.Path(filepath)
@@ -57,7 +57,7 @@ def read_config_template(
 
 def process_includes(
     config: dict[str, Any],
-    variables,
+    variables: Mapping[str, str],
     path_so_far: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """bake nested configs via 'include' pattern."""
