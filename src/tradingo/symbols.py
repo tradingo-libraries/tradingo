@@ -7,7 +7,6 @@ from collections import defaultdict
 from collections.abc import Callable
 from typing import (
     Any,
-    Concatenate,
     DefaultDict,
     NamedTuple,
     Optional,
@@ -210,18 +209,18 @@ def symbol_provider(
             def get_symbol_data(
                 v: dict[str, str],
                 with_no_date: bool = False,
-            ) -> dict[str, pd.DataFrame | None]: ...
+            ) -> dict[str, pd.DataFrame]: ...
 
             @overload
             def get_symbol_data(
                 v: str | list[str],
                 with_no_date: bool = False,
-            ) -> pd.DataFrame | None: ...
+            ) -> pd.DataFrame: ...
 
             def get_symbol_data(
                 v: str | list[str] | dict[str, str],
                 with_no_date: bool = False,
-            ) -> pd.DataFrame | dict[str, pd.DataFrame | None] | None:
+            ) -> pd.DataFrame | dict[str, pd.DataFrame] | None:
                 if isinstance(v, dict):
                     return {
                         key: get_symbol_data(item, with_no_date=with_no_date)
@@ -242,7 +241,7 @@ def symbol_provider(
                     multidata = (
                         multidata.transpose().groupby(level=1).last().transpose()
                     )
-                    return multidata[columns]
+                    return pd.DataFrame(multidata[columns])
                 symbol = Symbol.parse(v, kwargs, symbol_prefix=symbol_prefix)
                 try:
                     data = (
@@ -294,9 +293,8 @@ def symbol_provider(
             return _envoke_symbology_function(
                 func,
                 arctic,
-                start_date,
-                end_date,
-                *args,
+                start_date=start_date,
+                end_date=end_date,
                 **kwargs,
             )
 
@@ -309,12 +307,12 @@ def symbol_provider(
 
 
 def _envoke_symbology_function(
-    function: Callable[P, R],
+    function: Callable[..., R],
     arctic: adb.Arctic,
+    *,
     start_date: pd.Timestamp | None = None,
     end_date: pd.Timestamp | None = None,
-    *args: P.args,
-    **kwargs: P.kwargs,
+    **kwargs: object,
 ) -> R:
     sig = inspect.signature(function)
 
@@ -325,7 +323,7 @@ def _envoke_symbology_function(
     if "arctic" in sig.parameters:
         kwargs.setdefault("arctic", arctic)
 
-    return function(*args, **kwargs)
+    return function(**kwargs)
 
 
 class PublishedFunction(Protocol[P, Ret]):
@@ -365,13 +363,15 @@ def symbol_publisher(
         def wrapper(
             arctic: adb.Arctic,
             dry_run: bool = True,
-            snapshot: Optional[str] = None,
+            snapshot: str | None = None,
             clean: bool = False,
             *args: P.args,
             **kwargs: P.kwargs,
         ) -> pd.DataFrame | None:
+            if args:
+                raise ValueError("Keyword only arguments.")
             out: tuple[pd.DataFrame, ...] | pd.DataFrame = _envoke_symbology_function(
-                func, arctic, *args, **kwargs
+                func, arctic, **kwargs
             )
             if not isinstance(out, tuple):
                 out = (out,)

@@ -57,7 +57,7 @@ def sample_equity(
     interval: str = "1d",
     actions: bool = False,
     repair: bool = False,
-):
+) -> pd.DataFrame:
     """sample one symbol from yahoo finance"""
 
     ticker = _get_ticker(ticker)
@@ -96,7 +96,7 @@ def sample_equity(
     if not prices.index.tz:
         prices = prices.tz_localize("utc")
 
-    return (prices.tz_convert("utc"),)
+    return prices.tz_convert("utc")
 
 
 @symbols.lib_provider(pricelib="{raw_price_lib}")
@@ -105,7 +105,13 @@ def create_universe(
     instruments: pd.DataFrame,
     end_date: pd.Timestamp,
     start_date: pd.Timestamp,
-):
+) -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+]:
     """
     Create one arctic symbol for each OHLCV prices from yahoo finance.
     Each symbol contains all tickers defined for the universe.
@@ -114,8 +120,10 @@ def create_universe(
     start_date = pd.Timestamp(start_date)
     end_date = pd.Timestamp(end_date)
 
-    def get_data(symbol: str):
-        return pricelib.read(symbol, date_range=(start_date, end_date)).data
+    def get_data(symbol: str) -> pd.DataFrame:
+        return pd.DataFrame(
+            pricelib.read(symbol, date_range=(start_date, end_date)).data
+        )
 
     symbols = pricelib.list_symbols()
 

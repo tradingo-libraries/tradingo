@@ -75,6 +75,11 @@ tradingo-cli = "tradingo.cli:main"
 [tool.isort]
 profile = "black"
 
+[tool.mypy]
+exclude = [
+  "src/monitor"
+]
+
 [[tool.mypy.overrides]]
 module = [
   "pandas",

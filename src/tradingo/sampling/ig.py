@@ -1,7 +1,7 @@
 """IG data accessors"""
 
 import logging
-from typing import Optional
+from typing import Hashable, Optional
 
 import dateutil.tz
 import numpy as np
@@ -49,7 +49,7 @@ def sample_instrument(
     interval: str,
     wait: int = 0,
     service: Optional[IGService] = None,
-):
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     service = service or get_ig_service()
     try:
         result = (
@@ -100,8 +100,8 @@ def sample_instrument(
         service.session.close()
 
     return (
-        result["bid"],
-        result["ask"],
+        pd.DataFrame(result["bid"]),
+        pd.DataFrame(result["ask"]),
     )
 
 
@@ -111,15 +111,36 @@ def create_universe(
     instruments: pd.DataFrame,
     end_date: pd.Timestamp,
     start_date: pd.Timestamp,
-):
+) -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+]:
     start_date = pd.Timestamp(start_date)
     end_date = pd.Timestamp(end_date)
 
-    def get_data(symbol: str):
+    def get_data(symbol: str) -> pd.DataFrame:
         return pd.concat(
             (
-                pricelib.read(f"{symbol}.bid", date_range=(start_date, end_date)).data,
-                pricelib.read(f"{symbol}.ask", date_range=(start_date, end_date)).data,
+                pd.DataFrame(
+                    pricelib.read(
+                        f"{symbol}.bid", date_range=(start_date, end_date)
+                    ).data
+                ),
+                pd.DataFrame(
+                    pricelib.read(
+                        f"{symbol}.ask", date_range=(start_date, end_date)
+                    ).data
+                ),
             ),
             axis=1,
             keys=("bid", "ask"),
@@ -131,26 +152,26 @@ def create_universe(
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
     return (
-        result["bid"]["Open"],
-        result["bid"]["High"],
-        result["bid"]["Low"],
-        result["bid"]["Close"],
-        result["ask"]["Open"],
-        result["ask"]["High"],
-        result["ask"]["Low"],
-        result["ask"]["Close"],
-        ((result["ask"]["Open"] + result["bid"]["Open"]) / 2),
-        ((result["ask"]["High"] + result["bid"]["High"]) / 2),
-        ((result["ask"]["Low"] + result["bid"]["Low"]) / 2),
-        ((result["ask"]["Close"] + result["bid"]["Close"]) / 2),
+        pd.DataFrame(result["bid"]["Open"]),
+        pd.DataFrame(result["bid"]["High"]),
+        pd.DataFrame(result["bid"]["Low"]),
+        pd.DataFrame(result["bid"]["Close"]),
+        pd.DataFrame(result["ask"]["Open"]),
+        pd.DataFrame(result["ask"]["High"]),
+        pd.DataFrame(result["ask"]["Low"]),
+        pd.DataFrame(result["ask"]["Close"]),
+        pd.DataFrame((result["ask"]["Open"] + result["bid"]["Open"]) / 2),
+        pd.DataFrame((result["ask"]["High"] + result["bid"]["High"]) / 2),
+        pd.DataFrame((result["ask"]["Low"] + result["bid"]["Low"]) / 2),
+        pd.DataFrame((result["ask"]["Close"] + result["bid"]["Close"]) / 2),
     )
 
 
 def get_activity_history(
-    from_date,
-    to_date,
+    from_date: pd.Timestamp,
+    to_date: pd.Timestamp,
     svc: IGService | None = None,
-):
+) -> tuple[tuple[pd.DataFrame, tuple[Hashable]], ...]:
     """
     get activtiy history and return dataframe per asset
     """

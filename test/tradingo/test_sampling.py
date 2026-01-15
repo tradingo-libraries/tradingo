@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -13,7 +13,7 @@ from tradingo.sampling.yf import (
 )
 
 
-def test_handle_currency_ticker_valid_ticker():
+def test_handle_currency_ticker_valid_ticker() -> None:
     symbols = "USDJPY=X"
     result = symbol_to_currency(symbols)
     assert (
@@ -21,39 +21,41 @@ def test_handle_currency_ticker_valid_ticker():
     ), "The ticker should be correctly converted to currency pair."
 
 
-def test_handle_currency():
+def test_handle_currency() -> None:
     ticker = "GBPUSD"
     result = currency_to_symbol(ticker)
     assert result == "GBPUSD=X", "The ticker is a currency pair, whould end by =X."
 
 
-def test_handle_not_a_currency():
+def test_handle_not_a_currency() -> None:
     ticker = "NOTCCY"
     result = currency_to_symbol(ticker)
     assert result == "NOTCCY", "The ticker is not a currency pair."
 
 
-def test_get_ticker_logs():
+def test_get_ticker_logs() -> None:
     t = _get_ticker("USDEUR")
     assert t.endswith("=X")
 
 
 @patch("tradingo.sampling.yf.yf.download")
-def test_sample_equity_calls_download(mock_download):
+def test_sample_equity_calls_download(
+    mock_download: MagicMock,
+) -> None:
     mock_download.return_value = pd.DataFrame({"Close": [1, 2]})
-    (df,) = sample_equity("USDEUR", "2020-01-01", "2020-01-02")
+    df = sample_equity("USDEUR", "2020-01-01", "2020-01-02")
     assert isinstance(df, pd.DataFrame)
     mock_download.assert_called_once()
 
 
-def test_adjust_fx_series_basic():
+def test_adjust_fx_series_basic() -> None:
     df = pd.DataFrame({"EURUSD": [2.0, 4.0], "USDEUR": [0.5, 0.25]})
     out = adjust_fx_series(df, ref_ccy="USD", add_self=True)
     expected = pd.DataFrame({"EUR": [2.0, 4.0], "USD": [1.0, 1.0]})
     pd.testing.assert_frame_equal(out, expected)
 
 
-def test_align_series_basic():
+def test_align_series_basic() -> None:
     s = pd.Series([1, 2, 3])
     o = 2
     s1, s2 = _align_series(s, o)

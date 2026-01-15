@@ -72,7 +72,7 @@ def backtest(
             columns=mid_close.columns,
         )
 
-    def compute_backtest(inst_trades: pd.Series):
+    def compute_backtest(inst_trades: pd.Series) -> pd.DataFrame:
         logger.info("Computing backtest for ticker=%s", inst_trades.name)
         inst_mids = mid_close[inst_trades.name].ffill().dropna()
         inst_asks = ask_close[inst_trades.name].reindex(inst_mids.index, method="ffill")
@@ -130,6 +130,8 @@ def backtest(
     backtest["unrealised_pnl"] = backtest["unrealised_pnl"].where(
         backtest.net_position.ne(0.0), np.nan
     )
-    backtest_fields = (backtest.loc[:, f] for f in BACKTEST_FIELDS if f != "date")
+    backtest_fields: tuple[pd.DataFrame, ...] = tuple(
+        backtest.loc[:, f] for f in BACKTEST_FIELDS if f != "date"
+    )
 
-    return (summary, *backtest_fields)
+    return (pd.DataFrame(summary),) + backtest_fields

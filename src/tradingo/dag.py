@@ -7,7 +7,8 @@ import json
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Iterable
+from collections.abc import Callable
 
 from . import symbols
 from .config import ConfigLoadError
@@ -30,16 +31,16 @@ class Task:
 
     def __init__(
         self,
-        name,
-        function,
-        task_args,
-        task_kwargs,
-        symbols_out,
-        symbols_in,
-        load_args,
-        publish_args,
+        name: str,
+        function: str,
+        task_args: tuple[Any, ...],
+        task_kwargs: dict[str, Any],
+        symbols_out: list[str],
+        symbols_in: dict[str, str],
+        load_args: dict[str, Any],
+        publish_args: dict[str, Any],
         dependencies: Iterable[str] = (),
-    ) -> None:
+    ):
         self._function = function
         self.name = name
         self.task_args = task_args
@@ -62,18 +63,23 @@ class Task:
         )
 
     @property
-    def function(self) -> Callable:
+    def function(self) -> Callable[..., Any]:
         """task function"""
         module, function_name = self._function.rsplit(".", maxsplit=1)
-        function = getattr(importlib.import_module(module), function_name)
+        function: Callable[..., Any] = getattr(
+            importlib.import_module(module), function_name
+        )
 
         if self.symbols_out:
             function = symbols.symbol_publisher(
                 *self.symbols_out,
                 **self.publish_args,
             )(function)
+
         if self.symbols_in:
             function = symbols.symbol_provider(
+                symbol_prefix=self.load_args.pop("symbol_prefix", None),
+                no_date=self.load_args.pop("no_date", None),
                 **self.symbols_in,
                 **self.load_args,
             )(function)
@@ -90,11 +96,11 @@ class Task:
 
     def run(
         self,
-        *args,
+        *args: object,
         run_dependencies: bool | int = False,
-        skip_deps: re.Pattern | None = None,
-        force_rerun=False,
-        **kwargs,
+        skip_deps: re.Pattern[str] | None = None,
+        force_rerun: bool = False,
+        **kwargs: object,
     ) -> None:
         """run this task. optinally run also dependency tasks"""
         if run_dependencies:
@@ -106,6 +112,7 @@ class Task:
                 dependency.run(
                     *args,
                     run_dependencies=run_dependencies,
+                    skip_deps=skip_deps,
                     force_rerun=force_rerun,
                     **kwargs,
                 )
@@ -121,7 +128,7 @@ class Task:
         finally:
             self.state = state
 
-    def add_dependencies(self, *dependency) -> None:
+    def add_dependencies(self, *dependency: str) -> None:
         """add dependencies to this task"""
         self._dependencies.extend(dependency)
 
@@ -143,8 +150,8 @@ class Task:
 
 
 def collect_task_configs(
-    config, _tasks: Optional[dict[str, Any]] = None
-) -> dict[str, dict]:
+    config: dict[str, Any], _tasks: dict[str, Any] | None = None
+) -> dict[str, dict[str, Any]]:
     """gather all task specifications from a config, accounting for dependencies."""
     tasks = _tasks or {}
 
@@ -218,7 +225,7 @@ class DAG(dict[str, Task]):
                 print("  No dependencies")
             print()
 
-    def get_symbols(self) -> list[Task]:
+    def get_symbols(self) -> list[str]:
         """list all symbols produced by this DAG."""
         return [
             task
@@ -226,11 +233,25 @@ class DAG(dict[str, Task]):
             for task in subl
         ]
 
-    def run(self, task_name, skip_deps: re.Pattern[str], **kwargs) -> None:
+    def run(
+        self,
+        task_name: str,
+        skip_deps: re.Pattern[str],
+        run_dependencies: bool | int = False,
+        force_rerun: bool = False,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
         """run a specific task of this DAG."""
         if task_name not in self:
             raise ValueError(f"{task_name} is not a task in the DAG.")
-        return self[task_name].run(**kwargs, skip_deps=skip_deps)
+        self[task_name].run(
+            *args,
+            skip_deps=skip_deps,
+            run_dependencies=run_dependencies,
+            force_rerun=force_rerun,
+            **kwargs,
+        )
 
     def update_state(self) -> None:
         """update the local json file which keeps the DAG state."""

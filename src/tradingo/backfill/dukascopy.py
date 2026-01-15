@@ -8,12 +8,8 @@ import os
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Optional
 
 import pandas as pd
-from arcticdb import Arctic
-
-import tradingo.sampling as sampling
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +30,7 @@ MULTIPLIERS = {
 }
 
 
-def cli_app():
+def cli_app() -> argparse.ArgumentParser:
     app = argparse.ArgumentParser("load-historical-data")
 
     app.add_argument("--path", type=Path, required=True, nargs="+")
@@ -52,37 +48,10 @@ def cli_app():
 FILE_REGEX = r"^([A-Z0-9\.]+)_Candlestick_([0-9]+_[MDHS])_(BID|ASK)_([0-9]{2}\.[0-9]{2}\.[0-9]{4})-([0-9]{2}\.[0-9]{2}\.[0-9]{4}).csv$"
 
 
-def main():
-    args = cli_app().parse_args()
-
-    a = Arctic(args.arctic_uri)
-
-    result = read_backfill(
-        paths=args.path,
-        arctic=a,
-        dry_run=args.dry_run,
-        universe=args.universe,
-        provider=args.provider,
-        clean=args.clean,
-    )
-
-    sampling.instruments.download_instruments(
-        index_col=None,
-        epics=ASSET_MAPPING.values(),
-        universe=args.universe,
-        arctic=a,
-    )
-
-    if args.dry_run:
-        print(result)
-    print("finished")
-
-
 def read_backfill(
-    paths: List[Path],
-    end_date: Optional[pd.Timestamp] = None,
-    **kwargs,
-):
+    paths: list[Path],
+    end_date: pd.Timestamp | None = None,
+) -> tuple[pd.DataFrame, ...]:
     data_files = defaultdict(list)
 
     for path in paths:
@@ -91,13 +60,12 @@ def read_backfill(
                 symbol, frequency, field, start_date, end_date = match.groups()
 
                 # need to group by symbol
-
                 data_files[(field.lower(), symbol)].append(path / file)
 
     # symbol, ohlc, symbol
     #
     #
-    def read_file(f):
+    def read_file(f: str | Path) -> pd.DataFrame:
         logger.warning("Reading %s", f)
         out = pd.read_csv(
             f,

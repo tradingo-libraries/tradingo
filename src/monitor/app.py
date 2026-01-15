@@ -78,7 +78,7 @@ app.layout = html.Div(
     Output("universe-selection", "options"),
     Input("url", "pathname"),
 )
-def set_universe_options(_):
+def set_universe_options(_: Any) -> list[str]:
     api = Tradingo(uri=ARCTIC_URL)
     return api.instruments._library.list_symbols()
 
@@ -87,7 +87,7 @@ def set_universe_options(_):
     Output("asset-selection", "options"),
     Input("universe-selection", "value"),
 )
-def set_asset_options(universe):
+def set_asset_options(universe) -> list[str]:
     if not universe:
         return dash.no_update
     api = Tradingo(uri=ARCTIC_URL)
@@ -98,7 +98,7 @@ def set_asset_options(universe):
     Output("portfolio-selection", "options"),
     Input("universe-selection", "value"),
 )
-def set_portfolio_options(universe):
+def set_portfolio_options(universe) -> list[str]:
     if not universe:
         return dash.no_update
     api = Tradingo(uri=ARCTIC_URL)
@@ -109,7 +109,7 @@ def set_portfolio_options(universe):
     Output("portfolio-selection", "value"),
     Input("portfolio-selection", "options"),
 )
-def set_portfolio_value(options):
+def set_portfolio_value(options) -> str | Any:
     if not options:
         return dash.no_update
     return options[0]

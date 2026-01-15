@@ -1,11 +1,12 @@
 """Module for handling environment variables"""
 
+from __future__ import annotations
 import dataclasses
 import json
 import os
 import pathlib
 import typing
-from typing import Any, Mapping, Optional
+from typing import Any, MutableMapping, Optional, Self, TypeVar
 
 import jinja2
 import pandas as pd
@@ -21,7 +22,7 @@ class EnvProviderError(Exception):
     """"""
 
 
-def getbool_(val):
+def getbool_(val: str | int | bool) -> bool:
     if isinstance(val, (int, bool)):
         return bool(val)
     if val.lower() in {"true", "yes", "1"}:
@@ -31,7 +32,12 @@ def getbool_(val):
     raise ValueError(val)
 
 
-def get_cls(cls):
+T = TypeVar("T")
+
+
+def get_cls(
+    cls: Any,
+) -> Any:
     if cls is int:
         return int
     if cls is float:
@@ -61,7 +67,7 @@ def get_cls(cls):
     raise EnvProviderError(f"Unhandled type '{cls}'")
 
 
-def _read_dict(cls, val):
+def _read_dict(cls: Any, val: Any) -> Any | None:
     containercls, kcls, vcls = cls
     if isinstance(val, str):
         return containercls(json.loads(val))
@@ -71,7 +77,12 @@ def _read_dict(cls, val):
         raise EnvProviderError(f"Cannot read mapping '{cls}': '{val}'")
 
 
-def type_shed(field: dataclasses.Field, val, prefix, env) -> Any:
+def type_shed(
+    field: dataclasses.Field[Any],
+    val: Any,
+    prefix: str,
+    env: MutableMapping[str, Any],
+) -> Any:
     cls = get_cls(field.type)
 
     if isinstance(cls, tuple):
@@ -109,9 +120,9 @@ class EnvProvider:
     @classmethod
     def _resolve_args(
         cls,
-        env: Mapping[str, str],
+        env: MutableMapping[str, str],
         app_prefix: str,
-    ):
+    ) -> Any:
         out = {}
         for k, v in env.items():
             if not (k.lower().startswith(app_prefix)):
@@ -134,7 +145,7 @@ class EnvProvider:
 
         return out
 
-    def to_env(self, env=None):
+    def to_env(self, env: MutableMapping[str, Any] | None = None) -> Self:
         env = env if isinstance(env, dict) else os.environ
         for k, v in self.__dict__.items():
             if k == "app_prefix":
@@ -145,7 +156,7 @@ class EnvProvider:
             env[f"{self.app_prefix}{k}".upper()] = str(v)
         return self
 
-    def clean(self, env=None):
+    def clean(self, env: MutableMapping[str, Any] | None = None) -> EnvProvider:
         env = env if isinstance(env, dict) else os.environ
         for k, v in self.__dict__.items():
             if k == "app_prefix":
@@ -156,14 +167,16 @@ class EnvProvider:
             env.pop(f"{self.app_prefix}{k}".upper(), None)
         return self
 
+    T = TypeVar("T")
+
     @classmethod
     def from_env(
         cls,
         *,
         app_prefix: str | None = None,
-        env: dict[str, Any] | None = None,
+        env: MutableMapping[str, Any] | None = None,
         override_default_env: bool = True,
-    ):
+    ) -> Self:
 
         try:
             app_prefix = app_prefix or getattr(cls, "app_prefix")
@@ -171,6 +184,8 @@ class EnvProvider:
             raise EnvProviderError(
                 "app_prefix must be passed or set on the config object"
             ) from ex
+
+        assert isinstance(app_prefix, str)
 
         app_prefix = (app_prefix + "_").lower()
 
@@ -185,8 +200,10 @@ class EnvProvider:
                 (k, v) for k, v in default_env.items() if k in resolved_args
             )
 
+        resolved_args["app_prefix"] = app_prefix
+
         try:
-            return cls(**resolved_args, app_prefix=app_prefix)
+            return cls(**resolved_args)
         except TypeError as ex:
             if "missing" in ex.args[0]:
                 raise EnvProviderError(
@@ -200,7 +217,7 @@ class EnvProvider:
             raise ex
 
     @classmethod
-    def from_file(cls, variables: str | pathlib.Path):
+    def from_file(cls: type[EnvProvider], variables: str | pathlib.Path) -> EnvProvider:
         variables = pathlib.Path(variables)
         rendered = jinja2.Template(variables.read_text()).render(**os.environ)
         if variables.suffix == ".json":

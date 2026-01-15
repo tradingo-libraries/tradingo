@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import textwrap
 
 import pytest
@@ -8,7 +9,7 @@ from tradingo.settings import TradingoConfig
 
 
 @pytest.fixture
-def config_home(tmp_path):
+def config_home(tmp_path: Path) -> None:
     (tmp_path / "configs").mkdir(exist_ok=True)
     (tmp_path / "configs" / "signals").mkdir(exist_ok=True)
     (tmp_path / "configs" / "universes").mkdir(exist_ok=True)

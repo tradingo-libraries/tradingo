@@ -4,8 +4,10 @@ import re
 from typing import Any
 
 import arcticdb as adb
+from arcticdb.options import DEFAULT_ENCODING_VERSION, EncodingVersion
 from arcticdb.version_store.library import AsOf
 import pandas as pd
+from pandas.core.arrays.period import NaTType
 
 
 class _Read:
@@ -116,7 +118,7 @@ class _Read:
     def tail(
         self,
         n: int = 5,
-        as_of: int | str| None = None,
+        as_of: int | str | None = None,
         columns: list[str] | None = None,
     ) -> pd.DataFrame:
         columns = columns or []
@@ -129,20 +131,25 @@ class _Read:
         return bool(self._library.list_symbols(regex=f"^{re.escape(self._path)}$"))
 
 
-class Tradingo(adb.Arctic):
+class Tradingo(adb.Arctic):  # type: ignore
     def __init__(
         self,
-        *args,
+        uri: str,
         provider: str | None = None,
         universe: str | None = None,
-        **kwargs,
+        encoding_version: EncodingVersion = DEFAULT_ENCODING_VERSION,
+        output_format: adb.OutputFormat | str = adb.OutputFormat.PANDAS,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            uri=uri,
+            encoding_version=encoding_version,
+            output_format=output_format,
+        )
         self._provider = provider
         self._universe = universe
 
     def _get_path_so_far(self, library: str) -> list[str]:
-        path_so_far = []
+        path_so_far: list[str] = []
         if library == "instruments":
             return path_so_far
         if self._provider:
@@ -151,30 +158,32 @@ class Tradingo(adb.Arctic):
             path_so_far.append(self._universe)
         return path_so_far
 
-    def __getattr__(self, library):
-        if library in self.list_libraries():
-            path_so_far = self._get_path_so_far(library)
-            if library == "instruments":
-
-                    path_so_far=path_so_far,
-                    assets=[],
-                    root=self,
-                )
-
-            assets = []
-            if self._universe:
-                assets = getattr(self.instruments, self._universe)().index.to_list()
-
+    def __getattr__(self, library: str) -> _Read:
+        if library.startswith("_"):
+            raise AttributeError(library)
+        if library not in self.list_libraries():
+            raise AttributeError(library)
+        path_so_far = self._get_path_so_far(library)
+        if library == "instruments":
             return _Read(
                 library=self.get_library(library),
-                path_so_far=path_so_far,
-                assets=assets,
+                path_so_far=tuple(path_so_far),
+                assets=[],
                 root=self,
             )
 
-        return super().__getattr__(library)
+        assets = []
+        if self._universe:
+            assets = getattr(self.instruments, self._universe)().index.to_list()
 
-    def __dir__(self):
+        return _Read(
+            library=self.get_library(library),
+            path_so_far=tuple(path_so_far),
+            assets=assets,
+            root=self,
+        )
+
+    def __dir__(self) -> list[str]:
         return [*self.list_libraries(), *super().__dir__()]
 
 
@@ -182,9 +191,10 @@ class VolSurface(Tradingo):
     def get(
         self,
         symbol: str,
-        start_date: pd.Timestamp = pd.Timestamp("1970-01-01 00:00+00:00"),
+        start_date: NaTType | pd.Timestamp = pd.Timestamp("1970-01-01 00:00+00:00"),
         end_date: pd.Timestamp = pd.Timestamp.now("utc"),
-    ):
+    ) -> pd.DataFrame:
+        assert isinstance(start_date, pd.Timestamp)
         futures = (
             pd.concat(
                 (

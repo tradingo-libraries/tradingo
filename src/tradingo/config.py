@@ -2,7 +2,7 @@
 
 import json
 import pathlib
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, MutableMapping, Optional
 
 import jinja2
 import pandas as pd
@@ -15,7 +15,7 @@ class ConfigLoadError(Exception):
 
 def read_config_template(
     filepath: pathlib.Path,
-    variables: dict[str, str],
+    variables: MutableMapping[str, str],
     path_so_far: list[str] | None = None,
 ) -> dict[str, Any]:
     """read a config template and populate it with values"""
