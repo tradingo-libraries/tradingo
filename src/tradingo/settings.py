@@ -1,7 +1,8 @@
 """Module for handling environment variables"""
 
-from __future__ import annotations
+# from __future__ import annotations
 import dataclasses
+from importlib import import_module
 import json
 import os
 import pathlib
@@ -38,6 +39,9 @@ T = TypeVar("T")
 def get_cls(
     cls: Any,
 ) -> Any:
+    if isinstance(cls, str):
+        module, name = cls.rsplit(".", maxsplit=1)
+        cls = getattr(import_module(module), name)
     if cls is int:
         return int
     if cls is float:
@@ -52,6 +56,7 @@ def get_cls(
         return cls
     if isinstance(cls, type) and issubclass(cls, EnvProvider):
         return cls
+
     if isinstance(cls(), typing.Mapping):
         return (
             cls,
@@ -156,7 +161,7 @@ class EnvProvider:
             env[f"{self.app_prefix}{k}".upper()] = str(v)
         return self
 
-    def clean(self, env: MutableMapping[str, Any] | None = None) -> EnvProvider:
+    def clean(self, env: MutableMapping[str, Any] | None = None) -> "EnvProvider":
         env = env if isinstance(env, dict) else os.environ
         for k, v in self.__dict__.items():
             if k == "app_prefix":
@@ -217,7 +222,9 @@ class EnvProvider:
             raise ex
 
     @classmethod
-    def from_file(cls: type[EnvProvider], variables: str | pathlib.Path) -> EnvProvider:
+    def from_file(
+        cls: type["EnvProvider"], variables: str | pathlib.Path
+    ) -> "EnvProvider":
         variables = pathlib.Path(variables)
         rendered = jinja2.Template(variables.read_text()).render(**os.environ)
         if variables.suffix == ".json":

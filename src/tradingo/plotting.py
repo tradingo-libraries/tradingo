@@ -1,7 +1,6 @@
 from typing import Any, List, Union
 
 import matplotlib.axes
-from numpy import isin
 import pandas as pd
 from pandas.plotting._matplotlib.style import get_standard_colors
 

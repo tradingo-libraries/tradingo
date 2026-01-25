@@ -12,17 +12,19 @@ def arctic() -> Arctic:
 
 def test_symbol_provider(arctic: Arctic) -> None:
 
-    lib = arctic.get_library("my-lib", create_if_missing=True)
-
     @symbol_provider(input_1="my-lib/symbol")
     def provider(input_1: pd.DataFrame) -> pd.DataFrame:
         return input_1
 
     @symbol_publisher("my-lib/symbol")
     def publisher(input_1: pd.DataFrame) -> pd.DataFrame:
-        return pd.DataFrame()
+        return pd.DataFrame(
+            1,
+            index=pd.date_range("2025-01-01", "2026-01-01"),
+            columns=["A"],
+        )
 
-    publisher(arctic=arctic, input_1="my-lib/symbol")
+    publisher(arctic=arctic, input_1="my-lib/symbol", dry_run=False)
     res = provider(arctic=arctic, input_1="my-lib/symbol")
 
-    assert res.empty
+    assert res["A"].mean() == 1

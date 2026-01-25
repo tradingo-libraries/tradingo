@@ -9,7 +9,7 @@ from tradingo.settings import TradingoConfig
 
 
 @pytest.fixture
-def config_home(tmp_path: Path) -> None:
+def config_home(tmp_path: Path) -> Path:
     (tmp_path / "configs").mkdir(exist_ok=True)
     (tmp_path / "configs" / "signals").mkdir(exist_ok=True)
     (tmp_path / "configs" / "universes").mkdir(exist_ok=True)
@@ -86,7 +86,7 @@ def config_home(tmp_path: Path) -> None:
     return tmp_path / "configs"
 
 
-def test_config(config_home):
+def test_config(config_home: Path) -> None:
     env = TradingoConfig.from_env(
         env={
             "TP_CONFIG_HOME": str(config_home),
