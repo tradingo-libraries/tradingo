@@ -1,6 +1,6 @@
 import argparse
 import logging
-from typing import Hashable, Optional
+from typing import Hashable
 
 import numpy as np
 import pandas as pd

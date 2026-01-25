@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import Any
+from typing import Any, Sequence
 
 
 def get_instruments(config: dict[str, Any], key: str = "equity") -> pd.DataFrame:
@@ -33,33 +33,35 @@ def with_instrument_details(
     ).dropna()
 
 
-def null_instruments(symbols: list[str]) -> pd.DataFrame:
+def null_instruments(symbols: Sequence[str]) -> pd.DataFrame:
     return pd.DataFrame(
         data="",
-        index=symbols,
-        columns=[
-            "Name",
-            "SEDOL",
-            "ISIN",
-            "CUSIP",
-            "Incept. Date",
-            "Gross Expense Ratio (%)",
-            "Net Expense Ratio (%)",
-            "Net Assets (USD)",
-            "Net Assets as of",
-            "Asset Class",
-            "Sub Asset Class",
-            "Region",
-            "Market",
-            "Location",
-            "Investment Style",
-            "Key Facts",
-            "Avg. Annual Return: NAV Quarterly",
-            "Avg. Annual Return: Price Quarterly",
-            "Avg. Annual Return: NAV Monthly",
-            "Avg. Annual Return: Price Monthly",
-            "Yield",
-            "Fixed Income Characteristics",
-            "Sustainability Characteristics (MSCI ESG Fund Ratings)",
-        ],
+        index=pd.Index(symbols),
+        columns=pd.Index(
+            [
+                "Name",
+                "SEDOL",
+                "ISIN",
+                "CUSIP",
+                "Incept. Date",
+                "Gross Expense Ratio (%)",
+                "Net Expense Ratio (%)",
+                "Net Assets (USD)",
+                "Net Assets as of",
+                "Asset Class",
+                "Sub Asset Class",
+                "Region",
+                "Market",
+                "Location",
+                "Investment Style",
+                "Key Facts",
+                "Avg. Annual Return: NAV Quarterly",
+                "Avg. Annual Return: Price Quarterly",
+                "Avg. Annual Return: NAV Monthly",
+                "Avg. Annual Return: Price Monthly",
+                "Yield",
+                "Fixed Income Characteristics",
+                "Sustainability Characteristics (MSCI ESG Fund Ratings)",
+            ]
+        ),
     )

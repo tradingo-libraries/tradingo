@@ -9,7 +9,6 @@ from typing import (
     Any,
     DefaultDict,
     NamedTuple,
-    Optional,
     ParamSpec,
     Protocol,
     TypeVar,
@@ -410,7 +409,6 @@ def symbol_publisher(
                         parsed_symbol,
                         len(data.index),
                     )
-
                     lib_name, sym, params = parsed_symbol
                     lib = arctic.get_library(
                         lib_name,
