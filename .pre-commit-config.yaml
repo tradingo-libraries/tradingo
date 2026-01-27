@@ -28,3 +28,15 @@ repos:
           - ./
         pass_filenames: false
         always_run: true
+      - id: isort
+        name: isort check
+        entry: isort
+        language: system
+        types: [python]
+        args:
+          - --profile
+          - black
+          - --check
+          - ./
+        pass_filenames: false
+        always_run: true
