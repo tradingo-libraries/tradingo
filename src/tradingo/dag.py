@@ -5,10 +5,10 @@ from __future__ import annotations
 import importlib
 import json
 import re
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable
-from collections.abc import Callable
 
 from . import symbols
 from .config import ConfigLoadError
