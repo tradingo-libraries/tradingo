@@ -125,6 +125,14 @@ def create_universe(
     pd.DataFrame,
     pd.DataFrame,
 ]:
+    """Create wide format price data tables for instruments.
+
+    Params:
+        pricelib: the library.
+        instruments: the dataframe of instruments.
+        end_date: the end date.
+        start_date: the start date.
+    """
     start_date = pd.Timestamp(start_date)
     end_date = pd.Timestamp(end_date)
 

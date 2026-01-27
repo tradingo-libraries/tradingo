@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -30,9 +30,10 @@ def backtest(
     stop_limit: Optional[pd.DataFrame] = None,
     stop_loss: Optional[pd.DataFrame] = None,
     price_ffill_limit: int = 0,
-) -> tuple[pd.DataFrame]:
-    bid_close = bid_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
-    ask_close = ask_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
+) -> tuple[pd.DataFrame, ...]:
+    idx = cast(pd.DatetimeIndex, bid_close.index)
+    bid_close = bid_close.groupby(idx.date).ffill(limit=price_ffill_limit)
+    ask_close = ask_close.groupby(idx).ffill(limit=price_ffill_limit)
 
     mid_close = (bid_close + ask_close) / 2
     bid_close, ask_close = (
@@ -131,7 +132,7 @@ def backtest(
         backtest.net_position.ne(0.0), np.nan
     )
     backtest_fields: tuple[pd.DataFrame, ...] = tuple(
-        backtest.loc[:, f] for f in BACKTEST_FIELDS if f != "date"
+        pd.DataFrame(backtest.loc[:, f]) for f in BACKTEST_FIELDS if f != "date"
     )
 
     return (pd.DataFrame(summary),) + backtest_fields

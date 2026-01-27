@@ -2,11 +2,11 @@
 
 # from __future__ import annotations
 import dataclasses
-from importlib import import_module
 import json
 import os
 import pathlib
 import typing
+from importlib import import_module
 from typing import Any, MutableMapping, Optional, Self, TypeVar
 
 import jinja2
@@ -171,8 +171,6 @@ class EnvProvider:
                 continue
             env.pop(f"{self.app_prefix}{k}".upper(), None)
         return self
-
-    T = TypeVar("T")
 
     @classmethod
     def from_env(

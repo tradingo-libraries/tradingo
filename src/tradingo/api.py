@@ -1,13 +1,12 @@
 from __future__ import annotations
-import re
 
-from typing import Any
+import re
+from typing import Any, cast
 
 import arcticdb as adb
+import pandas as pd
 from arcticdb.options import DEFAULT_ENCODING_VERSION, EncodingVersion
 from arcticdb.version_store.library import AsOf
-import pandas as pd
-from pandas.core.arrays.period import NaTType
 
 
 class _Read:
@@ -25,7 +24,7 @@ class _Read:
         self._root = root
 
     def __dir__(self) -> list[str]:
-        return [*self.list(), *super().__dir__()]
+        return [*self.list_symbols(), *super().__dir__()]
 
     def __repr__(self) -> str:
         return f'Namespace("{self._path}")'
@@ -59,7 +58,7 @@ class _Read:
             lazy=False,
         )
         assert isinstance(result, adb.VersionedItem)
-        return result.data
+        return cast(pd.DataFrame, result.data)
 
     def update(
         self,
@@ -113,7 +112,7 @@ class _Read:
         columns = columns or []
         result = self._library.head(self._path, n, as_of, columns, lazy=False)
         assert isinstance(result, adb.VersionedItem)
-        return result.data
+        return cast(pd.DataFrame, result.data)
 
     def tail(
         self,
@@ -124,7 +123,7 @@ class _Read:
         columns = columns or []
         result = self._library.tail(self._path, n, as_of, columns, lazy=False)
         assert isinstance(result, adb.VersionedItem)
-        return result.data
+        return cast(pd.DataFrame, result.data)
 
     def exists(self) -> bool:
         """Return true if symbol exists"""
@@ -185,62 +184,3 @@ class Tradingo(adb.Arctic):  # type: ignore
 
     def __dir__(self) -> list[str]:
         return [*self.list_libraries(), *super().__dir__()]
-
-
-class VolSurface(Tradingo):
-    def get(
-        self,
-        symbol: str,
-        start_date: NaTType | pd.Timestamp = pd.Timestamp("1970-01-01 00:00+00:00"),
-        end_date: pd.Timestamp = pd.Timestamp.now("utc"),
-    ) -> pd.DataFrame:
-        assert isinstance(start_date, pd.Timestamp)
-        futures = (
-            pd.concat(
-                (
-                    self.futures.cboe.VX.expiration(date_range=(start_date, end_date)),
-                    self.futures.cboe.VX.price(date_range=(start_date, end_date)),
-                ),
-                axis=1,
-                keys=("expiration", "price"),
-            )
-            .stack()
-            .astype({"expiration": "datetime64[ns]"})
-            .reset_index()
-            .set_index(["timestamp", "symbol"])
-        )
-
-        library = getattr(self.options.cboe, symbol)
-        option_chains = pd.concat(
-            (
-                library.expiration(date_range=(start_date, end_date)),
-                library.option_type(date_range=(start_date, end_date)),
-                library.strike(date_range=(start_date, end_date)),
-                library.bid(date_range=(start_date, end_date)),
-                library.ask(date_range=(start_date, end_date)),
-                library.implied_volatility(date_range=(start_date, end_date)),
-                library.delta(date_range=(start_date, end_date)),
-                library.vega(date_range=(start_date, end_date)),
-                library.gamma(date_range=(start_date, end_date)),
-                library.theta(date_range=(start_date, end_date)),
-                library.rho(date_range=(start_date, end_date)),
-            ),
-            axis=1,
-            keys=(
-                "expiration",
-                "option_type",
-                "strike",
-                "bid",
-                "ask",
-                "implied_volatility",
-                "delta",
-                "vega",
-                "gamma",
-                "theta",
-                "rho",
-            ),
-        ).stack(future_stack=True)
-
-        return option_chains.merge(
-            futures, on=["timestamp", "expiration"], how="left"
-        ).set_index(["expiration", "option_type", "strike"], append=True)

@@ -2,7 +2,7 @@ from typing import Any, List, Union
 
 import matplotlib.axes
 import pandas as pd
-from pandas.plotting._matplotlib.style import get_standard_colors
+from pandas.plotting._matplotlib.style import get_standard_colors  # pyright: ignore
 
 
 def plot_multi(

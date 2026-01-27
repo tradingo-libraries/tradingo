@@ -1,6 +1,8 @@
 import pathlib
+from typing import cast
 
 import pandas as pd
+from arcticdb import VersionedItem
 from arcticdb.version_store.library import Library
 
 from tradingo import symbols
@@ -29,7 +31,7 @@ def load_backfill(
     )
 
 
-@symbols.lib_provider(pricelib="{raw_price_lib}")
+@symbols.lib_provider(pricelib="{raw_price_lib}")  # pyright: ignore
 def create_universe(
     pricelib: Library,
     symbols: list[str],
@@ -49,7 +51,10 @@ def create_universe(
         (
             (
                 pd.DataFrame(
-                    pricelib.read(symbol, date_range=(start_date, end_date)).data
+                    cast(
+                        VersionedItem,
+                        pricelib.read(symbol, date_range=(start_date, end_date)),
+                    ).data
                 )
                 for symbol in symbols
             )
@@ -58,9 +63,9 @@ def create_universe(
         keys=(s.rsplit(".", maxsplit=1)[0] for s in symbols),
     ).reorder_levels([1, 0], axis=1)
     return (
-        result["open"],
-        result["high"],
-        result["low"],
-        result["close"],
-        result["volume"],
+        result[["open"]],
+        result[["high"]],
+        result[["low"]],
+        result[["close"]],
+        result[["volume"]],
     )
