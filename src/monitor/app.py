@@ -1,4 +1,5 @@
 import datetime
+from typing import Any
 
 import dash
 import numpy as np
