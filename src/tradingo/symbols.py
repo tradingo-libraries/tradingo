@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from typing import (
     Any,
+    Concatenate,
     DefaultDict,
     NamedTuple,
     ParamSpec,
@@ -29,27 +30,21 @@ P = ParamSpec("P")
 Q = ParamSpec("Q")
 R = TypeVar("R", pd.DataFrame, tuple[pd.DataFrame, ...])
 
+ROpt = TypeVar("ROpt", pd.DataFrame, tuple[pd.DataFrame, ...], None)
+ROptCov = TypeVar(
+    "ROptCov", pd.DataFrame, tuple[pd.DataFrame, ...], None, covariant=True
+)
+Ret = TypeVar(
+    "Ret",
+    pd.DataFrame,
+    tuple[pd.DataFrame, ...],
+    None,
+    covariant=True,
+)
+
 
 class SymbolParseError(Exception):
     """raised when cant parse symbol"""
-
-
-# def add_params(function: Callable[P, R], *args: str) -> None:
-#     origsig = inspect.signature(function)
-#     orig_params = list(origsig.parameters.values())
-#     for arg in args:
-#         if arg in origsig.parameters:
-#             continue
-#         else:
-#             orig_params.insert(
-#                 0,
-#                 inspect.Parameter(
-#                     arg,
-#                     inspect.Parameter.POSITIONAL_OR_KEYWORD,
-#                 ),
-#             )
-#
-#     function.__signature__ = origsig.replace(parameters=orig_params)
 
 
 class Symbol(NamedTuple):
@@ -99,9 +94,6 @@ class Symbol(NamedTuple):
         return cls(lib, symbol_prefix + sym + symbol_postfix, kwargs)
 
 
-Ret = TypeVar("Ret", pd.DataFrame, tuple[pd.DataFrame, ...], covariant=True)
-
-
 class LibProvided(Protocol[P, Ret]):
 
     def __call__(
@@ -114,26 +106,24 @@ class LibProvided(Protocol[P, Ret]):
 
 def lib_provider(
     **libs: str,
-) -> Callable[[Callable[P, R]], LibProvided[P, R]]:
+) -> Callable[
+    [Callable[Concatenate[adb.Arctic, P], ROpt]],
+    LibProvided[P, ROpt],
+]:
+
     def decorator(
-        func: Callable[P, R],
-    ) -> LibProvided[P, R]:
-        @functools.wraps(
-            func,
-            assigned=(
-                "__module__",
-                "__name__",
-                "__qualname__",
-                "__doc__",
-            ),
-        )
+        func: Callable[Concatenate[adb.Arctic, P], ROpt],
+    ) -> LibProvided[P, ROpt]:
         def wrapper(
             arctic: adb.Arctic,
             *args: P.args,
             **kwargs: P.kwargs,
-        ) -> R:
+        ) -> ROpt:
             libs_ = {
-                k: arctic.get_library(str(kwargs.get(k, v)), create_if_missing=True)
+                k: arctic.get_library(
+                    str(kwargs.get(k, v)),
+                    create_if_missing=True,
+                )
                 for k, v in libs.items()
             }
             kwargs.update(libs_)
@@ -144,14 +134,18 @@ def lib_provider(
                 **kwargs,
             )
 
-        # add_params(wrapper, "arctic")
-
+        functools.update_wrapper(
+            wrapper,
+            func,
+            assigned=("__name__", "__doc__", "__module__"),
+            updated=(),
+        )
         return wrapper
 
     return decorator
 
 
-class SymbolProvided(Protocol[P, Ret]):
+class SymbolProvided(Protocol[P, ROptCov]):
 
     def __call__(
         self,
@@ -161,27 +155,18 @@ class SymbolProvided(Protocol[P, Ret]):
         end_date: pd.Timestamp | None = None,
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> Ret: ...
+    ) -> ROptCov: ...
 
 
 def symbol_provider(
     symbol_prefix: str = "",
     no_date: bool = False,
     **symbols: str,
-) -> Callable[[Callable[P, R]], SymbolProvided[P, R]]:
+) -> Callable[[Callable[P, ROpt]], SymbolProvided[P, ROpt]]:
 
     def decorator(
-        func: Callable[P, R],
-    ) -> SymbolProvided[P, R]:
-        @functools.wraps(
-            func,
-            assigned=(
-                "__module__",
-                "__name__",
-                "__qualname__",
-                "__doc__",
-            ),
-        )
+        func: Callable[P, ROpt],
+    ) -> SymbolProvided[P, ROpt]:
         def wrapper(
             arctic: adb.Arctic,
             raise_if_missing: bool = True,
@@ -189,7 +174,7 @@ def symbol_provider(
             end_date: pd.Timestamp | None = None,
             *args: P.args,
             **kwargs: P.kwargs,
-        ) -> R:
+        ) -> ROpt:
             orig_symbol_data: dict[str, Any] = {}
             requested_symbols = symbols.copy()
 
@@ -294,11 +279,16 @@ def symbol_provider(
                 arctic,
                 start_date=start_date,
                 end_date=end_date,
+                *args,
                 **kwargs,
             )
 
-        setattr(wrapper, "is_provided", None)
-        # add_params(wrapper, "arctic", "start_date", "end_date")
+        functools.update_wrapper(
+            wrapper,
+            func,
+            assigned=("__name__", "__doc__", "__module__"),
+            updated=(),
+        )
 
         return wrapper
 
@@ -306,23 +296,27 @@ def symbol_provider(
 
 
 def _envoke_symbology_function(
-    function: Callable[..., R],
+    function: Callable[..., ROpt],
     arctic: adb.Arctic,
-    *,
-    start_date: pd.Timestamp | None = None,
-    end_date: pd.Timestamp | None = None,
+    *args: object,
     **kwargs: object,
-) -> R:
+) -> ROpt:
     sig = inspect.signature(function)
 
     if "start_date" in sig.parameters:
-        kwargs.setdefault("start_date", start_date)
+        kwargs.setdefault("start_date", kwargs.get("start_date", None))
+    else:
+        kwargs.pop("start_date", None)
     if "end_date" in sig.parameters:
-        kwargs.setdefault("end_date", end_date)
+        kwargs.setdefault("end_date", kwargs.get("end_date", None))
+    else:
+        kwargs.pop("end_date", None)
     if "arctic" in sig.parameters:
         kwargs.setdefault("arctic", arctic)
+    else:
+        kwargs.pop("arctic", None)
 
-    return function(**kwargs)
+    return function(*args, **kwargs)
 
 
 class PublishedFunction(Protocol[P, Ret]):
@@ -335,7 +329,7 @@ class PublishedFunction(Protocol[P, Ret]):
         clean: bool = False,
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> pd.DataFrame | None: ...
+    ) -> pd.DataFrame | tuple[pd.DataFrame, ...]: ...
 
 
 def symbol_publisher(
@@ -350,15 +344,6 @@ def symbol_publisher(
     def decorator(
         func: Callable[P, R],
     ) -> PublishedFunction[P, R]:
-        # @functools.wraps(
-        #     func,
-        #     assigned=(
-        #         "__module__",
-        #         "__name__",
-        #         "__qualname__",
-        #         "__doc__",
-        #     ),
-        # )
         def wrapper(
             arctic: adb.Arctic,
             dry_run: bool = True,
@@ -366,11 +351,15 @@ def symbol_publisher(
             clean: bool = False,
             *args: P.args,
             **kwargs: P.kwargs,
-        ) -> pd.DataFrame | None:
+        ) -> pd.DataFrame | tuple[pd.DataFrame, ...]:
             if args:
                 raise ValueError("Keyword only arguments.")
             out: tuple[pd.DataFrame, ...] | pd.DataFrame = _envoke_symbology_function(
-                func, arctic, **kwargs
+                func,
+                arctic,
+                start_date=kwargs.pop("start_date", None),
+                end_date=kwargs.pop("end_date", None),
+                **kwargs,
             )
             if not isinstance(out, tuple):
                 out = (out,)
@@ -447,9 +436,8 @@ def symbol_publisher(
                 assert isinstance(out, tuple)
                 return pd.concat(out, keys=formatted_symbols, axis=1)
 
-            return None
+            return out
 
-        # add_params(wrapper, "arctic", "dry_run", "snapshot", "clean")
         return wrapper
 
     return decorator

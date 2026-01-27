@@ -1,5 +1,6 @@
+from typing import Any
+
 import pandas as pd
-from typing import Any, Sequence
 
 
 def get_instruments(config: dict[str, Any], key: str = "equity") -> pd.DataFrame:
@@ -33,7 +34,7 @@ def with_instrument_details(
     ).dropna()
 
 
-def null_instruments(symbols: Sequence[str]) -> pd.DataFrame:
+def null_instruments(symbols: pd.Index) -> pd.DataFrame:
     return pd.DataFrame(
         data="",
         index=pd.Index(symbols),

@@ -1,6 +1,6 @@
 import argparse
 import logging
-from typing import Hashable
+from typing import Hashable, cast
 
 import numpy as np
 import pandas as pd
@@ -33,7 +33,7 @@ def close_position(
     logger.info(result)
 
 
-def close_all_open_position(positions: pd.DataFrame, svc: IGService) -> None:
+def close_all_open_position(positions: pd.Series, svc: IGService) -> None:
     epic_positions = positions
 
     for deal_id, position in epic_positions.iterrows():
@@ -48,7 +48,7 @@ def get_current_positions(
         all_positions["direction"].replace({"BUY": 1, "SELL": -1})
         * all_positions["size"]
     )
-    return all_positions
+    return cast(pd.DataFrame, all_positions)
 
 
 def reduce_open_positions(
@@ -60,7 +60,9 @@ def reduce_open_positions(
 
     quantity_cxd = 0.0
 
-    for deal_id, position in positions.sort_values("size").iterrows():
+    for deal_id, position in (
+        cast(pd.DataFrame, positions).sort_values("size").iterrows()
+    ):
         to_cancel = min(position["size"], quantity - quantity_cxd)
 
         close_position(
@@ -108,7 +110,7 @@ def adjust_position_sizes(
     service = service or get_ig_service()
     current_positions = get_current_positions(service)
 
-    current_sizes = (
+    current_sizes: pd.Series[float] = (
         current_positions.groupby("epic")["size"]
         .sum()
         .reindex(target_positions.columns)
@@ -117,12 +119,15 @@ def adjust_position_sizes(
 
     for epic in target_positions:
         latest_target = target_positions[epic].iloc[-1]
-        current_position = current_sizes.loc[epic]
+        current_position = current_sizes.loc[str(epic)]
 
         # changing sides, close existing
         if current_position and np.sign(current_position) != np.sign(latest_target):
             logger.info("Closing open position of %s for %s", current_position, epic)
-            close_all_open_position(current_positions.loc[epic], service)
+            close_all_open_position(
+                pd.Series(current_positions.loc[str(epic)]),
+                service,
+            )
             current_position = 0.0
 
         # increasing position
@@ -140,9 +145,9 @@ def adjust_position_sizes(
 
             result = service.create_open_position(
                 direction=side,
-                currency_code=get_currency(instruments.loc[epic]),
+                currency_code=get_currency(pd.Series(instruments.loc[str(epic)])),
                 order_type="MARKET",
-                expiry=instruments.loc[epic].expiry,
+                expiry=instruments.loc[str(epic)].expiry,
                 size=target,
                 epic=epic,
                 force_open=False,
@@ -172,7 +177,7 @@ def adjust_position_sizes(
 
             reduce_open_positions(
                 service,
-                epic=epic,
+                epic=str(epic),
                 quantity=reduce_by,
             )
         else:

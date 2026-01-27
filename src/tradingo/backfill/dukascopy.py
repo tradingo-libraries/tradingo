@@ -8,6 +8,7 @@ import os
 import re
 from collections import defaultdict
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 
@@ -51,14 +52,14 @@ FILE_REGEX = r"^([A-Z0-9\.]+)_Candlestick_([0-9]+_[MDHS])_(BID|ASK)_([0-9]{2}\.[
 def read_backfill(
     paths: list[Path],
     end_date: pd.Timestamp | None = None,
-) -> tuple[pd.DataFrame, ...]:
+) -> tuple[tuple[pd.DataFrame, tuple[str, str]], ...]:
     data_files = defaultdict(list)
 
     for path in paths:
         for file in os.listdir(path):
             if match := re.match(FILE_REGEX, file):
-                symbol, frequency, field, start_date, end_date = match.groups()
-
+                symbol, _, field, _, end_date_ = match.groups()
+                end_date = cast(pd.Timestamp, end_date_)
                 # need to group by symbol
                 data_files[(field.lower(), symbol)].append(path / file)
 
@@ -73,10 +74,12 @@ def read_backfill(
             date_format="%d.%m.%Y %H:%M:%S.%f",
         )
         out.index = pd.to_datetime(out.index)
-        if out.index.name == "Local time":
-            out.index = out.index.tz_convert("utc")
+        if isinstance(out.index, pd.DatetimeIndex) and (out.index.name == "Local time"):
+            out.index = out.index.tz_convert("utc")  # pyright: ignore
         elif out.index.name == "Gmt time":
-            out.index = out.index.tz_localize("GMT").tz_convert("utc")
+            out.index = out.index.tz_localize("GMT").tz_convert(  # pyright: ignore
+                "utc"
+            )
         else:
             raise ValueError(out.index.name)
         return out.rename_axis("DateTime")

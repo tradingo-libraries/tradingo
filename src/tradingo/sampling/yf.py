@@ -1,10 +1,12 @@
 """Yahoo Finance data provider."""
 
 import logging
+from typing import cast
 
 import pandas as pd
 import pycountry
 import yfinance as yf
+from arcticdb import VersionedItem
 from arcticdb.version_store.library import Library
 
 from tradingo import symbols
@@ -12,7 +14,7 @@ from tradingo import symbols
 logger = logging.getLogger(__name__)
 
 
-_CCY_CODES = {c.alpha_3 for c in pycountry.currencies}
+_CCY_CODES = {c.alpha_3 for c in pycountry.currencies}  # pyright: ignore
 
 
 class ProviderDataError(Exception):
@@ -96,10 +98,10 @@ def sample_equity(
     if not prices.index.tz:
         prices = prices.tz_localize("utc")
 
-    return prices.tz_convert("utc")
+    return cast(pd.DataFrame, prices.tz_convert("utc"))
 
 
-@symbols.lib_provider(pricelib="{raw_price_lib}")
+@symbols.lib_provider(pricelib="{raw_price_lib}")  # pyright: ignore
 def create_universe(
     pricelib: Library,
     instruments: pd.DataFrame,
@@ -121,9 +123,10 @@ def create_universe(
     end_date = pd.Timestamp(end_date)
 
     def get_data(symbol: str) -> pd.DataFrame:
-        return pd.DataFrame(
-            pricelib.read(symbol, date_range=(start_date, end_date)).data
+        item = cast(
+            VersionedItem, pricelib.read(symbol, date_range=(start_date, end_date))
         )
+        return pd.DataFrame(item.data)
 
     symbols = pricelib.list_symbols()
 
@@ -139,11 +142,11 @@ def create_universe(
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 0], axis=1)
     return (
-        result["Open"],
-        result["High"],
-        result["Low"],
-        result["Close"],
-        result["Volume"],
+        result[["Open"]],
+        result[["High"]],
+        result[["Low"]],
+        result[["Close"]],
+        result[["Volume"]],
     )
 
 
@@ -218,7 +221,7 @@ def convert_prices_to_ccy(
     prices: pd.DataFrame,
     fx_series: pd.DataFrame,
     currency: str,
-) -> pd.DataFrame:
+) -> list[pd.DataFrame]:
     """
     Convert prices to a common currency using fx_series.
 
@@ -234,12 +237,12 @@ def convert_prices_to_ccy(
     for symbol, ccy in symbols_ccys.items():
         if ccy not in ccy_syms_map:
             ccy_syms_map[ccy] = []
-        ccy_syms_map[ccy].append(symbol)
+        ccy_syms_map[ccy].append(str(symbol))
 
-    converted = []
+    converted: list[pd.DataFrame] = []
     for name, df in prices.items():
         df_fx = adjust_fx_series(
-            fx_series[name], currency, add_self=True, add_cent=True
+            fx_series[[name]], currency, add_self=True, add_cent=True
         )
         if set(symbols_ccys) != set(df.columns):
             raise ValueError(
@@ -248,10 +251,10 @@ def convert_prices_to_ccy(
         if missing_ccys := set(ccy_syms_map).difference(set(df_fx.columns)):
             raise ValueError(f"fx_series columns miss currencies: {missing_ccys}")
 
-        result = []
+        result: list[pd.Series[float]] = []
         for sym in df.columns:
             df_, fx_ = _align_series(df[sym].ffill(), df_fx[symbols_ccys[sym]])
-            result.append(df_.mul(fx_).rename(df_.name))
+            result.append(df_.mul(fx_).rename(str(df_.name)))
         converted.append(pd.concat(result, axis=1)[df.columns])
 
     return converted

@@ -1,8 +1,10 @@
 import logging
 import re
+from typing import cast
 
 import numpy as np
 import pandas as pd
+from arcticdb import VersionedItem
 from arcticdb.arctic import Library
 
 from tradingo import symbols
@@ -10,7 +12,7 @@ from tradingo import symbols
 logger = logging.getLogger(__name__)
 
 
-@symbols.lib_provider(signals="signals")
+@symbols.lib_provider(signals="signals")  # pyright: ignore
 def portfolio_construction(
     signals: Library,
     close: pd.DataFrame,
@@ -68,9 +70,12 @@ def portfolio_construction(
             (
                 weight
                 * pd.DataFrame(
-                    signals.read(
-                        model_name,
-                        date_range=(start_date, end_date),
+                    cast(
+                        VersionedItem,
+                        signals.read(
+                            model_name,
+                            date_range=(start_date, end_date),
+                        ),
                     ).data
                 )
                 for model_name, weight in model_weights.items()
@@ -167,17 +172,15 @@ def portfolio_optimization(
 
 def instrument_ivol(
     close: pd.DataFrame,
-    provider: str,
-    **kwargs: object,
 ) -> pd.DataFrame:
-    pct_returns = np.log(close / close.shift())
+    pct_returns = cast(pd.DataFrame, np.log(close / close.shift()))
 
     ivols = []
 
     for symbol in pct_returns.columns:
         universe = pct_returns.drop(symbol, axis=1)
 
-        def vol(uni: pd.DataFrame) -> pd.DataFrame:
+        def vol(uni: pd.DataFrame) -> pd.Series[float]:
             return (1 - (1 + uni).prod(axis=1).pow(1 / 100)).ewm(10).std()
 
         ivol = vol(pd.concat((universe, pct_returns[symbol]), axis=1)) - vol(universe)
@@ -208,16 +211,18 @@ def position_from_trades(
         & trades["Order status"].eq("Completed")
     ]
     trades["Ticker"] = trades["Investment"].apply(_parse_ticker) + ".L"
-    position_shares = (
+    position_shares = cast(
+        pd.DataFrame,
         trades.set_index(["Date", "Ticker"])
         .groupby(["Date", "Ticker"])
         .sum()
-        .unstack()["My units"]
+        .unstack(),
+    )
+    position_shares = (
+        position_shares[["My units"]]
         .fillna(0.0)
         .cumsum()
-        .reindex_like(
-            close,
-        )
+        .reindex_like(close)
         .ffill()
         .fillna(0.0)
     )
@@ -229,5 +234,5 @@ def position_from_trades(
     )
 
 
-def point_in_time_position(positions: pd.DataFrame) -> pd.Series:
+def point_in_time_position(positions: pd.DataFrame) -> pd.DataFrame:
     return positions.iloc[-1:,]

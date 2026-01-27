@@ -9,13 +9,16 @@ import pathlib
 import re
 from typing import Any
 
-from arcticdb import Arctic
 import pandas as pd
+from arcticdb import Arctic
 
 from tradingo.api import Tradingo
 from tradingo.config import read_config_template
 from tradingo.dag import DAG
+from tradingo.sampling.ig import create_universe
 from tradingo.settings import IGTradingConfig, TradingoConfig
+
+create_universe
 
 logger = logging.getLogger(__name__)
 
