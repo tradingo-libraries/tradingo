@@ -30,7 +30,7 @@ repos:
         always_run: true
       - id: isort
         name: isort check
-        entry: isort
+        entry: "uv run isort"
         language: system
         types: [python]
         args:
