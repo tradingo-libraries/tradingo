@@ -7,11 +7,6 @@ repos:
         language: system
         types: [python]
         args: [--config=pyproject.toml]
-      - id: isort
-        name: isort
-        entry: isort
-        language: system
-        types: [python]
       - id: ruff
         name: ruff
         entry: "uv run ruff"
@@ -27,7 +22,6 @@ repos:
           - --config=pyproject.toml
           - ./
         pass_filenames: false
-        always_run: true
       - id: isort
         name: isort check
         entry: "uv run isort"
@@ -39,4 +33,3 @@ repos:
           - --check
           - ./
         pass_filenames: false
-        always_run: true
