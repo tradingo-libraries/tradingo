@@ -78,7 +78,7 @@ class Task:
 
         if self.symbols_in:
             function = symbols.symbol_provider(
-                symbol_prefix=self.load_args.pop("symbol_prefix", None),
+                symbol_prefix=self.load_args.pop("symbol_prefix", ""),
                 no_date=self.load_args.pop("no_date", None),
                 **self.symbols_in,
                 **self.load_args,

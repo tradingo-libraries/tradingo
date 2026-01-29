@@ -16,7 +16,7 @@ def download_instruments(
     index_col: str | None = None,
     html: str | None = None,
     file: str | None = None,
-    tickers: list[str] | None = None,
+    tickers: list[str] | str | None = None,
     epics: list[str] | None = None,
 ) -> pd.DataFrame:
     if file:
