@@ -93,7 +93,7 @@ def portfolio_construction(
         positions,
         pct_position.round(decimals=2),
         share_position.round(),
-        positions.round(),
+        (multiplier * positions).round(),
         signal_value,
     )
 
