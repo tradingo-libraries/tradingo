@@ -123,7 +123,7 @@ def handle_universes(args: Any, api: Tradingo) -> None:
     """inspect Tradingo's universe by inspecting the instruments in DB."""
 
     if args.universe_action == "list":
-        for item in api.instruments.list():
+        for item in api.instruments.list_symbols():
             print(item)
 
     elif args.universe_action == "show":

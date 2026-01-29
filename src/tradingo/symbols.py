@@ -160,6 +160,7 @@ class SymbolProvided(Protocol[P, ROptCov]):
 
 def symbol_provider(
     symbol_prefix: str = "",
+    symbol_postfix: str = "",
     no_date: bool = False,
     **symbols: str,
 ) -> Callable[[Callable[P, ROpt]], SymbolProvided[P, ROpt]]:
@@ -226,7 +227,12 @@ def symbol_provider(
                         multidata.transpose().groupby(level=1).last().transpose()
                     )
                     return pd.DataFrame(multidata[columns])
-                symbol = Symbol.parse(v, kwargs, symbol_prefix=symbol_prefix)
+                symbol = Symbol.parse(
+                    v,
+                    kwargs,
+                    symbol_prefix=symbol_prefix,
+                    symbol_postfix=symbol_postfix,
+                )
                 try:
                     data = (
                         arctic.get_library(
@@ -280,9 +286,9 @@ def symbol_provider(
             return _envoke_symbology_function(
                 func,
                 arctic,
+                *args,
                 start_date=start_date,
                 end_date=end_date,
-                *args,
                 **kwargs,
             )
 

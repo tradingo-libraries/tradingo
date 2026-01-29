@@ -33,7 +33,7 @@ def close_position(
     logger.info(result)
 
 
-def close_all_open_position(positions: pd.Series, svc: IGService) -> None:
+def close_all_open_position(positions: pd.DataFrame, svc: IGService) -> None:
     epic_positions = positions
 
     for deal_id, position in epic_positions.iterrows():
@@ -125,7 +125,7 @@ def adjust_position_sizes(
         if current_position and np.sign(current_position) != np.sign(latest_target):
             logger.info("Closing open position of %s for %s", current_position, epic)
             close_all_open_position(
-                pd.Series(current_positions.loc[str(epic)]),
+                pd.DataFrame(current_positions.loc[str(epic)]),
                 service,
             )
             current_position = 0.0
