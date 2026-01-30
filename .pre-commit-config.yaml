@@ -25,6 +25,7 @@ repos:
         types: [python]
         args:
           - --config=pyproject.toml
+          - --explicit-package-bases
           - ./src
         pass_filenames: false
         always_run: true
