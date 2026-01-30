@@ -11,11 +11,11 @@ source_uri = "lmdb:///home/rory/dev/tradingo-plat/data/prod/tradingo.db"
 
 
 def sync_symbols(
-    library,
-    symbol_regex,
-    source_uri,
-    target_uri,
-):
+    library: str,
+    symbol_regex: str,
+    source_uri: str,
+    target_uri: str,
+) -> None:
     source_a = Arctic(source_uri)
     target_a = Arctic(target_uri)
 

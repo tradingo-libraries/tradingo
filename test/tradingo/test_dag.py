@@ -3,7 +3,7 @@ import pytest
 from tradingo.dag import DAG
 
 
-def test_dag_configuration():
+def test_dag_configuration() -> None:
     nodes = {
         "raw_prices": {
             "MSFT.sample": {
