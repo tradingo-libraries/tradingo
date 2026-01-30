@@ -136,11 +136,11 @@ def handle_universes(args: Any, api: Tradingo) -> None:
         raise ValueError(args.universe_action)
 
 
-def main() -> None:
+def main(_args: argparse.Namespace | None = None) -> None:
     """Tradingo CLI entrypoint"""
 
     envconfig = TradingoConfig.from_env().to_env()
-    args = cli_app().parse_args()
+    args = _args or cli_app().parse_args()
     IGTradingConfig.from_env().to_env()
     envconfig.to_env()
 

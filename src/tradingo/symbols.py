@@ -30,9 +30,18 @@ P = ParamSpec("P")
 Q = ParamSpec("Q")
 R = TypeVar("R", pd.DataFrame, tuple[pd.DataFrame, ...])
 
-ROpt = TypeVar("ROpt", pd.DataFrame, tuple[pd.DataFrame, ...], None)
+ROpt = TypeVar(
+    "ROpt",
+    pd.DataFrame,
+    tuple[pd.DataFrame, ...],
+    None,
+)
 ROptCov = TypeVar(
-    "ROptCov", pd.DataFrame, tuple[pd.DataFrame, ...], None, covariant=True
+    "ROptCov",
+    pd.DataFrame,
+    tuple[pd.DataFrame, ...],
+    None,
+    covariant=True,
 )
 Ret = TypeVar(
     "Ret",
@@ -41,6 +50,25 @@ Ret = TypeVar(
     None,
     covariant=True,
 )
+
+
+def _add_params(function: Callable[P, ROpt], *args: str) -> None:
+
+    origsig = inspect.signature(function)
+    orig_params = list(origsig.parameters.values())
+    for arg in args:
+        if arg in origsig.parameters:
+            continue
+        else:
+            orig_params.insert(
+                0,
+                inspect.Parameter(
+                    arg,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                ),
+            )
+
+    function.__signature__ = origsig.replace(parameters=orig_params)  # type: ignore
 
 
 class SymbolParseError(Exception):
@@ -137,9 +165,10 @@ def lib_provider(
         functools.update_wrapper(
             wrapper,
             func,
-            assigned=("__name__", "__doc__", "__module__"),
+            assigned=("__name__", "__qualname__", "__doc__", "__module__"),
             updated=(),
         )
+        _add_params(wrapper, "arctic")
         return wrapper
 
     return decorator
@@ -298,6 +327,7 @@ def symbol_provider(
             assigned=("__name__", "__doc__", "__module__"),
             updated=(),
         )
+        _add_params(wrapper, "arctic", "start_date", "end_date")
 
         return wrapper
 
@@ -447,6 +477,13 @@ def symbol_publisher(
 
             return out
 
+        functools.update_wrapper(
+            wrapper,
+            func,
+            assigned=("__name__", "__doc__", "__module__"),
+            updated=(),
+        )
+        _add_params(wrapper, "arctic", "dry_run", "snapshot", "clean")  # type: ignore
         return wrapper
 
     return decorator
