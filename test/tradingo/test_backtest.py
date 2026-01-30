@@ -5,9 +5,10 @@ import pandas as pd
 import pytest
 
 from tradingo import backtest
+from tradingo.api import Tradingo
 
 
-def test_backtest_integration(tradingo):
+def test_backtest_integration(tradingo: Tradingo) -> None:
     pd.concat(
         backtest.backtest(
             portfolio=tradingo.portfolio.model.raw.shares(),
@@ -34,8 +35,8 @@ def test_backtest_integration(tradingo):
                 index=pd.bdate_range("2020-01-01", periods=260, freq="B"),
                 columns=["ABCD"],
             ).cumprod(),
-            "(prices_*portfolio_).squeeze().diff()",
-            "pd.Series(0.0, index=prices_.index)",
+            "(prices_*portfolio_).squeeze().diff().to_frame('ABCD')",
+            "pd.Series(0.0, index=prices_.index).to_frame('ABCD')",
         ),
         (
             pd.DataFrame(
@@ -48,8 +49,8 @@ def test_backtest_integration(tradingo):
                 index=pd.bdate_range("2020-01-01", periods=260, freq="B"),
                 columns=["ABCD"],
             ),
-            "pd.Series([np.nan, np.nan, *(prices_.diff()*portfolio_.shift()).squeeze().iloc[2:]], index=prices_.index)",
-            "pd.Series(0.0, index=prices_.index)",
+            "pd.Series([np.nan, np.nan, *(prices_.diff()*portfolio_.shift()).squeeze().iloc[2:]], index=prices_.index).to_frame('ABCD')",
+            "pd.Series(0.0, index=prices_.index).to_frame('ABCD')",
         ),
         (
             pd.DataFrame(
@@ -58,18 +59,24 @@ def test_backtest_integration(tradingo):
                 columns=["ABCD"],
             ).cumprod(),
             close_position(
-                pd.DataFrame(
+                pd.Series(
                     1,
                     index=pd.bdate_range("2020-01-01", periods=260, freq="B"),
-                    columns=["ABCD"],
+                    name="ABCD",
                 ).cumprod(),
-            ),
-            "pd.Series([*(prices_.diff()*portfolio_.shift()).squeeze().iloc[0:-1], np.nan], index=prices_.index)",
-            "pd.Series([*(0 for _ in range(0, 259)), 12.280985478055433], index=prices_.index)",
+            ).to_frame("ABCD"),
+            "pd.Series([*(prices_.diff()*portfolio_.shift()).squeeze().iloc[0:-1], np.nan], index=prices_.index).to_frame('ABCD')",
+            "pd.Series([*(0 for _ in range(0, 259)), 12.280985478055433], index=prices_.index).to_frame('ABCD')",
         ),
     ],
 )
-def test_backtest_smoke(tradingo, prices_, portfolio_, unrealised_pnl, realised_pnl):
+def test_backtest_smoke(
+    tradingo: Tradingo,
+    prices_: pd.DataFrame,
+    portfolio_: pd.DataFrame,
+    unrealised_pnl: pd.DataFrame,
+    realised_pnl: pd.Series,
+) -> None:
     dividends = pd.DataFrame(0, columns=prices_.columns, index=prices_.index)
     bt = pd.concat(
         backtest.backtest(
@@ -82,25 +89,25 @@ def test_backtest_smoke(tradingo, prices_, portfolio_, unrealised_pnl, realised_
         axis=1,
     )
 
-    actual_unrealised = bt["instrument.unrealised_pnl"].squeeze().diff()
+    actual_unrealised = pd.DataFrame(bt["instrument.unrealised_pnl"]).diff()
     expected_unrealised = (
         eval(unrealised_pnl) if isinstance(unrealised_pnl, str) else unrealised_pnl
     )
 
     pd.testing.assert_series_equal(
-        actual_unrealised,
-        expected_unrealised.astype("float32"),
+        pd.Series(actual_unrealised.squeeze()),
+        pd.Series(expected_unrealised.astype("float32").squeeze()),
         check_names=False,
         check_freq=False,
         rtol=1e-4,
     )
-    actual_realised = bt["instrument.realised_pnl"].squeeze().diff().fillna(0.0)
+    actual_realised = bt["instrument.realised_pnl"].diff().fillna(0.0)
     expected_realised = (
         eval(realised_pnl) if isinstance(realised_pnl, str) else realised_pnl
     )
     pd.testing.assert_series_equal(
-        actual_realised,
-        expected_realised.astype("float32"),
+        pd.Series(actual_realised.squeeze()),
+        pd.Series(expected_realised.astype("float32").squeeze()),
         check_names=False,
         check_freq=False,
         rtol=1e-4,
@@ -140,12 +147,12 @@ def test_backtest_smoke(tradingo, prices_, portfolio_, unrealised_pnl, realised_
     ),
 )
 def test_backtest_all_closed(
-    position,
-    prices,
-    unrealised_pnl,
-    realised_pnl,
-    total_pnl,
-):
+    position: pd.DataFrame,
+    prices: pd.DataFrame,
+    unrealised_pnl: pd.DataFrame,
+    realised_pnl: pd.DataFrame,
+    total_pnl: pd.DataFrame,
+) -> None:
     bt = pd.concat(
         backtest.backtest(
             portfolio=position,
@@ -158,17 +165,17 @@ def test_backtest_all_closed(
     )
 
     pd.testing.assert_frame_equal(
-        bt["instrument.unrealised_pnl"],
+        bt[["instrument.unrealised_pnl"]].droplevel(0, axis=1),
         unrealised_pnl,
         check_dtype=False,
     )
     pd.testing.assert_frame_equal(
-        bt["instrument.realised_pnl"],
+        bt[["instrument.realised_pnl"]].droplevel(0, axis=1),
         realised_pnl,
         check_dtype=False,
     )
     pd.testing.assert_frame_equal(
-        bt["instrument.total_pnl"],
+        bt[["instrument.total_pnl"]].droplevel(0, axis=1),
         total_pnl,
         check_dtype=False,
     )

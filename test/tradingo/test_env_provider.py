@@ -2,6 +2,7 @@ import dataclasses
 import json
 import os
 import pathlib
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -9,7 +10,10 @@ import pytest
 from tradingo.settings import EnvProvider, EnvProviderError
 
 
-def test_env_provider(tmp_path):
+def test_env_provider(tmp_path: pathlib.Path) -> None:
+
+    env: dict[str, Any]
+
     @dataclasses.dataclass
     class Settings1(EnvProvider):
         parameter: int
@@ -34,12 +38,12 @@ def test_env_provider(tmp_path):
         app_prefix = "TRADINGO"
 
     env = {"TRADINGO_PARAMETER": "true"}
-    s = Settings2.from_env(env=env)
-    assert s.parameter
+    s2 = Settings2.from_env(env=env)
+    assert s2.parameter
 
     env = {"TRADINGO_PARAMETER": "false"}
-    s = Settings2.from_env(env=env)
-    assert not s.parameter
+    s2 = Settings2.from_env(env=env)
+    assert not s2.parameter
 
     @dataclasses.dataclass
     class Settings3(EnvProvider):
@@ -55,7 +59,7 @@ def test_env_provider(tmp_path):
         EnvProviderError,
         match="Missing settings: 'param1', 'param2', 'param3', and 'param4'",
     ):
-        s = Settings3.from_env(env=env)
+        s3 = Settings3.from_env(env=env)
 
     s3 = Settings3.from_env(
         env={
