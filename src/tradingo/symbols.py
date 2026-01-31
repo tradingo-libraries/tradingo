@@ -368,7 +368,7 @@ class PublishedFunction(Protocol[P, Ret]):
         clean: bool = False,
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> pd.DataFrame | tuple[pd.DataFrame, ...]: ...
+    ) -> pd.DataFrame | None: ...
 
 
 def symbol_publisher(
@@ -390,7 +390,7 @@ def symbol_publisher(
             clean: bool = False,
             *args: P.args,
             **kwargs: P.kwargs,
-        ) -> pd.DataFrame | tuple[pd.DataFrame, ...]:
+        ) -> pd.DataFrame | None:
             if args:
                 raise ValueError("Keyword only arguments.")
             out: tuple[pd.DataFrame, ...] | pd.DataFrame = _envoke_symbology_function(
@@ -475,7 +475,7 @@ def symbol_publisher(
                 assert isinstance(out, tuple)
                 return pd.concat(out, keys=formatted_symbols, axis=1)
 
-            return out
+            return None
 
         functools.update_wrapper(
             wrapper,
