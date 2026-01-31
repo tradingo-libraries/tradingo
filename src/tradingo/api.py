@@ -83,7 +83,7 @@ class _Read:
         snapshot_name: str | None = None,
         regex: str = "",
     ) -> list[str]:
-        sub_symbol = re.escape(".".join(self._path_so_far))
+        sub_symbol = re.escape(self._path)
         if regex and sub_symbol:
             sub_symbol = re.escape(".").join((sub_symbol, regex))
         elif regex:
