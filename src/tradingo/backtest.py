@@ -135,4 +135,4 @@ def backtest(
         pd.DataFrame(backtest.loc[:, f]) for f in BACKTEST_FIELDS if f != "date"
     )
 
-    return (pd.DataFrame(summary),) + backtest_fields
+    return (pd.DataFrame(summary), *backtest_fields)

@@ -7,7 +7,7 @@ import os
 import pathlib
 import typing
 from importlib import import_module
-from typing import Any, MutableMapping, Optional, Self, TypeVar
+from typing import Any, MutableMapping, Optional, Self
 
 import jinja2
 import pandas as pd
@@ -31,9 +31,6 @@ def getbool_(val: str | int | bool) -> bool:
     if val.lower() in {"false", "no", "0"}:
         return False
     raise ValueError(val)
-
-
-T = TypeVar("T")
 
 
 def get_cls(
