@@ -1,6 +1,7 @@
 """static instruments data accessors."""
 
 import logging
+from typing import Any
 
 import pandas as pd
 from yfinance import Ticker
@@ -9,6 +10,21 @@ from tradingo.sampling.ig import get_ig_service
 from tradingo.sampling.yf import currency_to_symbol
 
 logger = logging.getLogger(__name__)
+
+
+def _flatten_dict(
+    obj: dict[str, Any],
+    parent_key: str = "",
+    sep: str = ".",
+) -> dict[str, Any]:
+    items: list[tuple[str, object]] = []
+    for key, value in obj.items():
+        new_key = sep.join((parent_key, key)) if parent_key else key
+        if isinstance(value, dict):
+            items.extend(_flatten_dict(value, new_key, sep).items())
+        else:
+            items.append((new_key, value))
+    return dict(items)
 
 
 def download_instruments(
@@ -32,7 +48,6 @@ def download_instruments(
         if isinstance(tickers, str) and tickers.startswith("http"):
             tickers = pd.read_html(tickers)[0][index_col].to_list()
         if isinstance(tickers, str) and tickers.startswith("file"):
-            breakpoint()
             tickers = pd.read_csv(tickers.split("://")[-1])[index_col].to_list()
         return (
             pd.DataFrame({t: Ticker(currency_to_symbol(t)).get_info() for t in tickers})
@@ -44,8 +59,10 @@ def download_instruments(
         service = get_ig_service()
 
         return (
-            pd.DataFrame((service.fetch_market_by_epic(e)["instrument"] for e in epics))
-            .set_index("epic")
+            pd.DataFrame(
+                (_flatten_dict(i) for i in service.fetch_markets_by_epics(epics))
+            )
+            .set_index("instrument.epic")
             .rename_axis("Symbol", axis=0)
         )
 
