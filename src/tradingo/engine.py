@@ -51,12 +51,33 @@ def get_current_positions(
     return cast(pd.DataFrame, all_positions)
 
 
+def update_open_positions(
+    service: IGService,
+    epic: str,
+    new_level: float | None,
+    current_position: pd.DataFrame,
+) -> None:
+
+    if new_level is not None and np.isnan(new_level):
+        new_level = None
+
+    positions = cast(pd.DataFrame, current_position.loc[epic])
+
+    for deal_id, _ in positions.sort_values("size").iterrows():
+        service.update_open_position(
+            limit_level=None,
+            stop_level=new_level,
+            deal_id=deal_id,
+        )
+
+
 def reduce_open_positions(
     service: IGService,
     epic: str,
     quantity: int,
+    current_position: pd.DataFrame,
 ) -> None:
-    positions = get_current_positions(service).loc[epic]
+    positions = current_position.loc[epic]
 
     quantity_cxd = 0.0
 
@@ -105,20 +126,34 @@ def get_currency(instrument: pd.Series) -> str:
 def adjust_position_sizes(
     instruments: pd.DataFrame,
     target_positions: pd.DataFrame,
+    stop_levels: pd.DataFrame | None,
     service: IGService | None = None,
+    current_positions: pd.DataFrame | None = None,
 ) -> None:
     service = service or get_ig_service()
-    current_positions = get_current_positions(service)
+    if current_positions is None:
+        current_positions = get_current_positions(service)
 
     current_sizes: pd.Series[float] = (
-        current_positions.groupby("epic")["size"]
+        current_positions.groupby(level="epic")["size"]
         .sum()
         .reindex(target_positions.columns)
         .fillna(0.0)
     )
 
+    current_stop_level: pd.Series[float] = (
+        current_positions.groupby(level="epic")["size"]
+        .first()
+        .reindex(target_positions.columns)
+    )
+
     for epic in target_positions:
         latest_target = target_positions[epic].iloc[-1]
+        if stop_levels is not None:
+            latest_stop = float(stop_levels[epic].iloc[-1])
+        else:
+            latest_stop = float(np.nan)
+
         current_position = current_sizes.loc[str(epic)]
 
         # changing sides, close existing
@@ -159,7 +194,7 @@ def adjust_position_sizes(
                 stop_distance=None,
                 trailing_stop=None,
                 trailing_stop_increment=None,
-                stop_level=None,
+                stop_level=latest_stop,
             )
 
             logger.info(result)
@@ -174,11 +209,11 @@ def adjust_position_sizes(
                 latest_target,
                 epic,
             )
-
             reduce_open_positions(
                 service,
                 epic=str(epic),
                 quantity=reduce_by,
+                current_position=current_positions,
             )
         else:
             logger.info(
@@ -186,4 +221,11 @@ def adjust_position_sizes(
                 current_position,
                 epic,
             )
+
+        # Only update stop levels if there are existing positions
+        if (
+            not pd.isna(current_stop_level.loc[str(epic)])
+            and current_stop_level.loc[str(epic)] != latest_stop
+        ):
+            update_open_positions(service, str(epic), latest_stop, current_positions)
     service.session.close()
