@@ -60,7 +60,7 @@ def download_instruments(
 
         return (
             pd.DataFrame(
-                (_flatten_dict(i) for i in service.fetch_markets_by_epics(epics))
+                (_flatten_dict(service.fetch_market_by_epic(e)) for e in epics)
             )
             .set_index("instrument.epic")
             .rename_axis("Symbol", axis=0)

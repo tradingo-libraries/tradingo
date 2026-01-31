@@ -606,25 +606,22 @@ class TestDownloadInstruments:
         mock_service = MagicMock()
         mock_get_service.return_value = mock_service
 
-        def fetch_markets_side_effect(epics: list[str]) -> list[dict[str, Any]]:
-            return [
-                {
-                    "instrument": {
-                        "epic": e,
-                        "name": f"Market {e}",
-                        "type": "INDICES",
-                    }
+        def fetch_market_side_effect(epic: str) -> dict[str, Any]:
+            return {
+                "instrument": {
+                    "epic": epic,
+                    "name": f"Market {epic}",
+                    "type": "INDICES",
                 }
-                for e in epics
-            ]
+            }
 
-        mock_service.fetch_markets_by_epics.side_effect = fetch_markets_side_effect
+        mock_service.fetch_market_by_epic.side_effect = fetch_market_side_effect
 
         result = download_instruments(epics=["EPIC1", "EPIC2"])
 
         assert len(result) == 2
         assert result.index.name == "Symbol"
-        assert mock_service.fetch_markets_by_epics.call_count == 1
+        assert mock_service.fetch_market_by_epic.call_count == 2
 
     def test_download_instruments_no_source_raises(self) -> None:
         from tradingo.sampling.instruments import download_instruments
