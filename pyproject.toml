@@ -85,8 +85,6 @@ exclude = [
 
 [[tool.mypy.overrides]]
 module = [
-  # "pandas",
-  # "pandas.*",
   "pandas.plotting._matplotlib.style",
   "arcticdb",
   "arcticdb.*",
