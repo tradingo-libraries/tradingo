@@ -142,11 +142,11 @@ def create_universe(
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 0], axis=1)
     return (
-        result[["Open"]],
-        result[["High"]],
-        result[["Low"]],
-        result[["Close"]],
-        result[["Volume"]],
+        cast(pd.DataFrame, result["Open"]),
+        cast(pd.DataFrame, result["High"]),
+        cast(pd.DataFrame, result["Low"]),
+        cast(pd.DataFrame, result["Close"]),
+        cast(pd.DataFrame, result["Volume"]),
     )
 
 
