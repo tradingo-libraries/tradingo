@@ -332,6 +332,7 @@ def stop_loss(
         - Stop level = current_price + (threshold - pnl) / position
                      = 100 + (-50 - 0) / 10 = 95
     """
+    ask, bid = ask.reindex_like(position), bid.reindex_like(position)
     if mode == "max-drawdown":
         # Calculate cumulative PnL: price change * lagged position
         if not aum:
