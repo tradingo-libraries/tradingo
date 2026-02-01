@@ -31,9 +31,12 @@ def backtest(
     stop_loss: Optional[pd.DataFrame] = None,
     price_ffill_limit: int = 0,
 ) -> tuple[pd.DataFrame, ...]:
-    idx = cast(pd.DatetimeIndex, bid_close.index)
-    bid_close = bid_close.groupby(idx.date).ffill(limit=price_ffill_limit)
-    ask_close = ask_close.groupby(idx).ffill(limit=price_ffill_limit)
+    bid_close = bid_close.groupby(cast(pd.DatetimeIndex, bid_close.index).date).ffill(
+        limit=price_ffill_limit
+    )
+    ask_close = ask_close.groupby(cast(pd.DatetimeIndex, ask_close.index).date).ffill(
+        limit=price_ffill_limit
+    )
 
     mid_close = (bid_close + ask_close) / 2
     bid_close, ask_close = (
