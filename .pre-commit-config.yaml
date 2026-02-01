@@ -3,7 +3,7 @@ repos:
     hooks:
       - id: black
         name: black
-        entry: "uv run black"
+        entry: "uv run black --check"
         language: system
         types: [python]
         args: [--config=pyproject.toml]

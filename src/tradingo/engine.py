@@ -1,6 +1,6 @@
 import argparse
 import logging
-from typing import Hashable, cast
+from typing import Any, Hashable, cast
 
 import numpy as np
 import pandas as pd
@@ -16,7 +16,7 @@ def close_position(
     position: pd.Series,
     svc: IGService,
     size: int | float | None = None,
-) -> None:
+) -> dict[str, Any]:
     direction = "BUY" if position.direction == "SELL" else "SELL"
 
     result = svc.close_open_position(
@@ -31,13 +31,20 @@ def close_position(
     )
 
     logger.info(result)
+    return dict(result)
 
 
-def close_all_open_position(positions: pd.DataFrame, svc: IGService) -> None:
+def close_all_open_position(
+    positions: pd.DataFrame, svc: IGService
+) -> list[dict[str, Any]]:
     epic_positions = positions
+    actions = []
 
     for deal_id, position in epic_positions.iterrows():
-        close_position(deal_id=deal_id, position=position, svc=svc)
+        result = close_position(deal_id=deal_id, position=position, svc=svc)
+        actions.append(result)
+
+    return actions
 
 
 def get_current_positions(
@@ -56,7 +63,8 @@ def update_open_positions(
     epic: str,
     new_level: float | None,
     current_position: pd.DataFrame,
-) -> None:
+) -> list[dict[str, Any]]:
+    actions = []
 
     if new_level is not None and np.isnan(new_level):
         new_level = None
@@ -64,11 +72,14 @@ def update_open_positions(
     positions = cast(pd.DataFrame, current_position.loc[epic])
 
     for deal_id, _ in positions.sort_values("size").iterrows():
-        service.update_open_position(
+        result = service.update_open_position(
             limit_level=None,
             stop_level=new_level,
             deal_id=deal_id,
         )
+        actions.append(dict(result))
+
+    return actions
 
 
 def reduce_open_positions(
@@ -76,8 +87,9 @@ def reduce_open_positions(
     epic: str,
     quantity: int,
     current_position: pd.DataFrame,
-) -> None:
+) -> list[dict[str, Any]]:
     positions = current_position.loc[epic]
+    actions = []
 
     quantity_cxd = 0.0
 
@@ -86,17 +98,20 @@ def reduce_open_positions(
     ):
         to_cancel = min(position["size"], quantity - quantity_cxd)
 
-        close_position(
+        result = close_position(
             deal_id=deal_id,
             position=position,
             svc=service,
             size=to_cancel,
         )
+        actions.append(result)
 
         quantity_cxd += to_cancel
 
         if quantity_cxd >= quantity:
             break
+
+    return actions
 
 
 def cli_app() -> argparse.ArgumentParser:
@@ -129,10 +144,12 @@ def adjust_position_sizes(
     stop_levels: pd.DataFrame | None,
     service: IGService | None = None,
     current_positions: pd.DataFrame | None = None,
-) -> None:
+) -> pd.DataFrame:
     service = service or get_ig_service()
     if current_positions is None:
         current_positions = get_current_positions(service)
+
+    actions: list[dict[str, Any]] = []
 
     current_sizes: pd.Series[float] = (
         current_positions.groupby(level="epic")["size"]
@@ -159,10 +176,11 @@ def adjust_position_sizes(
         # changing sides, close existing
         if current_position and np.sign(current_position) != np.sign(latest_target):
             logger.info("Closing open position of %s for %s", current_position, epic)
-            close_all_open_position(
+            close_actions = close_all_open_position(
                 pd.DataFrame(current_positions.loc[str(epic)]),
                 service,
             )
+            actions.extend(close_actions)
             current_position = 0.0
 
         # increasing position
@@ -198,6 +216,7 @@ def adjust_position_sizes(
             )
 
             logger.info(result)
+            actions.append(dict(result))
 
         elif abs(current_position) > abs(latest_target):
             reduce_by = abs(current_position - latest_target)
@@ -209,12 +228,13 @@ def adjust_position_sizes(
                 latest_target,
                 epic,
             )
-            reduce_open_positions(
+            reduce_actions = reduce_open_positions(
                 service,
                 epic=str(epic),
                 quantity=reduce_by,
                 current_position=current_positions,
             )
+            actions.extend(reduce_actions)
         else:
             logger.info(
                 "%s matches target, nothing to do for %s.",
@@ -227,5 +247,10 @@ def adjust_position_sizes(
             not pd.isna(current_stop_level.loc[str(epic)])
             and current_stop_level.loc[str(epic)] != latest_stop
         ):
-            update_open_positions(service, str(epic), latest_stop, current_positions)
+            update_actions = update_open_positions(
+                service, str(epic), latest_stop, current_positions
+            )
+            actions.extend(update_actions)
+
     service.session.close()
+    return pd.DataFrame(actions).set_index("date").rename_axis("DateTime")
