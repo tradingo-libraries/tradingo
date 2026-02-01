@@ -10,6 +10,7 @@ from tradingo.sampling.yf import (
     _get_ticker,
     adjust_fx_series,
     convert_prices_to_ccy,
+    create_universe,
     currency_to_symbol,
     sample_equity,
     symbol_to_currency,
@@ -639,8 +640,6 @@ class TestYfCreateUniverse:
     """Tests for Yahoo Finance create_universe function."""
 
     def test_create_universe_reads_from_library(self) -> None:
-        from tradingo.sampling.yf import create_universe
-
         mock_lib = MagicMock()
 
         # Create mock price data
@@ -675,6 +674,53 @@ class TestYfCreateUniverse:
 
         assert len(result) == 5  # Open, High, Low, Close, Volume
         mock_lib.read.assert_called()
+
+    def test_create_universe_returns_single_index_columns(self) -> None:
+        """Ensure create_universe returns DataFrames with single-level column index."""
+        mock_lib = MagicMock()
+
+        # Create mock price data for multiple tickers
+        price_data = pd.DataFrame(
+            {
+                "Open": [100.0, 101.0],
+                "High": [102.0, 103.0],
+                "Low": [99.0, 100.0],
+                "Close": [101.0, 102.0],
+                "Volume": [1000, 1100],
+            },
+            index=pd.DatetimeIndex(["2020-01-01", "2020-01-02"], tz="UTC", name="Date"),
+        )
+
+        mock_versioned_item = MagicMock()
+        mock_versioned_item.data = price_data
+        mock_lib.read.return_value = mock_versioned_item
+        mock_lib.list_symbols.return_value = ["sample.AAPL", "sample.MSFT"]
+
+        instruments = pd.DataFrame(
+            {"name": ["Apple", "Microsoft"]},
+            index=pd.Index(["AAPL", "MSFT"], name="Symbol"),
+        )
+
+        open_df, high_df, low_df, close_df, volume_df = create_universe.__wrapped__(  # type: ignore
+            mock_lib,
+            instruments,
+            pd.Timestamp("2020-01-03", tz="UTC"),
+            pd.Timestamp("2020-01-01", tz="UTC"),
+        )
+
+        # Verify all returned DataFrames have single-level column index (not MultiIndex)
+        for df, name in [
+            (open_df, "Open"),
+            (high_df, "High"),
+            (low_df, "Low"),
+            (close_df, "Close"),
+            (volume_df, "Volume"),
+        ]:
+            assert not isinstance(
+                df.columns, pd.MultiIndex
+            ), f"{name} DataFrame has MultiIndex columns, expected single-level Index"
+            assert isinstance(df.columns, pd.Index)
+            assert list(df.columns) == ["AAPL", "MSFT"]
 
 
 class TestIgCreateUniverse:
