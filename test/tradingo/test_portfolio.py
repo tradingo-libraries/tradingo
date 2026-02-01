@@ -1135,7 +1135,12 @@ class TestStopLoss:
         ask = pd.DataFrame({"SYM": [101.0, 102.0, 100.0, 98.0, 96.0]}, index=dates)
 
         _, stop_levels = stop_loss(
-            position, bid, ask, aum=10000.0, max_percent=0.05, mode="price"
+            position,
+            bid,
+            ask,
+            aum=10000.0,
+            max_percent=0.05,
+            mode="entry-price",
         )
 
         # Entry at bid=100, stop level should be 100 * (1 - 0.05) = 95
@@ -1155,7 +1160,12 @@ class TestStopLoss:
         ask = pd.DataFrame({"SYM": [101.0, 102.0, 104.0, 106.0, 108.0]}, index=dates)
 
         _, stop_levels = stop_loss(
-            position, bid, ask, aum=10000.0, max_percent=0.05, mode="price"
+            position,
+            bid,
+            ask,
+            aum=10000.0,
+            max_percent=0.05,
+            mode="entry-price",
         )
 
         # Entry at ask=102, stop level should be 102 * (1 + 0.05) = 107.1
@@ -1173,7 +1183,12 @@ class TestStopLoss:
         ask = pd.DataFrame({"SYM": [101.0, 102.0, 100.0, 98.0, 98.0]}, index=dates)
 
         stop_lossed_position, _ = stop_loss(
-            position, bid, ask, aum=10000.0, max_percent=0.05, mode="price"
+            position,
+            bid,
+            ask,
+            aum=10000.0,
+            max_percent=0.05,
+            mode="entry-price",
         )
 
         # Position should be maintained (bid 96 >= stop 95)
@@ -1191,7 +1206,12 @@ class TestStopLoss:
         ask = pd.DataFrame({"SYM": [101.0, 102.0, 100.0, 96.0, 94.0]}, index=dates)
 
         stop_lossed_position, _ = stop_loss(
-            position, bid, ask, aum=10000.0, max_percent=0.05, mode="price"
+            position,
+            bid,
+            ask,
+            aum=10000.0,
+            max_percent=0.05,
+            mode="entry-price",
         )
 
         # Position should be zeroed from t=3 onwards (bid 94 < stop 95)
@@ -1210,7 +1230,12 @@ class TestStopLoss:
         ask = pd.DataFrame({"SYM": [101.0, 102.0, 104.0, 106.0, 106.0]}, index=dates)
 
         stop_lossed_position, _ = stop_loss(
-            position, bid, ask, aum=10000.0, max_percent=0.05, mode="price"
+            position,
+            bid,
+            ask,
+            aum=10000.0,
+            max_percent=0.05,
+            mode="entry-price",
         )
 
         # Position should be maintained (ask 106 <= stop 107.1)
@@ -1228,7 +1253,12 @@ class TestStopLoss:
         ask = pd.DataFrame({"SYM": [101.0, 102.0, 104.0, 108.0, 108.0]}, index=dates)
 
         stop_lossed_position, _ = stop_loss(
-            position, bid, ask, aum=10000.0, max_percent=0.05, mode="price"
+            position,
+            bid,
+            ask,
+            aum=10000.0,
+            max_percent=0.05,
+            mode="entry-price",
         )
 
         # Position should be zeroed from t=3 onwards (ask 108 > stop 107.1)
@@ -1244,7 +1274,12 @@ class TestStopLoss:
         ask = pd.DataFrame({"SYM": [102.0, 52.0, 27.0, 12.0, 7.0]}, index=dates)
 
         stop_lossed_position, _ = stop_loss(
-            position, bid, ask, aum=10000.0, max_percent=0.05, mode="price"
+            position,
+            bid,
+            ask,
+            aum=10000.0,
+            max_percent=0.05,
+            mode="entry-price",
         )
 
         pd.testing.assert_frame_equal(stop_lossed_position, position)
@@ -1277,7 +1312,12 @@ class TestStopLoss:
         )
 
         stop_lossed_position, _ = stop_loss(
-            position, bid, ask, aum=10000.0, max_percent=0.05, mode="price"
+            position,
+            bid,
+            ask,
+            aum=10000.0,
+            max_percent=0.05,
+            mode="entry-price",
         )
 
         # SYM_A: stopped at t=3 (bid 94 < stop 95)
@@ -1383,7 +1423,10 @@ class TestAggregatePortfolio:
     @pytest.fixture
     def simple_dates(self) -> pd.DatetimeIndex:
         """Simple date index for tests."""
-        return pd.DatetimeIndex(["2024-01-01", "2024-01-02", "2024-01-03"])
+        return pd.DatetimeIndex(
+            ["2024-01-01", "2024-01-02", "2024-01-03"],
+            name="DateTime",
+        )
 
     @pytest.mark.parametrize(
         "prices_data,model_weights,gearing,models_data,expected_data",
