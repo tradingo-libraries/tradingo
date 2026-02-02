@@ -487,16 +487,15 @@ def stop_loss(
     else:
         raise NotImplementedError(mode)
 
-    return (
-        stop_lossed_position,
-        cast(pd.DataFrame, np.maximum(stop_levels, 0.0))
-        .replace(0.0, np.nan)
-        .where(
-            # Long position, not below 90% of original entry level
-            (((0.9 * passive_entry_level) < passive_entry_level))
-            # Short position, not above 110% of original entry level
-            & ((passive_entry_level < (1.1 * passive_entry_level)))
-        )
-        .groupby(idx.date)
-        .ffill(),
+    # Forward fill entry level for clamping calculations
+    idx = cast(pd.DatetimeIndex, passive_entry_level.index)
+    entry_ffill = passive_entry_level.groupby(idx.date).ffill()
+    lower_bound = entry_ffill * 0.90
+    upper_bound = entry_ffill * 1.10
+
+    # Clamp stop levels to be within 90-110% of entry price
+    clamped_stop = cast(
+        pd.DataFrame, np.maximum(np.minimum(stop_levels, upper_bound), lower_bound)
     )
+
+    return stop_lossed_position, clamped_stop

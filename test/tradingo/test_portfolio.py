@@ -1408,10 +1408,12 @@ class TestStopLoss:
         # Note: pnl at t=1 is 0 because diff() gives NaN for first row
         assert stop_levels["SYM"].iloc[1] == pytest.approx(96.0, abs=0.1)
 
+        # With extreme AUM, raw stop would be far below entry, but gets clamped to 90%
         _, stop_levels = stop_loss(
             position, bid, ask, aum=100000.0, max_percent=0.05, mode="max-drawdown"
         )
-        assert np.isnan(stop_levels["SYM"].iloc[1])
+        # Entry ask is 102, so 90% floor is 91.8
+        assert stop_levels["SYM"].iloc[1] == pytest.approx(91.8, abs=0.1)
 
     def test_notional_loss_long_not_stopped(self, dates: pd.DatetimeIndex) -> None:
         """Long position kept when notional loss stays within threshold."""
@@ -1507,6 +1509,63 @@ class TestStopLoss:
 
         with pytest.raises(ValueError, match="Missing max_notional"):
             stop_loss(position, bid, ask, max_percent=0.0, mode="notional-loss")
+
+    @pytest.mark.parametrize(
+        "mode,mode_kwargs",
+        [
+            ("entry-price", {"max_percent": 0.05, "aum": 1000.0}),
+            ("max-drawdown", {"max_percent": 0.05, "aum": 1000.0}),
+            ("notional-loss", {"max_percent": 0.0, "max_notional": 50.0}),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "position_sign,position_label",
+        [
+            (1.0, "long"),
+            (-1.0, "short"),
+        ],
+    )
+    def test_stop_level_within_90_110_percent_of_entry(
+        self,
+        dates: pd.DatetimeIndex,
+        mode: str,
+        mode_kwargs: dict[str, float],
+        position_sign: float,
+        position_label: str,
+    ) -> None:
+        """Stop levels should be within 90-110% of entry price for all modes."""
+        from tradingo.portfolio import stop_loss
+
+        # Entry price is ~100 (mid of bid=100, ask=102 at t=1)
+        entry_mid = 101.0
+        position = pd.DataFrame(
+            {
+                "SYM": [
+                    0.0,
+                    1.0 * position_sign,
+                    1.0 * position_sign,
+                    1.0 * position_sign,
+                    1.0 * position_sign,
+                ]
+            },
+            index=dates,
+        )
+        # Prices stay relatively stable around entry
+        bid = pd.DataFrame({"SYM": [99.0, 100.0, 99.0, 98.0, 97.0]}, index=dates)
+        ask = pd.DataFrame({"SYM": [101.0, 102.0, 101.0, 100.0, 99.0]}, index=dates)
+
+        _, stop_levels = stop_loss(position, bid, ask, mode=mode, **mode_kwargs)  # type: ignore[arg-type]
+
+        # Check stop levels at times when position is open (t=1 onwards)
+        for i in range(1, len(dates)):
+            stop_val = stop_levels["SYM"].iloc[i]
+            if pd.notna(stop_val):
+                lower_bound = entry_mid * 0.90
+                upper_bound = entry_mid * 1.10
+                assert lower_bound <= stop_val <= upper_bound, (
+                    f"Stop level {stop_val} at t={i} outside 90-110% of entry {entry_mid} "
+                    f"(bounds: {lower_bound}-{upper_bound}) for {position_label} {mode}"
+                )
 
 
 class TestAggregatePortfolio:
