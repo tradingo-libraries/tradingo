@@ -1139,7 +1139,7 @@ class TestStopLoss:
             position,
             bid,
             ask,
-            aum=10000.0,
+            aum=1000.0,
             max_percent=0.05,
             mode="entry-price",
         )
@@ -1407,6 +1407,106 @@ class TestStopLoss:
         # At t=1: mid=101, pnl=0 (first period), stop = 101 + (-50-0)/10 = 96
         # Note: pnl at t=1 is 0 because diff() gives NaN for first row
         assert stop_levels["SYM"].iloc[1] == pytest.approx(96.0, abs=0.1)
+
+        _, stop_levels = stop_loss(
+            position, bid, ask, aum=100000.0, max_percent=0.05, mode="max-drawdown"
+        )
+        assert np.isnan(stop_levels["SYM"].iloc[1])
+
+    def test_notional_loss_long_not_stopped(self, dates: pd.DatetimeIndex) -> None:
+        """Long position kept when notional loss stays within threshold."""
+        from tradingo.portfolio import stop_loss
+
+        # max_notional=100 means max allowed loss is 100
+        # Position of 1 unit, price drops from 100 to 95 = loss of 5 (within threshold)
+        position = pd.DataFrame({"SYM": [0.0, 1.0, 1.0, 1.0, 1.0]}, index=dates)
+        bid = pd.DataFrame({"SYM": [99.0, 100.0, 98.0, 96.0, 95.0]}, index=dates)
+        ask = pd.DataFrame({"SYM": [101.0, 102.0, 100.0, 98.0, 97.0]}, index=dates)
+
+        stop_lossed_position, _ = stop_loss(
+            position,
+            bid,
+            ask,
+            max_notional=100.0,
+            max_percent=0.0,
+            mode="notional-loss",
+        )
+
+        # Loss is only 5 (mid drops from 101 to 96), threshold is 100
+        pd.testing.assert_frame_equal(stop_lossed_position, position)
+
+    def test_notional_loss_long_stopped(self, dates: pd.DatetimeIndex) -> None:
+        """Long position closed when notional loss exceeds threshold."""
+        from tradingo.portfolio import stop_loss
+
+        # max_notional=50 means max allowed loss is 50
+        # Position of 10 units, price drops from 100 to 90 = loss of 100 (exceeds threshold)
+        position = pd.DataFrame({"SYM": [0.0, 10.0, 10.0, 10.0, 10.0]}, index=dates)
+        bid = pd.DataFrame({"SYM": [99.0, 100.0, 98.0, 92.0, 88.0]}, index=dates)
+        ask = pd.DataFrame({"SYM": [101.0, 102.0, 100.0, 94.0, 90.0]}, index=dates)
+        # Mid prices: 100, 101, 99, 93, 89
+
+        stop_lossed_position, _ = stop_loss(
+            position, bid, ask, max_notional=50.0, max_percent=0.0, mode="notional-loss"
+        )
+
+        # At t=3: cumulative loss = (99-101)*10 + (93-99)*10 = -20 + -60 = -80 > -50 threshold
+        # Position should be stopped
+        expected = pd.DataFrame({"SYM": [0.0, 10.0, 10.0, 0.0, 0.0]}, index=dates)
+        pd.testing.assert_frame_equal(stop_lossed_position, expected)
+
+    def test_notional_loss_short_stopped(self, dates: pd.DatetimeIndex) -> None:
+        """Short position closed when notional loss exceeds threshold."""
+        from tradingo.portfolio import stop_loss
+
+        # Short position of -10 units, price rises = loss
+        # max_notional=50 means max allowed loss is 50
+        position = pd.DataFrame({"SYM": [0.0, -10.0, -10.0, -10.0, -10.0]}, index=dates)
+        bid = pd.DataFrame({"SYM": [99.0, 100.0, 102.0, 108.0, 112.0]}, index=dates)
+        ask = pd.DataFrame({"SYM": [101.0, 102.0, 104.0, 110.0, 114.0]}, index=dates)
+        # Mid prices: 100, 101, 103, 109, 113
+
+        stop_lossed_position, _ = stop_loss(
+            position, bid, ask, max_notional=50.0, max_percent=0.0, mode="notional-loss"
+        )
+
+        # For short, rising prices = loss
+        # At t=3: cumulative loss = (103-101)*(-10) + (109-103)*(-10) = -20 + -60 = -80 > -50 threshold
+        expected = pd.DataFrame({"SYM": [0.0, -10.0, -10.0, 0.0, 0.0]}, index=dates)
+        pd.testing.assert_frame_equal(stop_lossed_position, expected)
+
+    def test_notional_loss_stop_level_calculation(
+        self, dates: pd.DatetimeIndex
+    ) -> None:
+        """Stop level is price at which notional loss threshold would be hit."""
+        from tradingo.portfolio import stop_loss
+
+        # Position of 10 units at mid price 101, max_notional=50
+        # Threshold = -50, current PnL = 0 at t=1
+        # Stop level = 101 + (-50 - 0) / 10 = 101 - 5 = 96
+        position = pd.DataFrame({"SYM": [0.0, 10.0, 10.0, 10.0, 10.0]}, index=dates)
+        bid = pd.DataFrame({"SYM": [99.0, 100.0, 100.0, 100.0, 100.0]}, index=dates)
+        ask = pd.DataFrame({"SYM": [101.0, 102.0, 102.0, 102.0, 102.0]}, index=dates)
+
+        _, stop_levels = stop_loss(
+            position, bid, ask, max_notional=50.0, max_percent=0.0, mode="notional-loss"
+        )
+
+        # At t=1: mid=101, pnl=0 (first period), stop = 101 + (-50-0)/10 = 96
+        assert stop_levels["SYM"].iloc[1] == pytest.approx(96.0, abs=0.1)
+
+    def test_notional_loss_missing_max_notional_raises(
+        self, dates: pd.DatetimeIndex
+    ) -> None:
+        """notional-loss mode requires max_notional parameter."""
+        from tradingo.portfolio import stop_loss
+
+        position = pd.DataFrame({"SYM": [0.0, 10.0, 10.0]}, index=dates[:3])
+        bid = pd.DataFrame({"SYM": [99.0, 100.0, 98.0]}, index=dates[:3])
+        ask = pd.DataFrame({"SYM": [101.0, 102.0, 100.0]}, index=dates[:3])
+
+        with pytest.raises(ValueError, match="Missing max_notional"):
+            stop_loss(position, bid, ask, max_percent=0.0, mode="notional-loss")
 
 
 class TestAggregatePortfolio:

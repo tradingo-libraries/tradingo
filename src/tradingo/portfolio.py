@@ -334,8 +334,9 @@ def stop_loss(
     bid: pd.DataFrame,
     ask: pd.DataFrame,
     max_percent: float,
-    mode: Literal["max-drawdown", "entry-price"],
+    mode: Literal["max-drawdown", "entry-price", "notional-loss"],
     aum: float | None = None,
+    max_notional: float | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Calculate stop loss levels and apply them to positions.
 
@@ -381,6 +382,9 @@ def stop_loss(
     :param mode: Stop loss calculation mode:
         - "entry-price": Stop based on percentage price move from entry.
         - "max-drawdown": Stop based on cumulative PnL loss as percentage of AUM.
+        - "notional-loss": Stop based on cumulative PnL loss exceeding a fixed amount.
+    :param max_notional: Maximum notional loss allowed (used for notional-loss mode).
+        Position is closed when cumulative loss exceeds this value.
     :return: Tuple of (stop_lossed_position, stop_levels):
         - stop_lossed_position: Positions set to 0 where stop loss triggered.
         - stop_levels: The calculated stop loss price levels.
@@ -401,14 +405,33 @@ def stop_loss(
         - This hits the threshold, so position is closed.
         - Stop level = current_price + (threshold - pnl) / position
                      = 100 + (-50 - 0) / 10 = 95
+
+    Example (notional-loss mode):
+        With max_notional=1000, position is closed when cumulative loss exceeds 1000.
+        For a long position of 10 units at mid-price 100:
+        - If price falls to 80, cumulative loss = 10 * (80-100) = -200
+        - Position still open (loss < 1000)
+        - Stop level = current_price + (threshold - pnl) / position
+                     = 80 + (-1000 - (-200)) / 10 = 0
+        - If price falls to 0, cumulative loss = 10 * (0-100) = -1000
+        - This hits the threshold, so position is closed.
     """
-    ask, bid = ask.reindex_like(position), bid.reindex_like(position)
+    ask, bid, mid = (
+        ask.reindex_like(position),
+        bid.reindex_like(position),
+        (ask + bid) / 2,
+    )
+    aggressor_entry_level = bid.where(position > 0, ask).where(
+        position.shift() == 0.0, np.nan
+    )
+    passive_entry_level = bid.where(position < 0, ask).where(
+        position.shift() == 0.0, np.nan
+    )
     if mode == "max-drawdown":
         # Calculate cumulative PnL: price change * lagged position
         if not aum:
             raise ValueError("Missing aum value for max drawdown mode")
-        mid_price = (ask + bid) / 2
-        pnl = (mid_price.diff() * position.shift()).cumsum()
+        pnl = (mid.diff() * position.shift()).cumsum()
 
         # Maximum allowed loss threshold
         threshold = -max_percent * aum
@@ -419,23 +442,38 @@ def stop_loss(
         # Solving: stop_price = current_price + (threshold - current_pnl) / position
         # For long (position > 0): stop is below current price
         # For short (position < 0): stop is above current price
-        stop_levels = mid_price + (threshold - pnl) / position.where(
-            position != 0, np.nan
-        )
+        stop_levels = mid + (threshold - pnl) / position.where(position != 0, np.nan)
+        idx = cast(pd.DatetimeIndex, stop_levels.index)
+        stop_levels = (stop_levels).groupby(idx.date).ffill()
+
+        # Keep position while PnL hasn't breached threshold
+        stop_lossed_position = position.where(pnl > threshold, 0.0)
+    elif mode == "notional-loss":
+        # Simple notional loss: stop when cumulative PnL loss exceeds max_notional
+        if not max_notional:
+            raise ValueError("Missing max_notional value for notional-loss mode")
+        pnl = (mid.diff() * position.shift()).cumsum()
+
+        # Fixed notional threshold (negative value)
+        threshold = -max_notional
+
+        # Stop level calculation same as max-drawdown
+        stop_levels = mid + (threshold - pnl) / position.where(position != 0, np.nan)
+        idx = cast(pd.DatetimeIndex, stop_levels.index)
+        stop_levels = (stop_levels).groupby(idx.date).ffill()
 
         # Keep position while PnL hasn't breached threshold
         stop_lossed_position = position.where(pnl > threshold, 0.0)
     elif mode == "entry-price":
         # Get entry price: bid for long positions, ask for short positions
         # Only capture price when position is first opened (previous position was 0)
-        px_level = bid.where(position > 0, ask).where(position.shift() == 0.0, np.nan)
 
         # Calculate stop levels:
         # Long: stop = entry * (1 - max_percent) - triggers when price falls
         # Short: stop = entry * (1 + max_percent) - triggers when price rises
         is_long = position > 0
         stop_multiplier = (1 - max_percent) * is_long + (1 + max_percent) * ~is_long
-        stop_levels = px_level * stop_multiplier
+        stop_levels = aggressor_entry_level * stop_multiplier
         idx = cast(pd.DatetimeIndex, stop_levels.index)
         stop_levels = (stop_levels).groupby(idx.date).ffill()
 
@@ -449,4 +487,16 @@ def stop_loss(
     else:
         raise NotImplementedError(mode)
 
-    return stop_lossed_position, stop_levels
+    return (
+        stop_lossed_position,
+        cast(pd.DataFrame, np.maximum(stop_levels, 0.0))
+        .replace(0.0, np.nan)
+        .where(
+            # Long position, not below 90% of original entry level
+            (((0.9 * passive_entry_level) < passive_entry_level))
+            # Short position, not above 110% of original entry level
+            & ((passive_entry_level < (1.1 * passive_entry_level)))
+        )
+        .groupby(idx.date)
+        .ffill(),
+    )
