@@ -253,4 +253,7 @@ def adjust_position_sizes(
             actions.extend(update_actions)
 
     service.session.close()
-    return pd.DataFrame(actions).set_index("date").rename_axis("DateTime")
+    if actions:
+        return pd.DataFrame(actions).set_index("date").rename_axis("DateTime")
+    else:
+        return pd.DataFrame(index=pd.DatetimeIndex(data=[], name="DateTime"))
