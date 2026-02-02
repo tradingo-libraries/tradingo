@@ -218,16 +218,19 @@ def _align_series(
 
 def convert_prices_to_ccy(
     instruments: pd.DataFrame,
-    prices: pd.DataFrame,
-    fx_series: pd.DataFrame,
+    prices: dict[str, pd.DataFrame],
+    fx_series: dict[str, pd.DataFrame],
     currency: str,
 ) -> list[pd.DataFrame]:
     """
     Convert prices to a common currency using fx_series.
 
     :param instruments: DataFrame with instrument symbols and their currencies
-    :param prices: DataFrame with prices indexed by instrument symbols
-    :param fx_series: DataFrame with FX rates indexed by currency pairs (e.g., 'EURUSD')
+    :param prices: a dictionary of DataFrame with prices indexed by instrument symbols
+        each member of the dictionary corresponds to a bar observation (open/high...)
+    :param fx_series: a dictionary of DataFrame with FX rates indexed by currency
+        pairs (e.g., 'EURUSD') each member of the dictionary corresponds to a bar
+        observation (open/high...)
     :param currency: Target currency to convert prices to
     :return: List of DataFrames with prices converted to the target currency
     """
@@ -242,7 +245,7 @@ def convert_prices_to_ccy(
     converted: list[pd.DataFrame] = []
     for name, df in prices.items():
         df_fx = adjust_fx_series(
-            fx_series[[name]], currency, add_self=True, add_cent=True
+            pd.DataFrame(fx_series[name]), currency, add_self=True, add_cent=True
         )
         if set(symbols_ccys) != set(df.columns):
             raise ValueError(
