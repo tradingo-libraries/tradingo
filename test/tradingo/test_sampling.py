@@ -228,16 +228,18 @@ class TestConvertPricesToCcy:
         # prices is a dict where keys are price types and values are DataFrames
         # with columns matching the instruments index
         prices = {
-            "EURUSD": pd.DataFrame(
+            "close": pd.DataFrame(
                 {"AAPL": [100.0, 101.0]},
                 index=pd.DatetimeIndex(["2020-01-01", "2020-01-02"]),
             )
         }
-        fx_series = pd.DataFrame(
-            {"EURUSD": [1.1, 1.2]},
-            index=pd.DatetimeIndex(["2020-01-01", "2020-01-02"]),
-        )
-        result = convert_prices_to_ccy(instruments, prices, fx_series, "USD")  # type: ignore[arg-type]
+        fx_series = {
+            "close": pd.DataFrame(
+                {"EURUSD": [1.1, 1.2]},
+                index=pd.DatetimeIndex(["2020-01-01", "2020-01-02"]),
+            )
+        }
+        result = convert_prices_to_ccy(instruments, prices, fx_series, "USD")
         assert len(result) == 1
         assert isinstance(result[0], pd.DataFrame)
 
