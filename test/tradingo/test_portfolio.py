@@ -21,6 +21,7 @@ from tradingo.portfolio import (
     aggregate_portfolio,
     apply_dealing_rules,
     portfolio_construction,
+    volatility_target,
 )
 
 # ---------------------------------------------------------------------------
@@ -1736,6 +1737,399 @@ class TestAggregatePortfolio:
         )
 
         pd.testing.assert_frame_equal(result_high_prices, result_low_prices)
+
+
+class TestVolatilityTarget:
+    """Tests for volatility_target function.
+
+    The volatility_target function scales model weights so each instrument achieves
+    a target volatility on a rolling basis. The scaling factor is:
+        target_volatility / realized_volatility
+    """
+
+    @pytest.fixture
+    def vol_dates(self) -> pd.DatetimeIndex:
+        """Date index with enough periods for rolling volatility calculation."""
+        return pd.bdate_range(start="2024-01-01", periods=50, tz="UTC")
+
+    @pytest.fixture
+    def stable_prices(self, vol_dates: pd.DatetimeIndex) -> pd.DataFrame:
+        """Prices with known volatility for testing.
+
+        Creates price series with approximately 10% annualized volatility.
+        daily_vol = 10% / sqrt(252) ≈ 0.63%
+        """
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.10 / np.sqrt(252)
+
+        # Generate log-normal price paths
+        returns_a = np.random.normal(0, daily_vol, n)
+        returns_b = np.random.normal(0, daily_vol * 2, n)  # B has 2x volatility
+
+        prices_a = 100 * np.exp(np.cumsum(returns_a))
+        prices_b = 100 * np.exp(np.cumsum(returns_b))
+
+        return pd.DataFrame({"A": prices_a, "B": prices_b}, index=vol_dates)
+
+    @pytest.fixture
+    def uniform_model(self, vol_dates: pd.DatetimeIndex) -> pd.DataFrame:
+        """Model with uniform weights of 1.0 for all instruments."""
+        return pd.DataFrame(
+            {"A": np.ones(len(vol_dates)), "B": np.ones(len(vol_dates))},
+            index=vol_dates,
+        )
+
+    def test_basic_scaling(
+        self,
+        vol_dates: pd.DatetimeIndex,
+        stable_prices: pd.DataFrame,
+        uniform_model: pd.DataFrame,
+    ) -> None:
+        """Model weights are scaled by target_vol / realized_vol."""
+        target_vol = 0.10  # 10%
+        window = 20
+
+        result = volatility_target(
+            model=uniform_model,
+            close=stable_prices,
+            target_volatility=target_vol,
+            window=window,
+        )
+
+        # Result should have same shape as model
+        assert result.shape == uniform_model.shape
+
+        # Scaling factor should be approximately 1.0 for A (same vol)
+        # and approximately 0.5 for B (2x vol -> scale down by half)
+        # Check after warm-up period
+        warmup = window + 5
+        assert result["A"].iloc[warmup:].mean() > result["B"].iloc[warmup:].mean()
+
+    def test_higher_vol_gets_scaled_down(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Instruments with higher volatility get scaled down."""
+        np.random.seed(123)
+        n = len(vol_dates)
+
+        # Create two instruments: A with low vol, B with high vol
+        low_vol = 0.05 / np.sqrt(252)
+        high_vol = 0.20 / np.sqrt(252)
+
+        returns_a = np.random.normal(0, low_vol, n)
+        returns_b = np.random.normal(0, high_vol, n)
+
+        prices = pd.DataFrame(
+            {
+                "LOW_VOL": 100 * np.exp(np.cumsum(returns_a)),
+                "HIGH_VOL": 100 * np.exp(np.cumsum(returns_b)),
+            },
+            index=vol_dates,
+        )
+
+        model = pd.DataFrame(
+            {"LOW_VOL": np.ones(n), "HIGH_VOL": np.ones(n)},
+            index=vol_dates,
+        )
+
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+        )
+
+        # After warmup, LOW_VOL should have higher weights (scaled up)
+        # and HIGH_VOL should have lower weights (scaled down)
+        warmup = 25
+        assert (
+            result["LOW_VOL"].iloc[warmup:].mean()
+            > result["HIGH_VOL"].iloc[warmup:].mean()
+        )
+
+    def test_window_parameter(
+        self, vol_dates: pd.DatetimeIndex, stable_prices: pd.DataFrame
+    ) -> None:
+        """Different window sizes affect the smoothness of scaling."""
+        model = pd.DataFrame(1.0, index=vol_dates, columns=stable_prices.columns)
+
+        result_short = volatility_target(
+            model=model,
+            close=stable_prices,
+            target_volatility=0.10,
+            window=5,
+        )
+
+        result_long = volatility_target(
+            model=model,
+            close=stable_prices,
+            target_volatility=0.10,
+            window=30,
+        )
+
+        # Shorter window should have more volatile scaling factors
+        # (measured by std of the result)
+        short_std = result_short.iloc[30:].std().mean()
+        long_std = result_long.iloc[30:].std().mean()
+        assert short_std > long_std
+
+    def test_annualization_factor(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Annualization factor affects the volatility calculation."""
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.01  # 1% daily
+
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, daily_vol, n)))},
+            index=vol_dates,
+        )
+        model = pd.DataFrame({"A": np.ones(n)}, index=vol_dates)
+
+        # With daily annualization (252 days), annual vol ≈ 1% * sqrt(252) ≈ 15.9%
+        result_daily = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+            annualization_factor=252.0,
+        )
+
+        # With weekly annualization (52 weeks), treats data as weekly
+        # Annual vol would be 1% * sqrt(52) ≈ 7.2%
+        result_weekly = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+            annualization_factor=52.0,
+        )
+
+        # With lower annualization factor, calculated vol is lower,
+        # so scaling factor is higher (target / realized_vol)
+        # Daily: realized_vol ≈ 1% * sqrt(252) ≈ 15.9%, scaling ≈ 0.63
+        # Weekly: realized_vol ≈ 1% * sqrt(52) ≈ 7.2%, scaling ≈ 1.39
+        warmup = 25
+        assert (
+            result_weekly["A"].iloc[warmup:].mean()
+            > result_daily["A"].iloc[warmup:].mean()
+        )
+
+    def test_vol_floor(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Vol floor prevents division by very small volatility values."""
+        n = len(vol_dates)
+
+        # Create nearly constant prices (very low volatility)
+        prices = pd.DataFrame(
+            {"A": np.full(n, 100.0) + np.random.normal(0, 1e-10, n)},
+            index=vol_dates,
+        )
+        model = pd.DataFrame({"A": np.ones(n)}, index=vol_dates)
+
+        # Without sensible vol_floor, we'd get very large scaling factors
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+            vol_floor=0.01,  # 1% floor
+        )
+
+        # Scaling should be capped at target_vol / vol_floor = 0.10 / 0.01 = 10
+        warmup = 25
+        assert result["A"].iloc[warmup:].max() <= 10.1  # Small tolerance
+
+    def test_vol_cap(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Vol cap limits the maximum scaling factor."""
+        np.random.seed(42)
+        n = len(vol_dates)
+
+        # Create low volatility prices
+        low_vol = 0.02 / np.sqrt(252)
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, low_vol, n)))},
+            index=vol_dates,
+        )
+        model = pd.DataFrame({"A": np.ones(n)}, index=vol_dates)
+
+        # Target vol is much higher than realized, so scaling would be high
+        result_uncapped = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.20,  # 20% target
+            window=20,
+            vol_cap=None,
+        )
+
+        result_capped = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.20,
+            window=20,
+            vol_cap=3.0,  # Cap at 3x
+        )
+
+        warmup = 25
+        assert result_capped["A"].iloc[warmup:].max() <= 3.0
+        assert (
+            result_uncapped["A"].iloc[warmup:].max()
+            > result_capped["A"].iloc[warmup:].max()
+        )
+
+    def test_min_periods(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Min periods affects when scaling starts."""
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.10 / np.sqrt(252)
+
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, daily_vol, n)))},
+            index=vol_dates,
+        )
+        model = pd.DataFrame({"A": np.ones(n)}, index=vol_dates)
+
+        result_early = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+            min_periods=5,  # Start calculating vol after 5 periods
+        )
+
+        result_late = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+            min_periods=20,  # Start calculating vol after 20 periods
+        )
+
+        # Early result should have non-zero values earlier
+        # (after filling NaN with 0)
+        early_first_nonzero = cast(pd.Timestamp, (result_early["A"] != 0).idxmax())
+        late_first_nonzero = cast(pd.Timestamp, (result_late["A"] != 0).idxmax())
+        assert early_first_nonzero < late_first_nonzero
+
+    def test_model_alignment(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Model is aligned to close prices via reindex and ffill."""
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.10 / np.sqrt(252)
+
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, daily_vol, n)))},
+            index=vol_dates,
+        )
+
+        # Model has fewer rows (sparse signal)
+        sparse_index = vol_dates[::5]  # Every 5th date
+        model = pd.DataFrame(
+            {"A": np.linspace(1.0, 2.0, len(sparse_index))},
+            index=sparse_index,
+        )
+
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+        )
+
+        # Result should have same index as close prices
+        pd.testing.assert_index_equal(result.index, prices.index)
+
+    def test_multiple_instruments_independent(
+        self, vol_dates: pd.DatetimeIndex
+    ) -> None:
+        """Each instrument is scaled independently based on its own volatility."""
+        np.random.seed(42)
+        n = len(vol_dates)
+
+        # Create instruments with different volatilities
+        vol_a = 0.05 / np.sqrt(252)  # 5% annualized
+        vol_b = 0.15 / np.sqrt(252)  # 15% annualized
+        vol_c = 0.25 / np.sqrt(252)  # 25% annualized
+
+        prices = pd.DataFrame(
+            {
+                "A": 100 * np.exp(np.cumsum(np.random.normal(0, vol_a, n))),
+                "B": 100 * np.exp(np.cumsum(np.random.normal(0, vol_b, n))),
+                "C": 100 * np.exp(np.cumsum(np.random.normal(0, vol_c, n))),
+            },
+            index=vol_dates,
+        )
+        model = pd.DataFrame(
+            {"A": np.ones(n), "B": np.ones(n), "C": np.ones(n)},
+            index=vol_dates,
+        )
+
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,  # 10% target
+            window=20,
+        )
+
+        # After warmup:
+        # A (5% vol) should be scaled up (factor ~2)
+        # B (15% vol) should be scaled down (factor ~0.67)
+        # C (25% vol) should be scaled down more (factor ~0.4)
+        warmup = 25
+        mean_a = result["A"].iloc[warmup:].mean()
+        mean_b = result["B"].iloc[warmup:].mean()
+        mean_c = result["C"].iloc[warmup:].mean()
+
+        assert mean_a > mean_b > mean_c
+
+    def test_preserves_signal_direction(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Scaling preserves the sign of model weights."""
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.10 / np.sqrt(252)
+
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, daily_vol, n)))},
+            index=vol_dates,
+        )
+
+        # Model with alternating positive and negative signals
+        model = pd.DataFrame(
+            {"A": np.where(np.arange(n) % 2 == 0, 1.0, -1.0)},
+            index=vol_dates,
+        )
+
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+        )
+
+        # Signs should be preserved after warmup
+        warmup = 25
+        model_signs = pd.Series(np.sign(model["A"].iloc[warmup:].values))
+        result_signs = pd.Series(np.sign(result["A"].iloc[warmup:].values))
+        pd.testing.assert_series_equal(model_signs, result_signs, check_names=False)
+
+    def test_zero_model_stays_zero(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Zero model weights remain zero after scaling."""
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.10 / np.sqrt(252)
+
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, daily_vol, n)))},
+            index=vol_dates,
+        )
+        model = pd.DataFrame({"A": np.zeros(n)}, index=vol_dates)
+
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+        )
+
+        # Zero * anything = zero
+        assert (result["A"] == 0).all()
 
 
 if __name__ == "__main__":
