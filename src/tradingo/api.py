@@ -1,25 +1,24 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, cast
 
 import arcticdb as adb
 import pandas as pd
-from arcticdb.options import DEFAULT_ENCODING_VERSION, EncodingVersion
 from arcticdb.version_store.library import AsOf
 
 
 class _Read:
     def __init__(
         self,
-        path_so_far: tuple[str, ...],
+        *,
+        path_so_far: tuple[str, ...] = (),
         library: adb.library.Library,
-        assets: list[str],
         root: Tradingo,
     ):
         self._path_so_far = path_so_far
         self._library = library
-        self._assets = assets
         self._path = ".".join(self._path_so_far)
         self._root = root
 
@@ -31,9 +30,8 @@ class _Read:
 
     def __getattr__(self, symbol: str) -> _Read:
         return self.__class__(
-            (*self._path_so_far, symbol),
+            path_so_far=(*self._path_so_far, symbol),
             library=self._library,
-            assets=self._assets,
             root=self._root,
         )
 
@@ -131,30 +129,11 @@ class _Read:
 
 
 class Tradingo(adb.Arctic):  # type: ignore
-    def __init__(
-        self,
-        uri: str,
-        provider: str | None = None,
-        universe: str | None = None,
-        encoding_version: EncodingVersion = DEFAULT_ENCODING_VERSION,
-        output_format: adb.OutputFormat | str = adb.OutputFormat.PANDAS,
-    ):
-        super().__init__(
-            uri=uri,
-            encoding_version=encoding_version,
-            output_format=output_format,
-        )
-        self._provider = provider
-        self._universe = universe
 
     def _get_path_so_far(self, library: str) -> list[str]:
         path_so_far: list[str] = []
         if library == "instruments":
             return path_so_far
-        if self._provider:
-            path_so_far.append(self._provider)
-        if self._universe:
-            path_so_far.append(self._universe)
         return path_so_far
 
     def __getattr__(self, library: str) -> _Read:
@@ -162,25 +141,20 @@ class Tradingo(adb.Arctic):  # type: ignore
             raise AttributeError(library)
         if library not in self.list_libraries():
             raise AttributeError(library)
-        path_so_far = self._get_path_so_far(library)
-        if library == "instruments":
-            return _Read(
-                library=self.get_library(library),
-                path_so_far=tuple(path_so_far),
-                assets=[],
-                root=self,
-            )
-
-        assets = []
-        if self._universe:
-            assets = getattr(self.instruments, self._universe)().index.to_list()
-
         return _Read(
             library=self.get_library(library),
-            path_so_far=tuple(path_so_far),
-            assets=assets,
             root=self,
         )
 
     def __dir__(self) -> list[str]:
         return [*self.list_libraries(), *super().__dir__()]
+
+
+_GLOBAL_INSTANCE: Tradingo | None = None
+
+
+def from_env() -> Tradingo:
+    global _GLOBAL_INSTANCE
+    if _GLOBAL_INSTANCE is not None:
+        return _GLOBAL_INSTANCE
+    return (_GLOBAL_INSTANCE := Tradingo(os.environ["TP_ARCTIC_URI"]))
