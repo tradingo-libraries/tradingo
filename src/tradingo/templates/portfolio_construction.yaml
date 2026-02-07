@@ -16,21 +16,21 @@
   depends_on:
     #{% for model in model_weights %}
     - "signals.{{ model }}"
-  #{% endfor %}
+    #{% endfor %}
   function: tradingo.portfolio.portfolio_construction
   symbols_in:
     instruments:
       #{% for model in model_weights %}
-      - "instruments/{{ universe_name }}"
-    #{% endfor %}
+      - "instruments/{{ model }}"
+      #{% endfor %}
     close:
       #{% for model in model_weights %}
       #{% if portfolio.currency is defined %}
       - "prices/{{ model }}.mid.close.{{ portfolio.currency }}"
       #{% else %}
-      - "prices/{{ universe_name }}.mid.close"
-    #{% endif %}
-    #{% endfor %}
+      - "prices/{{ model }}.mid.close"
+      #{% endif %}
+      #{% endfor %}
   symbols_out:
     - "portfolio/{{ name }}.raw.percent"
     - "portfolio/{{ name }}.raw.shares"
