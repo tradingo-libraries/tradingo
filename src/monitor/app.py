@@ -349,7 +349,16 @@ app.layout = dbc.Container(
                     [
                         dbc.Col(dcc.Loading(dcc.Graph(id="positions-net")), lg=6),
                         dbc.Col(dcc.Loading(dcc.Graph(id="positions-exposure")), lg=6),
-                    ]
+                    ],
+                    className="mb-3",
+                ),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            dcc.Loading(dcc.Graph(id="positions-unrealised-pnl")), lg=6
+                        ),
+                        dbc.Col(dcc.Loading(dcc.Graph(id="positions-total-pnl")), lg=6),
+                    ],
                 ),
             ],
         ),
@@ -708,6 +717,8 @@ def update_history(
     Output("positions-table-wrapper", "children"),
     Output("positions-net", "figure"),
     Output("positions-exposure", "figure"),
+    Output("positions-unrealised-pnl", "figure"),
+    Output("positions-total-pnl", "figure"),
     Input("portfolio-select", "value"),
     Input("tabs", "active_tab"),
     Input("live-toggle", "value"),
@@ -718,7 +729,13 @@ def update_positions(portfolio: str | None, tab: str, live: bool) -> tuple:
 
     end = pd.Timestamp.now("UTC")
     start = end - pd.offsets.BDay(5)
-    no_data: tuple = (html.P("No data"), empty_fig(), empty_fig())
+    no_data: tuple = (
+        html.P("No data"),
+        empty_fig(),
+        empty_fig(),
+        empty_fig(),
+        empty_fig(),
+    )
 
     try:
         positions = read_instrument(portfolio, "net_position", date_range=(start, end))
@@ -857,10 +874,61 @@ def update_positions(portfolio: str | None, tab: str, live: bool) -> tuple:
     fig_exp = exposure.ffill().plot(title="Net Exposure (5d)")
     fig_exp.update_layout(height=350, margin=dict(t=40, b=40))
 
+    # Per-instrument unrealised PnL (live PnL)
+    active_cols = [c for c in positions.columns if c in bt_active | live_active]
+    unrealised_active = unrealised.ffill()[
+        [c for c in active_cols if c in unrealised.columns]
+    ]
+    if not unrealised_active.empty:
+        fig_unrealised = go.Figure()
+        for col in unrealised_active.columns:
+            fig_unrealised.add_trace(
+                go.Scatter(
+                    x=unrealised_active.index,
+                    y=unrealised_active[col],
+                    mode="lines",
+                    name=col,
+                )
+            )
+        fig_unrealised.update_layout(
+            title="Unrealised PnL per Position",
+            height=350,
+            margin=dict(t=40, b=40),
+            yaxis_title="PnL",
+        )
+    else:
+        fig_unrealised = empty_fig("No unrealised PnL data")
+
+    # Per-instrument total PnL (theoretical PnL)
+    total_pnl_active = total_pnl.ffill()[
+        [c for c in active_cols if c in total_pnl.columns]
+    ]
+    if not total_pnl_active.empty:
+        fig_total = go.Figure()
+        for col in total_pnl_active.columns:
+            fig_total.add_trace(
+                go.Scatter(
+                    x=total_pnl_active.index,
+                    y=total_pnl_active[col],
+                    mode="lines",
+                    name=col,
+                )
+            )
+        fig_total.update_layout(
+            title="Total PnL per Position",
+            height=350,
+            margin=dict(t=40, b=40),
+            yaxis_title="PnL",
+        )
+    else:
+        fig_total = empty_fig("No total PnL data")
+
     return (
         html.Div([html.H5("Open Positions"), table_content]),
         fig_pos,
         fig_exp,
+        fig_unrealised,
+        fig_total,
     )
 
 
