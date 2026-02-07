@@ -36,7 +36,7 @@ class Task:
         task_args: tuple[Any, ...],
         task_kwargs: dict[str, Any],
         symbols_out: list[str],
-        symbols_in: dict[str, str],
+        symbols_in: dict[str, str | list[str]],
         load_args: dict[str, Any],
         publish_args: dict[str, Any],
         dependencies: Iterable[str] = (),

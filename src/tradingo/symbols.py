@@ -191,7 +191,7 @@ def symbol_provider(
     symbol_prefix: str = "",
     symbol_postfix: str = "",
     no_date: bool = False,
-    **symbols: str,
+    **symbols: str | list[str],
 ) -> Callable[[Callable[P, ROpt]], SymbolProvided[P, ROpt]]:
 
     def decorator(
