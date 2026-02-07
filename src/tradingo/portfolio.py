@@ -1,80 +1,117 @@
 import logging
 import re
-from typing import Optional
 
 import numpy as np
 import pandas as pd
-from arcticdb.arctic import Library
-
-from tradingo import symbols
 
 logger = logging.getLogger(__name__)
 
 
-@symbols.lib_provider(signals="signals")
 def portfolio_construction(
-    signals: Library,
-    close: pd.DataFrame,
-    model_weights: dict[str, float],
-    multiplier: float,
-    aum: float,
+    signals: pd.DataFrame,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
-    instruments: Optional[pd.DataFrame] = None,
+    close: pd.DataFrame,
+    aum: float,
+    multiplier: float,
+    model_weights: dict[str, float],
+    instrument_weights: dict[str, dict[str, float]] | None = None,
     default_instrument_weight: float = 1.0,
-    instrument_weights: Optional[dict] = None,
-):
-    """Catch all portfolio construction function for basic
-    portfolio construction routines
-
-    :param signals: library of where to find signals
-    :param close: dataframe of close prices
-    :param model_weights: dictionary of model weights. Keys correspond
-        to a symbol in the library
-    :param multiplier: some scalar to multiply weights by
-    :param aum: notional aum value
-    :param start_date: the start date to use
-    :param end_date: the end date to use
-    :param instruments: optional dataframe of instruments for asset type weights
-    :param instrument_weights: loading to apply to instruments
+    instruments: pd.DataFrame | None = None,
+) -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+]:
     """
+    Construct portfolio from models via allocations, signals and overrides.
+
+    This function works as an allocation engine which combines multiple model signals
+    and instrument-specific weights to produce final portfolio positions.
+    Univariate parameters:
+      * multiplier: constant scaling factor for all weights
+      * model_weights: allocation for each model's signals
+      * instrument_weights: multipliers for specific instrument attributes
+      * signals: ArcticDB library containing signals data
+    Cross-sectional parameters:
+      * portfolio optimisation function
+
+    The univariate position for instrument j from model i is calculated as:
+
+        position_i = multiplier * model_weight[i] * instrument_weight[i][j] * signal[i][j]
+
+    Overall portfolio positions can be allocated by looking at the whole portfolio
+
+    Parameters
+    ----------
+    signals : Library
+        ArcticDB library containing signals data.
+    start_date : pd.Timestamp
+        Start date for signals.
+    end_date : pd.Timestamp
+        End date for signals.
+    close : pd.DataFrame
+        DataFrame of closing prices for instruments.
+    aum : float
+        Assets under management in currency units.
+    multiplier : float
+        Constant portfolio multiplier to scale all weights.
+    model_weights : dict[str, float]
+        Allocation for each model's signals.
+    instrument_weights : dict[str, dict[str, float]], optional
+        Multiplier configuration for instruments, by default None.
+    default_instrument_weight : float, optional
+        Default instrument_weights if not specified, by default 1.0.
+    instruments : pd.DataFrame
+        DataFrame of instrument attributes.
+    """
+
+    if not multiplier > 0.0:
+        raise ValueError("multiplier must be positive")
+
+    _ = instruments.index.unique() if instruments is not None else None  # no-op
+
+    # read signals dataframes indexed as (time, (model, symbol))
+    signals_df: pd.DataFrame = signals.loc[start_date:end_date].rename_axis(
+        ["model", "symbol"], axis=1
+    )
+
+    # calculate model-specific instrument weights
     instrument_weights = instrument_weights or {}
+    instruments_mult = pd.Series(
+        {
+            (model_name, instrument): weight
+            for model_name in instrument_weights
+            for instrument, weight in instrument_weights[model_name].items()
+        }
+    )
+    instruments_mult = (
+        pd.Series(index=signals_df.columns)
+        if instruments_mult.empty
+        else instruments_mult.reindex(index=signals_df.columns)
+    ).fillna(default_instrument_weight)
 
-    weights = pd.Series(multiplier, index=close.columns)
+    # calculate model weights
+    models_mult = (
+        pd.Series(model_weights)
+        .reindex(signals_df.columns.get_level_values("model"))
+        .set_axis(signals_df.columns)
+        .rename_axis(signals_df.columns.names)
+    )
 
-    if instruments is not None:
+    # apply weights to signals
+    total_mult = models_mult * instruments_mult * multiplier
+    signals_df = signals_df.multiply(total_mult, axis=1)
 
-        instruments["Symbol"] = instruments.index
+    # TODO: implement cross-sectional portfolio optimisation here
 
-        for key, weights_config in instrument_weights.items():
-            if key not in instruments.columns:
-                continue
-
-            weights = weights * instruments.apply(
-                lambda i: weights_config.get(i[key], default_instrument_weight),
-                axis=1,
-            )
-            logger.info("Weights: %s", weights)
-
+    # aggregate signals to get final position to trade
     signal_value = (
-        pd.concat(
-            (
-                weight
-                * signals.read(
-                    model_name,
-                    date_range=(start_date, end_date),
-                ).data
-                for model_name, weight in model_weights.items()
-            ),
-            keys=model_weights,
-            axis=1,
-        )
-        .transpose()
-        .groupby(level=[1])
-        .sum()
-        .transpose()
-        .ffill()
-        .fillna(0)
+        signals_df.transpose().groupby(level=[1]).sum().transpose().ffill().fillna(0.0)
     )
 
     positions = signal_value.reindex_like(close).ffill()
