@@ -40,7 +40,7 @@ BACKTEST_FIELDS = (
 SESSION_START_HOUR = 14  # 2pm UTC
 SESSION_END_HOUR = 21  # 9pm UTC
 
-ARCTIC_URI: str = ""
+ARCTIC_URI: str = os.environ.get("TP_ARCTIC_URI", "")
 
 pd.options.plotting.backend = "plotly"
 pio.templates.default = "plotly_white"

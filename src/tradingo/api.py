@@ -93,7 +93,9 @@ class _Read:
                     i.replace(
                         f"{sub_symbol}." if sub_symbol else "",
                         "",
-                    )
+                    ).split(
+                        "."
+                    )[0]
                     for i in self._library.list_symbols(
                         regex=sub_symbol, snapshot_name=snapshot_name
                     )
