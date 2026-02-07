@@ -105,8 +105,8 @@ def sample_equity(
 def create_universe(
     pricelib: Library,
     instruments: pd.DataFrame,
-    end_date: pd.Timestamp,
-    start_date: pd.Timestamp,
+    end_date: pd.Timestamp | None,
+    start_date: pd.Timestamp | None,
 ) -> tuple[
     pd.DataFrame,
     pd.DataFrame,
@@ -128,7 +128,7 @@ def create_universe(
         )
         return pd.DataFrame(item.data)
 
-    available_symbols = set(pricelib.list_symbols())
+    available_symbols = pricelib.list_symbols()
     if missing_symbol := set(instruments.index.difference(available_symbols)):
         logger.warning(
             "some symbols are missing from the library: %s",
@@ -226,7 +226,7 @@ def convert_prices_to_ccy(
     prices: dict[str, pd.DataFrame],
     fx_series: dict[str, pd.DataFrame],
     currency: str,
-) -> tuple[pd.DataFrame]:
+) -> tuple[pd.DataFrame, ...]:
     """
     Convert prices to a common currency using fx_series.
 
