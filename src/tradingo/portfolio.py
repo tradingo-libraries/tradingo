@@ -76,7 +76,9 @@ def portfolio_construction(
     _ = instruments.index.unique() if instruments is not None else None  # no-op
 
     # read signals dataframes indexed as (time, (model, symbol))
-    signals_df: pd.DataFrame = signals.loc[start_date:end_date].rename_axis(["model", "symbol"], axis=1)
+    signals_df: pd.DataFrame = signals.loc[start_date:end_date].rename_axis(
+        ["model", "symbol"], axis=1
+    )
 
     # calculate model-specific instrument weights
     instrument_weights = instrument_weights or {}
