@@ -16,21 +16,21 @@
   depends_on:
     #{% for model in model_weights %}
     - "signals.{{ model }}"
-  #{% endfor %}
+    #{% endfor %}
   function: tradingo.portfolio.portfolio_construction
   symbols_in:
     instruments:
       #{% for model in model_weights %}
-      - "instruments/{{ universe_name }}"
-    #{% endfor %}
+      - "instruments/{{ model }}"
+      #{% endfor %}
     close:
       #{% for model in model_weights %}
       #{% if portfolio.currency is defined %}
       - "prices/{{ model }}.mid.close.{{ portfolio.currency }}"
       #{% else %}
-      - "prices/{{ universe_name }}.mid.close"
-    #{% endif %}
-    #{% endfor %}
+      - "prices/{{ model }}.mid.close"
+      #{% endif %}
+      #{% endfor %}
   symbols_out:
     - "portfolio/{{ name }}.raw.percent"
     - "portfolio/{{ name }}.raw.shares"
@@ -50,9 +50,9 @@
   params:
     price_ffill_limit: {{ backtest.price_ffill_limit }}
   symbols_in:
-    portfolio: "{{ position }}"
-    bid_close: "{{ bid_close }}"
-    ask_close: "{{ ask_close }}"
+    portfolio: {{ position }}
+    bid_close: {{ bid_close | tojson | safe }}
+    ask_close: {{ ask_close | tojson | safe }}
   symbols_out:
     - backtest/{{ name }}.portfolio
     - backtest/{{ name }}.instrument.unrealised_pnl
