@@ -3,16 +3,12 @@ import re
 
 import numpy as np
 import pandas as pd
-from arcticdb.arctic import Library
-
-from tradingo import symbols
 
 logger = logging.getLogger(__name__)
 
 
-@symbols.lib_provider(signals="signals")
 def portfolio_construction(
-    signals: Library,
+    signals: pd.DataFrame,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
     close: pd.DataFrame,
@@ -80,18 +76,7 @@ def portfolio_construction(
     _ = instruments.index.unique() if instruments is not None else None  # no-op
 
     # read signals dataframes indexed as (time, (model, symbol))
-    model_names = list(model_weights.keys())
-    signals_df: pd.DataFrame = pd.concat(
-        (
-            signals.read(
-                model_name,
-                date_range=(start_date, end_date),
-            ).data
-            for model_name in model_names
-        ),
-        keys=model_names,
-        axis=1,
-    ).rename_axis(["model", "symbol"], axis=1)
+    signals_df: pd.DataFrame = signals.loc[start_date:end_date].rename_axis(["model", "symbol"], axis=1)
 
     # calculate model-specific instrument weights
     instrument_weights = instrument_weights or {}
