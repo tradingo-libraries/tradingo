@@ -221,7 +221,7 @@ def convert_prices_to_ccy(
     prices: dict[str, pd.DataFrame],
     fx_series: dict[str, pd.DataFrame],
     currency: str,
-) -> list[pd.DataFrame]:
+) -> tuple[pd.DataFrame, ...]:
     """
     Convert prices to a common currency using fx_series.
 
@@ -232,7 +232,7 @@ def convert_prices_to_ccy(
         pairs (e.g., 'EURUSD') each member of the dictionary corresponds to a bar
         observation (open/high...)
     :param currency: Target currency to convert prices to
-    :return: List of DataFrames with prices converted to the target currency
+    :return: tuple of DataFrames with prices converted to the target currency
     """
 
     symbols_ccys = instruments.currency.to_dict()
@@ -260,4 +260,4 @@ def convert_prices_to_ccy(
             result.append(df_.mul(fx_).rename(str(df_.name)))
         converted.append(pd.concat(result, axis=1)[df.columns])
 
-    return converted
+    return tuple(converted)
