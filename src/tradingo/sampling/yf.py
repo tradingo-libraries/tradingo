@@ -105,8 +105,8 @@ def sample_equity(
 def create_universe(
     pricelib: Library,
     instruments: pd.DataFrame,
-    end_date: pd.Timestamp,
-    start_date: pd.Timestamp,
+    end_date: pd.Timestamp | None,
+    start_date: pd.Timestamp | None,
 ) -> tuple[
     pd.DataFrame,
     pd.DataFrame,
@@ -119,8 +119,8 @@ def create_universe(
     Each symbol contains all tickers defined for the universe.
     """
 
-    start_date = pd.Timestamp(start_date)
-    end_date = pd.Timestamp(end_date)
+    start_date = pd.Timestamp(start_date) if start_date else None
+    end_date = pd.Timestamp(end_date) if end_date else None
 
     def get_data(symbol: str) -> pd.DataFrame:
         item = cast(
@@ -128,14 +128,19 @@ def create_universe(
         )
         return pd.DataFrame(item.data)
 
-    symbols = pricelib.list_symbols()
+    available_symbols = pricelib.list_symbols()
+    if missing_symbol := set(instruments.index.difference(available_symbols)):
+        logger.warning(
+            "some symbols are missing from the library: %s",
+            missing_symbol,
+        )
 
     result = pd.concat(
         (
             (
                 get_data(symbol)
                 for symbol in instruments.index.to_list()
-                if _get_ticker(symbol) in f"sample.{symbols}"
+                if symbol in available_symbols
             )
         ),
         axis=1,
