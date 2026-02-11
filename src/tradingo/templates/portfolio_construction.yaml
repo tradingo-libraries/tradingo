@@ -50,9 +50,9 @@
   params:
     price_ffill_limit: {{ backtest.price_ffill_limit }}
   symbols_in:
-    portfolio: "{{ position }}"
-    bid_close: "{{ bid_close }}"
-    ask_close: "{{ ask_close }}"
+    portfolio: {{ position }}
+    bid_close: {{ bid_close | tojson | safe }}
+    ask_close: {{ ask_close | tojson | safe }}
   symbols_out:
     - backtest/{{ name }}.portfolio
     - backtest/{{ name }}.instrument.unrealised_pnl

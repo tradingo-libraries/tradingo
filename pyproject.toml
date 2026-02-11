@@ -40,6 +40,8 @@ dev = [
   "mypy>=1.15.0",
   "debugpy>=1.8.13",
   "pre-commit>=3.6.0",
+  "pandas-stubs>=2.3.3.260113",
+  "pytest-cov>=7.0.0",
 ]
 research = [
   "dtale",
@@ -76,10 +78,14 @@ tradingo-cli = "tradingo.cli:main"
 [tool.isort]
 profile = "black"
 
+[tool.mypy]
+exclude = [
+  "src/monitor"
+]
+
 [[tool.mypy.overrides]]
 module = [
-  "pandas",
-  "pandas.*",
+  "pandas.plotting._matplotlib.style",
   "arcticdb",
   "arcticdb.*",
   "arcticdb_ext",
@@ -94,9 +100,24 @@ module = [
   "numba",
   "pandas_market_calendars",
   "trading_ig.*",
-  "tradingo",
-  "tradingo.*",
   "Cython.*",
   "dash",
 ]
 ignore_missing_imports = true
+strict = true
+
+[tool.coverage.run]
+source = ["src/tradingo"]
+branch = true
+omit = [
+  "src/tradingo/templates/*",
+  "src/monitor/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+]
+show_missing = true

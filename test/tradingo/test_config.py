@@ -1,5 +1,7 @@
 import os
 import textwrap
+from pathlib import Path
+from typing import Generator
 
 import pytest
 
@@ -8,7 +10,7 @@ from tradingo.settings import TradingoConfig
 
 
 @pytest.fixture(autouse=True)
-def isolated_env(monkeypatch):
+def isolated_env(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """Ensure environment variables are isolated between tests."""
     old_env = os.environ.copy()
     yield
@@ -17,7 +19,7 @@ def isolated_env(monkeypatch):
 
 
 @pytest.fixture
-def config_home(tmp_path):
+def config_home(tmp_path: Path) -> Path:
     (tmp_path / "configs").mkdir(exist_ok=True)
     (tmp_path / "configs" / "signals").mkdir(exist_ok=True)
     (tmp_path / "configs" / "universes").mkdir(exist_ok=True)
@@ -94,7 +96,7 @@ def config_home(tmp_path):
 
 
 @pytest.fixture
-def config_home_two_models(tmp_path):
+def config_home_two_models(tmp_path: Path) -> Path:
     (tmp_path / "configs").mkdir(exist_ok=True)
     (tmp_path / "configs" / "signals").mkdir(exist_ok=True)
     (tmp_path / "configs" / "universes").mkdir(exist_ok=True)
@@ -154,8 +156,12 @@ def config_home_two_models(tmp_path):
                 backtest:
                     price_ffill_limit: 5
                 name: balanced_portfolio
-                bid_field: mid
-                ask_field: mid
+                ask_close:
+                    - prices/equities-universe.mid.close.GBP
+                    - prices/bonds-universe.mid.close.GBP
+                bid_close:
+                    - prices/equities-universe.mid.close.GBP
+                    - prices/bonds-universe.mid.close.GBP
                 model_weights:
                     equities: 0.6
                     bonds: 0.4
@@ -218,7 +224,7 @@ def config_home_two_models(tmp_path):
     return tmp_path / "configs"
 
 
-def test_config(config_home):
+def test_config(config_home: Path) -> None:
     env = TradingoConfig.from_env(
         env={
             "TP_CONFIG_HOME": str(config_home),
@@ -235,7 +241,7 @@ def test_config(config_home):
     dag.DAG.from_config(out)
 
 
-def test_multiple_models(config_home_two_models):
+def test_multiple_models(config_home_two_models: Path) -> None:
     env = TradingoConfig.from_env(
         env={
             "TP_CONFIG_HOME": str(config_home_two_models),
@@ -251,6 +257,8 @@ def test_multiple_models(config_home_two_models):
 
     dag.DAG.from_config(out)
 
+    expected_prices_stages = ["prices.bonds", "prices.equities", "prices.fx"]
+    assert sorted(out["prices"]) == expected_prices_stages
     portfolio_construction_config = out["portfolio"]["portfolio.balanced_portfolio"]
 
     # positions from 2 models
@@ -273,4 +281,16 @@ def test_multiple_models(config_home_two_models):
     assert portfolio_construction_config["symbols_in"]["close"] == [
         "prices/equities.mid.close.GBP",
         "prices/bonds.mid.close.GBP",
+    ]
+
+    backtest_construction_config = out["portfolio"]["backtest.balanced_portfolio"]
+
+    # ask and bid close from 2 models
+    assert backtest_construction_config["symbols_in"]["ask_close"] == [
+        "prices/equities-universe.mid.close.GBP",
+        "prices/bonds-universe.mid.close.GBP",
+    ]
+    assert backtest_construction_config["symbols_in"]["bid_close"] == [
+        "prices/equities-universe.mid.close.GBP",
+        "prices/bonds-universe.mid.close.GBP",
     ]

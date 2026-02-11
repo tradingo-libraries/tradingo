@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -30,9 +30,10 @@ def backtest(
     stop_limit: Optional[pd.DataFrame] = None,
     stop_loss: Optional[pd.DataFrame] = None,
     price_ffill_limit: int = 0,
-) -> tuple[pd.DataFrame]:
-    bid_close = bid_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
-    ask_close = ask_close.groupby(bid_close.index.date).ffill(limit=price_ffill_limit)
+) -> tuple[pd.DataFrame, ...]:
+    idx = cast(pd.DatetimeIndex, bid_close.index)
+    bid_close = bid_close.groupby(idx.date).ffill(limit=price_ffill_limit)
+    ask_close = ask_close.groupby(idx).ffill(limit=price_ffill_limit)
 
     mid_close = (bid_close + ask_close) / 2
     bid_close, ask_close = (
@@ -72,7 +73,7 @@ def backtest(
             columns=mid_close.columns,
         )
 
-    def compute_backtest(inst_trades: pd.Series):
+    def compute_backtest(inst_trades: pd.Series) -> pd.DataFrame:
         logger.info("Computing backtest for ticker=%s", inst_trades.name)
         inst_mids = mid_close[inst_trades.name].ffill().dropna()
         inst_asks = ask_close[inst_trades.name].reindex(inst_mids.index, method="ffill")
@@ -130,6 +131,8 @@ def backtest(
     backtest["unrealised_pnl"] = backtest["unrealised_pnl"].where(
         backtest.net_position.ne(0.0), np.nan
     )
-    backtest_fields = (backtest.loc[:, f] for f in BACKTEST_FIELDS if f != "date")
+    backtest_fields: tuple[pd.DataFrame, ...] = tuple(
+        pd.DataFrame(backtest.loc[:, f]) for f in BACKTEST_FIELDS if f != "date"
+    )
 
-    return (summary, *backtest_fields)
+    return (pd.DataFrame(summary), *backtest_fields)
