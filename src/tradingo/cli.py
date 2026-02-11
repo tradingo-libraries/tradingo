@@ -7,8 +7,10 @@ import logging
 import os
 import pathlib
 import re
+from typing import Any
 
 import pandas as pd
+from arcticdb import Arctic
 
 from tradingo.api import Tradingo
 from tradingo.config import read_config_template
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 def int_or_bool(val: str) -> int | bool:
     if val.lower() in {"true", "yes"}:
         return True
-    if val.lower() == {"false", "no"}:
+    if val.lower() in {"false", "no"}:
         return False
     if not val.isnumeric():
         raise ValueError("Invalid value for int or bool: {val}")
@@ -73,7 +75,7 @@ def cli_app() -> argparse.ArgumentParser:
     return app
 
 
-def handle_tasks(args, arctic):
+def handle_tasks(args: argparse.Namespace, arctic: Arctic) -> None:
     """inspect or run Tradingo tasks."""
 
     if args.list_action == "list":
@@ -98,7 +100,7 @@ def handle_tasks(args, arctic):
                 extra_kwargs["end_date"] = args.end_date
             if args.clean:
                 extra_kwargs["clean"] = args.clean
-            out = graph.run(
+            graph.run(
                 args.task,
                 run_dependencies=args.with_deps,
                 force_rerun=args.force_rerun,
@@ -107,8 +109,6 @@ def handle_tasks(args, arctic):
                 skip_deps=args.skip_deps,
                 **extra_kwargs,
             )
-            if args.dry_run:
-                print(out)
         finally:
             graph.serialise_state()
 
@@ -116,11 +116,11 @@ def handle_tasks(args, arctic):
         raise ValueError(args.list_action)
 
 
-def handle_universes(args, api: Tradingo):
+def handle_universes(args: Any, api: Tradingo) -> None:
     """inspect Tradingo's universe by inspecting the instruments in DB."""
 
     if args.universe_action == "list":
-        for item in api.instruments.list():
+        for item in api.instruments.list_symbols():
             print(item)
 
     elif args.universe_action == "show":
@@ -133,11 +133,11 @@ def handle_universes(args, api: Tradingo):
         raise ValueError(args.universe_action)
 
 
-def main():
+def main(_args: argparse.Namespace | None = None) -> None:
     """Tradingo CLI entrypoint"""
 
     envconfig = TradingoConfig.from_env().to_env()
-    args = cli_app().parse_args()
+    args = _args or cli_app().parse_args()
     IGTradingConfig.from_env().to_env()
     envconfig.to_env()
 

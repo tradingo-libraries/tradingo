@@ -3,29 +3,33 @@ repos:
     hooks:
       - id: black
         name: black
-        entry: black
+        entry: "uv run black"
         language: system
         types: [python]
         args: [--config=pyproject.toml]
-      - id: isort
-        name: isort
-        entry: isort
-        language: system
-        types: [python]
       - id: ruff
         name: ruff
-        entry: ruff
+        entry: "uv run ruff"
         language: system
         types: [python]
         args: [check, --config=pyproject.toml]
       - id: mypy
         name: mypy type check
-        entry: mypy
+        entry: "uv run mypy"
         language: system
         types: [python]
         args:
           - --config=pyproject.toml
-          - --explicit-package-bases
-          - ./src
+          - ./
         pass_filenames: false
-        always_run: true
+      - id: isort
+        name: isort check
+        entry: "uv run isort"
+        language: system
+        types: [python]
+        args:
+          - --profile
+          - black
+          - --check
+          - ./
+        pass_filenames: false

@@ -1,10 +1,12 @@
 """Yahoo Finance data provider."""
 
 import logging
+from typing import cast
 
 import pandas as pd
 import pycountry
 import yfinance as yf
+from arcticdb import VersionedItem
 from arcticdb.version_store.library import Library
 
 from tradingo import symbols
@@ -12,7 +14,7 @@ from tradingo import symbols
 logger = logging.getLogger(__name__)
 
 
-_CCY_CODES = {c.alpha_3 for c in pycountry.currencies}
+_CCY_CODES = {c.alpha_3 for c in pycountry.currencies}  # pyright: ignore
 
 
 class ProviderDataError(Exception):
@@ -57,7 +59,7 @@ def sample_equity(
     interval: str = "1d",
     actions: bool = False,
     repair: bool = False,
-):
+) -> pd.DataFrame:
     """sample one symbol from yahoo finance"""
 
     ticker = _get_ticker(ticker)
@@ -96,46 +98,60 @@ def sample_equity(
     if not prices.index.tz:
         prices = prices.tz_localize("utc")
 
-    return (prices.tz_convert("utc"),)
+    return cast(pd.DataFrame, prices.tz_convert("utc"))
 
 
-@symbols.lib_provider(pricelib="{raw_price_lib}")
+@symbols.lib_provider(pricelib="{raw_price_lib}")  # pyright: ignore
 def create_universe(
     pricelib: Library,
     instruments: pd.DataFrame,
-    end_date: pd.Timestamp,
-    start_date: pd.Timestamp,
-):
+    end_date: pd.Timestamp | None,
+    start_date: pd.Timestamp | None,
+) -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+]:
     """
     Create one arctic symbol for each OHLCV prices from yahoo finance.
     Each symbol contains all tickers defined for the universe.
     """
 
-    start_date = pd.Timestamp(start_date)
-    end_date = pd.Timestamp(end_date)
+    start_date = pd.Timestamp(start_date) if start_date else None
+    end_date = pd.Timestamp(end_date) if end_date else None
 
-    def get_data(symbol: str):
-        return pricelib.read(symbol, date_range=(start_date, end_date)).data
+    def get_data(symbol: str) -> pd.DataFrame:
+        item = cast(
+            VersionedItem, pricelib.read(symbol, date_range=(start_date, end_date))
+        )
+        return pd.DataFrame(item.data)
 
-    symbols = pricelib.list_symbols()
+    available_symbols = pricelib.list_symbols()
+    if missing_symbol := set(instruments.index.difference(available_symbols)):
+        logger.warning(
+            "some symbols are missing from the library: %s",
+            missing_symbol,
+        )
 
     result = pd.concat(
         (
             (
                 get_data(symbol)
                 for symbol in instruments.index.to_list()
-                if _get_ticker(symbol) in f"sample.{symbols}"
+                if symbol in available_symbols
             )
         ),
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 0], axis=1)
     return (
-        result["Open"],
-        result["High"],
-        result["Low"],
-        result["Close"],
-        result["Volume"],
+        cast(pd.DataFrame, result["Open"]),
+        cast(pd.DataFrame, result["High"]),
+        cast(pd.DataFrame, result["Low"]),
+        cast(pd.DataFrame, result["Close"]),
+        cast(pd.DataFrame, result["Volume"]),
     )
 
 
@@ -207,18 +223,21 @@ def _align_series(
 
 def convert_prices_to_ccy(
     instruments: pd.DataFrame,
-    prices: pd.DataFrame,
-    fx_series: pd.DataFrame,
+    prices: dict[str, pd.DataFrame],
+    fx_series: dict[str, pd.DataFrame],
     currency: str,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, ...]:
     """
     Convert prices to a common currency using fx_series.
 
     :param instruments: DataFrame with instrument symbols and their currencies
-    :param prices: DataFrame with prices indexed by instrument symbols
-    :param fx_series: DataFrame with FX rates indexed by currency pairs (e.g., 'EURUSD')
+    :param prices: a dictionary of DataFrame with prices indexed by instrument symbols
+        each member of the dictionary corresponds to a bar observation (open/high...)
+    :param fx_series: a dictionary of DataFrame with FX rates indexed by currency
+        pairs (e.g., 'EURUSD') each member of the dictionary corresponds to a bar
+        observation (open/high...)
     :param currency: Target currency to convert prices to
-    :return: List of DataFrames with prices converted to the target currency
+    :return: tuple of DataFrames with prices converted to the target currency
     """
 
     symbols_ccys = instruments.currency.to_dict()
@@ -226,12 +245,12 @@ def convert_prices_to_ccy(
     for symbol, ccy in symbols_ccys.items():
         if ccy not in ccy_syms_map:
             ccy_syms_map[ccy] = []
-        ccy_syms_map[ccy].append(symbol)
+        ccy_syms_map[ccy].append(str(symbol))
 
-    converted = []
+    converted: list[pd.DataFrame] = []
     for name, df in prices.items():
         df_fx = adjust_fx_series(
-            fx_series[name], currency, add_self=True, add_cent=True
+            pd.DataFrame(fx_series[name]), currency, add_self=True, add_cent=True
         )
         if set(symbols_ccys) != set(df.columns):
             raise ValueError(
@@ -240,10 +259,10 @@ def convert_prices_to_ccy(
         if missing_ccys := set(ccy_syms_map).difference(set(df_fx.columns)):
             raise ValueError(f"fx_series columns miss currencies: {missing_ccys}")
 
-        result = []
+        result: list[pd.Series[float]] = []
         for sym in df.columns:
             df_, fx_ = _align_series(df[sym].ffill(), df_fx[symbols_ccys[sym]])
-            result.append(df_.mul(fx_).rename(df_.name))
+            result.append(df_.mul(fx_).rename(str(df_.name)))
         converted.append(pd.concat(result, axis=1)[df.columns])
 
-    return converted
+    return tuple(converted)
