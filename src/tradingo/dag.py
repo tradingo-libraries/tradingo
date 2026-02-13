@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import re
 from collections.abc import Callable
 from enum import Enum
@@ -12,6 +13,8 @@ from typing import Any, Iterable
 
 from . import symbols
 from .config import ConfigLoadError
+
+logger = logging.getLogger(__name__)
 
 
 class TaskState(Enum):
@@ -149,6 +152,142 @@ class Task:
         return self._dependencies
 
 
+class Stage:
+    """A group of tasks executed sequentially as a single unit.
+
+    Eliminates inter-task overhead (e.g. Celery round-trips) by running
+    multiple tasks in a single process. Each subtask still performs its
+    own ArcticDB I/O via the standard symbol_provider/symbol_publisher
+    decorators, so all intermediate results are persisted as normal.
+
+    Config syntax::
+
+        my.stage.name:
+          stage:
+            - task.a
+            - task.b
+            - task.c
+
+    The listed tasks must be defined elsewhere in the config with their
+    own ``function``, ``symbols_in``, ``symbols_out``, and ``params``.
+    Dependencies between stage members are resolved internally; external
+    dependencies are auto-computed. Any task outside the stage that depends
+    on a stage member is automatically re-wired to depend on the stage.
+    """
+
+    def __init__(self, name: str, tasks: list[Task]):
+        self.name = name
+        self._tasks = tasks
+        self.state = TaskState.PENDING
+        self.task_args: tuple[Any, ...] = ()
+
+        # Store subtask kwargs in task_kwargs so Airflow can template-render
+        # any Jinja2 variables (e.g. {{ data_interval_start }}) within them.
+        self.task_kwargs: dict[str, Any] = {
+            "_stage_steps": [
+                {"args": list(t.task_args), "kwargs": t.task_kwargs} for t in tasks
+            ]
+        }
+
+        # Aggregate symbols for DAG introspection
+        self.symbols_out: list[str] = [s for t in tasks for s in t.symbols_out]
+        self.symbols_in: dict[str, str] = {}
+        self.load_args: dict[str, Any] = {}
+        self.publish_args: dict[str, Any] = {}
+
+        # External dependencies: deps of members that point outside the stage
+        member_names = {t.name for t in tasks}
+        self._dependencies: list[str] = list(
+            dict.fromkeys(
+                dep for t in tasks for dep in t._dependencies if dep not in member_names
+            )
+        )
+        self._resolved_dependencies: list[Task] = []
+
+    def __repr__(self) -> str:
+        subtask_names = [t.name for t in self._tasks]
+        return f"Stage(name='{self.name}', tasks={subtask_names})"
+
+    @property
+    def function(self) -> Callable[..., Any]:
+        """Return a callable that runs all subtasks sequentially."""
+        subtasks = self._tasks
+
+        def run_stage(
+            arctic: Any,
+            dry_run: bool = False,
+            _stage_steps: list[dict[str, Any]] | None = None,
+            **global_kwargs: Any,
+        ) -> None:
+            steps = _stage_steps or [{"args": (), "kwargs": {}} for _ in subtasks]
+            for task, step in zip(subtasks, steps):
+                kwargs = {**step["kwargs"], **global_kwargs}
+                logger.info("Stage %s: running subtask %s", self.name, task.name)
+                task.function(
+                    *step["args"],
+                    arctic=arctic,
+                    dry_run=dry_run,
+                    **kwargs,
+                )
+
+        return run_stage
+
+    def run(
+        self,
+        *args: object,
+        run_dependencies: bool | int = False,
+        skip_deps: re.Pattern[str] | None = None,
+        force_rerun: bool = False,
+        **kwargs: object,
+    ) -> None:
+        """Run all subtasks sequentially, with optional dependency execution."""
+        if run_dependencies:
+            if isinstance(run_dependencies, int):
+                run_dependencies -= 1
+            for dependency in self.dependencies:
+                if skip_deps and skip_deps.match(dependency.name):
+                    continue
+                dependency.run(
+                    *args,
+                    run_dependencies=run_dependencies,
+                    skip_deps=skip_deps,
+                    force_rerun=force_rerun,
+                    **kwargs,
+                )
+
+        state = self.state
+        try:
+            if self.state == TaskState.PENDING or force_rerun:
+                state = TaskState.FAILED
+                print(f"Running {self}")
+                for task in self._tasks:
+                    task_kwargs = {**task.task_kwargs, **kwargs}
+                    task.function(*task.task_args, *args, **task_kwargs)
+                self.state = state = TaskState.SUCCESS
+        finally:
+            self.state = state
+
+    def add_dependencies(self, *dependency: str) -> None:
+        """add dependencies to this stage"""
+        self._dependencies.extend(dependency)
+
+    def resolve_dependencies(self, tasks: dict[str, Task]) -> None:
+        """resolve dependencies to this stage"""
+        self._resolved_dependencies.extend(
+            tasks[dep_name] for dep_name in self._dependencies
+        )
+
+    @property
+    def dependencies(self) -> list[Task]:
+        """this stage's external dependency tasks"""
+        return self._resolved_dependencies
+
+    @property
+    def dependency_names(self) -> list[str]:
+        """this stage's external dependency task names"""
+        return self._dependencies
+
+
 def collect_task_configs(
     config: dict[str, Any], _tasks: dict[str, Any] | None = None
 ) -> dict[str, dict[str, Any]]:
@@ -156,14 +295,41 @@ def collect_task_configs(
     tasks = _tasks or {}
 
     for key, value in config.items():
-        if isinstance(value, dict) and "depends_on" in value:
-            # its a task, collect it
+        if isinstance(value, dict) and ("depends_on" in value or "stage" in value):
+            # its a task or stage, collect it
             tasks[key] = value
         elif isinstance(value, dict):
             # its a set of tasks collect them
             tasks.update(collect_task_configs(value, tasks))
 
     return tasks
+
+
+def _topo_sort_tasks(tasks: list[Task], member_names: set[str]) -> list[Task]:
+    """Topologically sort tasks within a stage based on internal dependencies."""
+    by_name = {t.name: t for t in tasks}
+    sorted_tasks: list[Task] = []
+    sorted_names: set[str] = set()
+
+    remaining = dict(by_name)
+    while remaining:
+        ready = [
+            name
+            for name, task in remaining.items()
+            if all(
+                dep not in member_names or dep in sorted_names
+                for dep in task._dependencies
+            )
+        ]
+        if not ready:
+            raise ConfigLoadError(
+                f"Circular dependency in stage among: {list(remaining.keys())}"
+            )
+        for name in ready:
+            sorted_tasks.append(remaining.pop(name))
+            sorted_names.add(name)
+
+    return sorted_tasks
 
 
 class DAG(dict[str, Task]):
@@ -175,9 +341,13 @@ class DAG(dict[str, Task]):
 
         task_configs = collect_task_configs(config)
 
+        # Separate stage definitions from normal tasks
+        stage_configs = {k: v for k, v in task_configs.items() if "stage" in v}
+        normal_configs = {k: v for k, v in task_configs.items() if "stage" not in v}
+
         tasks: dict[str, Task] = {}
 
-        for task_name, task_config in task_configs.items():
+        for task_name, task_config in normal_configs.items():
             if not task_config.get("enabled", True):
                 continue
             params = task_config["params"]
@@ -197,6 +367,41 @@ class DAG(dict[str, Task]):
                 raise ConfigLoadError(
                     f"{task_name} is missing setting {ex.args[0]}"
                 ) from ex
+
+        # Process stages: pull subtasks out, create Stage objects, re-wire deps
+        for stage_name, stage_config in stage_configs.items():
+            subtask_names = stage_config["stage"]
+            member_names = set(subtask_names)
+
+            subtasks: list[Task] = []
+            for name in subtask_names:
+                if name not in tasks:
+                    raise ConfigLoadError(
+                        f"Stage '{stage_name}': task '{name}' not found"
+                    )
+                subtasks.append(tasks.pop(name))
+
+            sorted_subtasks = _topo_sort_tasks(subtasks, member_names)
+            stage = Stage(stage_name, sorted_subtasks)
+
+            # Add any explicit depends_on from the stage config
+            if "depends_on" in stage_config:
+                for dep in stage_config["depends_on"]:
+                    if dep not in stage._dependencies:
+                        stage._dependencies.append(dep)
+
+            tasks[stage_name] = stage  # type: ignore[assignment]
+
+            # Re-wire: any task depending on a stage member now depends
+            # on the stage itself
+            for task in tasks.values():
+                rewired = []
+                for dep in task._dependencies:
+                    if dep in member_names:
+                        rewired.append(stage_name)
+                    else:
+                        rewired.append(dep)
+                task._dependencies = list(dict.fromkeys(rewired))
 
         for task_name, task in tasks.items():
             try:
