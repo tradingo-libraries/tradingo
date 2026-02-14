@@ -1010,6 +1010,19 @@ wheels = [
 ]
 
 [[package]]
+name = "dukascopy-python"
+version = "4.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pandas" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/34/7f/c054097e4020696ac3c4a9e85ab9a75342e01e593dbe60adc14148924ea1/dukascopy_python-4.0.1.tar.gz", hash = "sha256:5bdcf2c8a72d69ec035a56e59b5534a96ccbbbecdbe4f22d74608d88eaf39b64", size = 19326, upload-time = "2025-04-28T19:11:58.519Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e4/0c/bddb653f83f7e721044910e329f4e2b87569e676b58520e91296dc7f7237/dukascopy_python-4.0.1-py3-none-any.whl", hash = "sha256:bb7ccb9b38e43276f08256c41f66ca38fd972d0d5db0081660ee652d14ddf431", size = 17023, upload-time = "2025-04-28T19:11:54.489Z" },
+]
+
+[[package]]
 name = "et-xmlfile"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4147,6 +4160,7 @@ name = "tradingo"
 source = { editable = "." }
 dependencies = [
     { name = "arcticdb" },
+    { name = "dukascopy-python" },
     { name = "ipython" },
     { name = "lightgbm" },
     { name = "lxml" },
@@ -4190,6 +4204,7 @@ research = [
 [package.metadata]
 requires-dist = [
     { name = "arcticdb" },
+    { name = "dukascopy-python" },
     { name = "ipython", specifier = ">=9.1.0" },
     { name = "lightgbm", specifier = ">=4.6.0" },
     { name = "lxml" },

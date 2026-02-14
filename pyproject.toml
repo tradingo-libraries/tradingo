@@ -28,6 +28,7 @@ dependencies = [
   "ipython>=9.1.0",
   "tabula>=1.0.5",
   "tabula-py>=2.10.0",
+  "dukascopy-python",
 ]
 
 [dependency-groups]
@@ -102,6 +103,8 @@ module = [
   "numba",
   "pandas_market_calendars",
   "trading_ig.*",
+  "dukascopy_python",
+  "dukascopy_python.*",
   "Cython.*",
   "dash",
 ]

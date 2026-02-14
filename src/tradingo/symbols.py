@@ -98,7 +98,7 @@ class Symbol(NamedTuple):
             symbol = base.format(**string_kwargs)
             parsed_symbol = urlparse(symbol)
             try:
-                lib, sym = parsed_symbol.path.split("/")
+                lib, sym = parsed_symbol.path.split("/", maxsplit=1)
             except ValueError as ex:
                 raise SymbolParseError(f"symbol {symbol} is invalid.") from ex
             kwargs = dict(parse_qsl(parsed_symbol.query))

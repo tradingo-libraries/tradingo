@@ -34,6 +34,7 @@ def download_instruments(
     file: str | None = None,
     tickers: list[str] | str | None = None,
     epics: list[str] | None = None,
+    dukascopy_instruments: list[str] | None = None,
 ) -> pd.DataFrame:
     if file:
         return pd.read_csv(
@@ -65,5 +66,48 @@ def download_instruments(
             .set_index("instrument.epic")
             .rename_axis("Symbol", axis=0)
         )
+
+    if dukascopy_instruments is not None:
+        from tradingo.sampling.dukascopy import _INSTRUMENT_REVERSE_MAP
+
+        records = []
+        for instrument_value in dukascopy_instruments:
+            const_name = _INSTRUMENT_REVERSE_MAP.get(instrument_value)
+            if const_name is None:
+                logger.warning(
+                    "Unknown dukascopy instrument value: %s", instrument_value
+                )
+                records.append(
+                    {
+                        "name": instrument_value,
+                        "category": "unknown",
+                        "subcategory": "",
+                        "currency": "",
+                    }
+                )
+                continue
+
+            # Parse category/subcategory from constant name
+            # e.g. INSTRUMENT_FX_MAJORS_AUD_CAD -> category=FX, subcategory=MAJORS
+            # e.g. INSTRUMENT_CMD_AGRICULTURAL_COCOA_CMD_USD -> category=CMD, subcategory=AGRICULTURAL
+            parts = const_name.replace("INSTRUMENT_", "").split("_")
+            category = parts[0] if len(parts) > 0 else ""
+            subcategory = parts[1] if len(parts) > 1 else ""
+
+            # Extract currency from /CCY suffix if present
+            currency = ""
+            if "/" in instrument_value:
+                currency = instrument_value.split("/")[-1]
+
+            records.append(
+                {
+                    "name": instrument_value,
+                    "category": category,
+                    "subcategory": subcategory,
+                    "currency": currency,
+                }
+            )
+
+        return pd.DataFrame(records).set_index("name").rename_axis("Symbol")
 
     raise ValueError(file)
