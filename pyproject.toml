@@ -50,6 +50,9 @@ research = [
 monitor = [
   "dash>=2.18.2",
 ]
+ib = [
+  "ib_insync",
+]
 
 
 [tool.setuptools.packages.find]
@@ -72,6 +75,7 @@ target-version = ['py311']
 
 [project.scripts]
 tradingo-cli = "tradingo.cli:main"
+tradingo-engine-ib = "tradingo.engine.ib:main"
 
 [tool.setuptools_scm]
 
@@ -100,6 +104,8 @@ module = [
   "numba",
   "pandas_market_calendars",
   "trading_ig.*",
+  "ib_insync",
+  "ib_insync.*",
   "Cython.*",
   "dash",
 ]

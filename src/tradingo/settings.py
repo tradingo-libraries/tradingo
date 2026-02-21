@@ -241,6 +241,18 @@ class IGTradingConfig(EnvProvider):
 
 
 @dataclasses.dataclass
+class IBTradingConfig(EnvProvider):
+    """IB Trading configuration"""
+
+    port: int
+    host: str
+    account: str
+    client_id: int = 1
+    timeout: int = 4
+    app_prefix = "IB_SERVICE"
+
+
+@dataclasses.dataclass
 class TradingoConfig(EnvProvider):
     """Tradingo configuration"""
 
