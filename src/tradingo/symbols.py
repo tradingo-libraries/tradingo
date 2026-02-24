@@ -191,7 +191,7 @@ def symbol_provider(
     symbol_prefix: str = "",
     symbol_postfix: str = "",
     no_date: bool = False,
-    **symbols: str,
+    **symbols: str | list[str],
 ) -> Callable[[Callable[P, ROpt]], SymbolProvided[P, ROpt]]:
 
     def decorator(
@@ -400,7 +400,7 @@ def symbol_publisher(
                 end_date=kwargs.pop("end_date", None),
                 **kwargs,
             )
-            if not isinstance(out, tuple):
+            if not isinstance(out, (tuple, list)):
                 out = (out,)
 
             logger.info("Publishing %s to %s", symbols or template, arctic)
