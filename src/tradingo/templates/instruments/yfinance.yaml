@@ -26,7 +26,6 @@
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
     interval: "{{ interval }}"
-
 # {% endfor %}
 
 "sample.{{ universe_name }}":
@@ -36,9 +35,9 @@
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
   depends_on:
-    #  {%for ticker in tickers %}
+    # {%for ticker in tickers %}
     - "sample.{{ ticker }}"
-  #  {% endfor %}
+    # {% endfor %}
   symbols_in:
     instruments: "instruments/{{ universe_name }}"
   load_args:
@@ -46,9 +45,9 @@
   publish_args:
     astype: float
   symbols_out:
-    #  {% for occurence in ["open", "high", "low", "close", "volume"] %}
+    # {% for occurence in ["open", "high", "low", "close", "volume"] %}
     - prices/{{ universe_name }}.mid.{{ occurence }}
-#  {% endfor %}
+    # {% endfor %}
 
 # {% if currency and fx_universe_name %}
 "sample.{{ universe_name }}.{{ currency }}":
@@ -63,19 +62,19 @@
   symbols_in:
     instruments: "instruments/{{ universe_name }}"
     prices:
-      #      {% for occurence in ["open", "high", "low", "close"] %}
+      # {% for occurence in ["open", "high", "low", "close"] %}
       "{{ occurence }}": "prices/{{ universe_name }}.mid.{{ occurence }}"
-    #      {% endfor %}
+      # {% endfor %}
     fx_series:
-      #      {% for occurence in ["open", "high", "low", "close"] %}
+      # {% for occurence in ["open", "high", "low", "close"] %}
       "{{ occurence }}": "prices/{{ fx_universe_name }}.mid.{{ occurence }}"
-  #      {% endfor %}
+      # {% endfor %}
   load_args:
     no_date: true
   publish_args:
     astype: float
   symbols_out:
-    #  {% for occurence in ["open", "high", "low", "close"] %}
+    # {% for occurence in ["open", "high", "low", "close"] %}
     - prices/{{ universe_name }}.mid.{{ occurence }}.{{ currency }}
-#  {% endfor %}
+    # {% endfor %}
 # {% endif %}
