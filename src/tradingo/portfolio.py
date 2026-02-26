@@ -220,15 +220,21 @@ def apply_dealing_rules(
     :param min_deal_size_col: Column for minimum trade size
     :return: Adjusted positions
     """
-    lot_sizes = np.asarray(
-        instruments[lot_size_col].reindex(positions.columns).fillna(1).astype(float)
-    )
-    min_deals = np.asarray(
-        instruments[min_deal_size_col]
-        .reindex(positions.columns)
-        .fillna(0)
-        .astype(float)
-    )
+    if not lot_size_col:
+        lot_sizes = np.asarray(pd.Series(1.0, index=positions.columns))
+    else:
+        lot_sizes = np.asarray(
+            instruments[lot_size_col].reindex(positions.columns).fillna(1).astype(float)
+        )
+    if not min_deal_size_col:
+        min_deals = np.asarray(pd.Series(1.0, index=positions.columns))
+    else:
+        min_deals = np.asarray(
+            instruments[min_deal_size_col]
+            .reindex(positions.columns)
+            .fillna(0)
+            .astype(float)
+        )
 
     rounded: npt.NDArray[np.float64] = (
         np.round(positions.values / lot_sizes) * lot_sizes
