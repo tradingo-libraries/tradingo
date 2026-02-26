@@ -7,7 +7,13 @@ import dateutil.tz
 import numpy as np
 import pandas as pd
 from arcticdb.version_store.library import Library
-from tenacity import Retrying, retry_if_exception_type, wait_exponential
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from tenacity import (
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 from trading_ig.rest import ApiExceededException, IGService
 
 from tradingo import symbols
@@ -26,7 +32,13 @@ def get_ig_service(
 
     retryer = Retrying(
         wait=wait_exponential(),
-        retry=retry_if_exception_type(ApiExceededException),
+        stop=stop_after_attempt(5),
+        retry=retry_if_exception_type(
+            (
+                ApiExceededException,
+                RequestsConnectionError,
+            )
+        ),
     )
 
     service = IGService(
