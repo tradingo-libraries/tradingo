@@ -259,7 +259,7 @@ def _apply_min_deal_filter(
     for i in range(n_rows):
         target = rounded[i]
         can_trade = np.abs(target - current) >= min_deals
-        current = np.where(can_trade, target, current)  # type: ignore
+        current = np.where(can_trade, target, current)
         result[i] = current
 
     return result

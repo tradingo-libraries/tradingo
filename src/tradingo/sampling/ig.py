@@ -81,7 +81,6 @@ def sample_instrument(
             .tz_localize(dateutil.tz.tzlocal())
             .tz_convert("utc")
         )
-
     except Exception as ex:
         if ex.args and (
             ex.args[0] == "Historical price data not found"
@@ -123,6 +122,7 @@ def create_universe(
     instruments: pd.DataFrame,
     end_date: pd.Timestamp,
     start_date: pd.Timestamp,
+    permit_missing: bool = False,
 ) -> tuple[
     pd.DataFrame,
     pd.DataFrame,
@@ -173,6 +173,8 @@ def create_universe(
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
+    if permit_missing:
+        result = result.reindex(instruments.index)
     return (
         pd.DataFrame(result["bid"]["Open"]),
         pd.DataFrame(result["bid"]["High"]),

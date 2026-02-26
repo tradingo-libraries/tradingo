@@ -29,7 +29,7 @@
     epic: "{{ epic }}"
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
-    interval: "{{ interval }}"
+    interval: "{{ interval.upper() }}"
   publish_args:
     astype: float
 #{% endfor %}
@@ -40,6 +40,7 @@
     pricelib: "{{ raw_prices_lib }}"
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
+    permit_missing: "{{ permit_missing }}"
   depends_on:
   #{%for epic in epics %}
     - "sample.{{ epic }}"
