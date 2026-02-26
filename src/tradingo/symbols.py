@@ -293,6 +293,7 @@ def symbol_provider(
                 except InternalException as ex:
                     if (
                         "The data for this symbol is pickled" in ex.args[0]
+                        or "Cannot apply date range filter to symbol" in ex.args[0]
                         or "on pickled data" in ex.args[0]
                     ):
                         return get_symbol_data(v, with_no_date=True)
