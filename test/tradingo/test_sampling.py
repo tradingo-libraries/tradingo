@@ -659,7 +659,7 @@ class TestYfCreateUniverse:
         mock_versioned_item = MagicMock()
         mock_versioned_item.data = price_data
         mock_lib.read.return_value = mock_versioned_item
-        mock_lib.list_symbols.return_value = ["sample.AAPL"]
+        mock_lib.list_symbols.return_value = ["AAPL"]
 
         instruments = pd.DataFrame(
             {"name": ["Apple"]},
@@ -696,7 +696,7 @@ class TestYfCreateUniverse:
         mock_versioned_item = MagicMock()
         mock_versioned_item.data = price_data
         mock_lib.read.return_value = mock_versioned_item
-        mock_lib.list_symbols.return_value = ["sample.AAPL", "sample.MSFT"]
+        mock_lib.list_symbols.return_value = ["AAPL", "MSFT"]
 
         instruments = pd.DataFrame(
             {"name": ["Apple", "Microsoft"]},
