@@ -259,7 +259,6 @@ def test_multiple_models(config_home_two_models: Path) -> None:
 
     expected_prices_stages = ["prices.bonds", "prices.equities", "prices.fx"]
     assert sorted(out["prices"]) == expected_prices_stages
-
     portfolio_construction_config = out["portfolio"]["portfolio.balanced_portfolio"]
 
     # positions from 2 models
