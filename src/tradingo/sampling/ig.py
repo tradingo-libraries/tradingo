@@ -6,6 +6,7 @@ from typing import Hashable, cast
 import dateutil.tz
 import numpy as np
 import pandas as pd
+from arcticdb.exceptions import NoSuchVersionException
 from arcticdb.version_store.library import Library
 from tenacity import Retrying, retry_if_exception_type, wait_exponential
 from trading_ig.rest import ApiExceededException, IGService
@@ -137,24 +138,29 @@ def create_universe(
     end_date = pd.Timestamp(end_date)
 
     def get_data(symbol: str) -> pd.DataFrame:
-        return pd.concat(
-            (
-                cast(
-                    pd.DataFrame,
-                    pricelib.read(
-                        f"{symbol}.bid", date_range=(start_date, end_date)
-                    ).data,
+        try:
+            return pd.concat(
+                (
+                    cast(
+                        pd.DataFrame,
+                        pricelib.read(
+                            f"{symbol}.bid", date_range=(start_date, end_date)
+                        ).data,
+                    ),
+                    cast(
+                        pd.DataFrame,
+                        pricelib.read(
+                            f"{symbol}.ask", date_range=(start_date, end_date)
+                        ).data,
+                    ),
                 ),
-                cast(
-                    pd.DataFrame,
-                    pricelib.read(
-                        f"{symbol}.ask", date_range=(start_date, end_date)
-                    ).data,
-                ),
-            ),
-            axis=1,
-            keys=("bid", "ask"),
-        )
+                axis=1,
+                keys=("bid", "ask"),
+            )
+        except NoSuchVersionException as ex:
+            if permit_missing:
+                return pd.DataFrame()
+            raise ex
 
     result = pd.concat(
         ((get_data(symbol) for symbol in instruments.index.to_list())),
