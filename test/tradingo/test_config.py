@@ -235,7 +235,7 @@ def test_config(config_home: Path) -> None:
 
     out = config.read_config_template(
         config_home / "myconfig.yaml",
-        variables=os.environ,
+        variables=dict(os.environ),
     )
 
     dag.DAG.from_config(out)
@@ -252,7 +252,7 @@ def test_multiple_models(config_home_two_models: Path) -> None:
 
     out = config.read_config_template(
         config_home_two_models / "balancedconfig.yaml",
-        variables=os.environ,
+        variables=dict(os.environ),
     )
 
     dag.DAG.from_config(out)

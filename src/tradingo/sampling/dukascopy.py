@@ -1,7 +1,6 @@
 """Dukascopy data accessors."""
 
 import logging
-from datetime import datetime
 
 import dukascopy_python
 import pandas as pd
@@ -74,18 +73,17 @@ def sample_instrument(
             f"Valid intervals: {sorted(INTERVAL_MAP)}"
         )
 
-    start_dt = pd.Timestamp(start_date).to_pydatetime()
-    end_dt = pd.Timestamp(end_date).to_pydatetime()
+    start_dt = pd.Timestamp(start_date)
+    end_dt = pd.Timestamp(end_date)
 
     # Ensure naive datetimes (dukascopy_python expects naive UTC)
-    if start_dt.tzinfo is not None:
-        start_dt = start_dt.astimezone(datetime.now().astimezone().tzinfo).replace(
-            tzinfo=None
-        )
-    if end_dt.tzinfo is not None:
-        end_dt = end_dt.astimezone(datetime.now().astimezone().tzinfo).replace(
-            tzinfo=None
-        )
+    if not start_dt.tzinfo:
+        raise ValueError("Timestamp should not be naiive")
+    if not end_dt.tzinfo:
+        raise ValueError("Timestamp should not be naiive")
+
+    start_dt = start_dt.tz_convert("utc")
+    end_dt = end_dt.tz_convert("utc")
 
     logger.info("Fetching %s [%s] %s -> %s", epic, interval, start_dt, end_dt)
 
@@ -93,8 +91,8 @@ def sample_instrument(
         instrument,
         dk_interval,
         dukascopy_python.OFFER_SIDE_BID,
-        start_dt,
-        end_dt,
+        start_dt.to_pydatetime(),
+        end_dt.to_pydatetime(),
     )
 
     ask = dukascopy_python.fetch(

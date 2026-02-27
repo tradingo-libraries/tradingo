@@ -38,14 +38,14 @@ def cli_app() -> argparse.ArgumentParser:
     app.add_argument(
         "--auth",
         type=lambda i: IGTradingConfig.from_env(
-            env=read_config_template(pathlib.Path(i), os.environ),
+            env=read_config_template(pathlib.Path(i), dict(os.environ)),
             override_default_env=False,
         ).to_env(),
         required=False,
     )
     app.add_argument(
         "--config",
-        type=lambda i: read_config_template(pathlib.Path(i), os.environ),
+        type=lambda i: read_config_template(pathlib.Path(i), dict(os.environ)),
         required=True,
     )
 
