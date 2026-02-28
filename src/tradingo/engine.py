@@ -11,6 +11,15 @@ from tradingo.sampling.ig import get_ig_service
 logger = logging.getLogger(__name__)
 
 
+def _get_latest_or_none(value: pd.Series | None) -> float | None:
+    if value is None:
+        return None
+    latest = value.iloc[-1]
+    if np.isnan(latest):
+        return None
+    return float(latest)
+
+
 def close_position(
     deal_id: str | Hashable,
     position: pd.Series,
@@ -64,10 +73,13 @@ def update_open_positions(
     new_level: float | None,
     current_position: pd.DataFrame,
 ) -> list[dict[str, Any]]:
-    actions = []
+    actions: list[dict[str, Any]] = []
 
     if new_level is not None and np.isnan(new_level):
         new_level = None
+
+    if epic not in current_position.columns:
+        return actions
 
     positions = cast(pd.DataFrame, current_position.loc[epic])
 
@@ -166,10 +178,9 @@ def adjust_position_sizes(
 
     for epic in target_positions:
         latest_target = target_positions[epic].iloc[-1]
-        if stop_levels is not None:
-            latest_stop = float(stop_levels[epic].iloc[-1])
-        else:
-            latest_stop = float(np.nan)
+        latest_stop = (
+            _get_latest_or_none(stop_levels[epic]) if stop_levels is not None else None
+        )
 
         current_position = current_sizes.loc[str(epic)]
 
@@ -189,33 +200,37 @@ def adjust_position_sizes(
             side = "BUY" if latest_target > 0 else "SELL"
 
             logger.info(
-                "Increasing target position from %s to %s - %s for %s",
+                "Increasing target position from %s to %s - %s for %s stop @ %s",
                 current_position,
                 latest_target,
                 side,
                 epic,
+                latest_stop,
             )
 
             result = service.create_open_position(
                 direction=side,
                 currency_code=get_currency(pd.Series(instruments.loc[str(epic)])),
                 order_type="MARKET",
-                expiry=instruments.loc[str(epic)].expiry,
-                size=target,
+                expiry=instruments.loc[str(epic)]["instrument.expiry"],
+                size=float(target),
                 epic=epic,
-                force_open=False,
+                force_open=bool(latest_stop),
                 guaranteed_stop=False,
                 level=None,
                 limit_distance=None,
                 limit_level=None,
                 quote_id=None,
                 stop_distance=None,
-                trailing_stop=None,
+                trailing_stop=False,
                 trailing_stop_increment=None,
-                stop_level=latest_stop,
+                stop_level=round(latest_stop, 2) if latest_stop else None,
             )
 
-            logger.info(result)
+            if result["dealStatus"] == "REJECTED":
+                logger.warning(result)
+            else:
+                logger.info(result)
             actions.append(dict(result))
 
         elif abs(current_position) > abs(latest_target):
@@ -244,7 +259,8 @@ def adjust_position_sizes(
 
         # Only update stop levels if there are existing positions
         if (
-            not pd.isna(current_stop_level.loc[str(epic)])
+            (latest_target and not np.isnan(latest_target))
+            and pd.isna(current_stop_level.loc[str(epic)])
             and current_stop_level.loc[str(epic)] != latest_stop
         ):
             update_actions = update_open_positions(

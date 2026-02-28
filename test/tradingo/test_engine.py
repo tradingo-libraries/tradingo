@@ -64,8 +64,8 @@ def instruments() -> pd.DataFrame:
     """Sample instruments dataframe."""
     return pd.DataFrame(
         {
-            "expiry": ["DFB", "DFB"],
-            "name": ["Test £ Asset", "Test $ Asset"],
+            "instrument.expiry": ["DFB", "DFB"],
+            "instrument.name": ["Test £ Asset", "Test $ Asset"],
         },
         index=pd.Index(["IX.D.FTSE.DAILY.IP", "IX.D.DOW.DAILY.IP"], name="epic"),
     )
