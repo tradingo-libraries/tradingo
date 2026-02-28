@@ -40,7 +40,7 @@ BACKTEST_FIELDS = (
 SESSION_START_HOUR = 14  # 2pm UTC
 SESSION_END_HOUR = 21  # 9pm UTC
 
-ARCTIC_URI: str = ""
+ARCTIC_URI = os.environ.get("TP_ARCTIC_URI", "")
 
 pd.options.plotting.backend = "plotly"
 pio.templates.default = "plotly_white"
@@ -50,6 +50,9 @@ pio.templates.default = "plotly_white"
 
 
 def _lib() -> adb.library.Library:
+    global ARCTIC_URI
+    if not ARCTIC_URI:
+        ARCTIC_URI = os.environ.get("TP_ARCTIC_URI", "")
     return adb.Arctic(ARCTIC_URI).get_library("backtest")
 
 
