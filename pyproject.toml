@@ -28,6 +28,7 @@ dependencies = [
   "ipython>=9.1.0",
   "tabula>=1.0.5",
   "tabula-py>=2.10.0",
+  "tradingo-quant",
 ]
 
 [dependency-groups]
@@ -51,12 +52,18 @@ monitor = [
   "dash>=2.18.2",
   "dash-bootstrap-components>=1.5.0",
 ]
+serve = [
+  "fastapi",
+  "uvicorn",
+  "croniter",
+]
 
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
+"tradingo" = ["logging.yaml"]
 "tradingo.templates" = ["*.yaml"]
 
 [build-system]
@@ -103,6 +110,7 @@ module = [
   "pandas_market_calendars",
   "trading_ig.*",
   "Cython.*",
+  "croniter",
   "dash",
 ]
 ignore_missing_imports = true
@@ -123,3 +131,6 @@ exclude_lines = [
   "raise NotImplementedError",
 ]
 show_missing = true
+
+[tool.uv.sources]
+tradingo-quant = { path = "../../tradsys/tradingo-quant", editable = true }

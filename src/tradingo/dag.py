@@ -236,7 +236,7 @@ class DAG(dict[str, Task]):
     def run(
         self,
         task_name: str,
-        skip_deps: re.Pattern[str],
+        skip_deps: re.Pattern[str] | None = None,
         run_dependencies: bool | int = False,
         force_rerun: bool = False,
         *args: object,
