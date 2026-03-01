@@ -1658,7 +1658,7 @@ stage1:
 
         from tradingo.config import read_config_template
 
-        config = read_config_template(config_file, os.environ)
+        config = read_config_template(config_file, dict(os.environ))
 
         args = argparse.Namespace(
             config=config,
