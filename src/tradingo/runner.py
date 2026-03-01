@@ -55,6 +55,7 @@ class PipelineRunner:
         *,
         run_dependencies: bool | int = True,
         force_rerun: bool = True,
+        max_workers: int = 1,
         **kwargs: Any,
     ) -> None:
         """Run one pipeline iteration for a new interval."""
@@ -62,6 +63,7 @@ class PipelineRunner:
             task_name,
             run_dependencies=run_dependencies,
             force_rerun=force_rerun,
+            max_workers=max_workers,
             arctic=self.arctic,
             dry_run=False,
             skip_deps=None,

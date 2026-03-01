@@ -28,7 +28,7 @@ dependencies = [
   "ipython>=9.1.0",
   "tabula>=1.0.5",
   "tabula-py>=2.10.0",
-  "tradingo-quant",
+  "dukascopy-python",
 ]
 
 [dependency-groups]
@@ -43,6 +43,9 @@ dev = [
   "pre-commit>=3.6.0",
   "pandas-stubs>=2.3.3.260113",
   "pytest-cov>=7.0.0",
+  "types-requests>=2.32.4.20260107",
+  "httpx>=0.28.1",
+  "types-croniter>=6.0.0.20250809",
 ]
 research = [
   "dtale",
@@ -53,9 +56,8 @@ monitor = [
   "dash-bootstrap-components>=1.5.0",
 ]
 serve = [
+  "croniter>=6.0.0",
   "fastapi",
-  "uvicorn",
-  "croniter",
 ]
 
 
@@ -63,7 +65,6 @@ serve = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-"tradingo" = ["logging.yaml"]
 "tradingo.templates" = ["*.yaml"]
 
 [build-system]
@@ -109,9 +110,12 @@ module = [
   "numba",
   "pandas_market_calendars",
   "trading_ig.*",
+  "dukascopy_python",
+  "dukascopy_python.*",
   "Cython.*",
-  "croniter",
   "dash",
+  "requests.exceptions",
+  "uvicorn",
 ]
 ignore_missing_imports = true
 strict = true
@@ -131,6 +135,3 @@ exclude_lines = [
   "raise NotImplementedError",
 ]
 show_missing = true
-
-[tool.uv.sources]
-tradingo-quant = { path = "../../tradsys/tradingo-quant", editable = true }

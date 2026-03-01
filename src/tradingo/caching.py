@@ -9,6 +9,7 @@ All reads come from memory; writes go to both mem and backing store
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
@@ -38,6 +39,7 @@ class CachingLibrary:
         self._async_write = async_write
         self._executor = executor
         self._futures: list[Future[None]] = []
+        self._futures_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Properties
@@ -74,7 +76,8 @@ class CachingLibrary:
         fn = getattr(self._backing, method_name)
         if self._async_write and self._executor is not None:
             future = self._executor.submit(fn, *args, **kwargs)
-            self._futures.append(future)
+            with self._futures_lock:
+                self._futures.append(future)
             return future
         return fn(*args, **kwargs)
 
@@ -111,14 +114,16 @@ class CachingLibrary:
 
     def flush(self) -> None:
         """Wait for all pending async writes to complete."""
+        with self._futures_lock:
+            pending = list(self._futures)
+            self._futures.clear()
         exceptions = []
-        for future in self._futures:
+        for future in pending:
             try:
                 future.result()
             except Exception as exc:
                 logger.error("Async write failed: %s", exc)
                 exceptions.append(exc)
-        self._futures.clear()
         if exceptions:
             raise RuntimeError(
                 f"{len(exceptions)} async write(s) failed"
@@ -170,6 +175,7 @@ class CachingArctic:
             ThreadPoolExecutor(max_workers=max_workers) if async_write else None
         )
         self._libraries: dict[str, CachingLibrary] = {}
+        self._libraries_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Library access
@@ -181,22 +187,23 @@ class CachingArctic:
         create_if_missing: bool = False,
         **kwargs: Any,
     ) -> CachingLibrary:
-        if name in self._libraries:
-            return self._libraries[name]
+        with self._libraries_lock:
+            if name in self._libraries:
+                return self._libraries[name]
 
-        mem_lib = self._mem.get_library(name, create_if_missing=True, **kwargs)
-        backing_lib = self._backing.get_library(
-            name, create_if_missing=create_if_missing, **kwargs
-        )
+            mem_lib = self._mem.get_library(name, create_if_missing=True, **kwargs)
+            backing_lib = self._backing.get_library(
+                name, create_if_missing=create_if_missing, **kwargs
+            )
 
-        lib = CachingLibrary(
-            mem=mem_lib,
-            backing=backing_lib,
-            async_write=self._async_write,
-            executor=self._executor,
-        )
-        self._libraries[name] = lib
-        return lib
+            lib = CachingLibrary(
+                mem=mem_lib,
+                backing=backing_lib,
+                async_write=self._async_write,
+                executor=self._executor,
+            )
+            self._libraries[name] = lib
+            return lib
 
     def get_uri(self) -> str:
         return str(self._backing.get_uri())

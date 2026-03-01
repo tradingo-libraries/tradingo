@@ -68,14 +68,14 @@ def cli_app() -> argparse.ArgumentParser:
     app.add_argument(
         "--auth",
         type=lambda i: IGTradingConfig.from_env(
-            env=read_config_template(pathlib.Path(i), os.environ),
+            env=read_config_template(pathlib.Path(i), dict(os.environ)),
             override_default_env=False,
         ).to_env(),
         required=False,
     )
     app.add_argument(
         "--config",
-        type=lambda i: read_config_template(pathlib.Path(i), os.environ),
+        type=lambda i: read_config_template(pathlib.Path(i), dict(os.environ)),
         required=True,
     )
 
@@ -100,6 +100,12 @@ def cli_app() -> argparse.ArgumentParser:
     run_tasks.add_argument("--clean", action="store_true")
     run_tasks.add_argument("--skip-deps", type=re.compile)
     run_tasks.add_argument(
+        "--n-workers",
+        type=int,
+        default=1,
+        help="Number of parallel workers for task execution (default: 1 = sequential)",
+    )
+    run_tasks.add_argument(
         "--cache",
         action="store_true",
         help="Wrap Arctic in a write-through in-memory cache for faster reads",
@@ -116,6 +122,12 @@ def cli_app() -> argparse.ArgumentParser:
     run_pipeline.add_argument("--end-date", type=pd.Timestamp, required=False)
     run_pipeline.add_argument("--warm-start", type=pd.Timestamp, required=False)
     run_pipeline.add_argument("--warm-end", type=pd.Timestamp, required=False)
+    run_pipeline.add_argument(
+        "--n-workers",
+        type=int,
+        default=1,
+        help="Number of parallel workers for task execution (default: 1 = sequential)",
+    )
     run_pipeline.add_argument(
         "--async-write",
         action="store_true",
@@ -205,6 +217,7 @@ def handle_tasks(args: argparse.Namespace, arctic: Arctic | CachingArctic) -> No
                 args.task,
                 run_dependencies=args.with_deps,
                 force_rerun=args.force_rerun,
+                max_workers=getattr(args, "n_workers", 1),
                 arctic=arctic,
                 dry_run=args.dry_run,
                 skip_deps=args.skip_deps,
@@ -246,6 +259,7 @@ def handle_pipeline(args: argparse.Namespace, arctic_uri: str) -> None:
         runner.tick(
             args.task,
             run_dependencies=args.with_deps,
+            max_workers=getattr(args, "n_workers", 1),
             **extra_kwargs,
         )
 

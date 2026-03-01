@@ -1,11 +1,13 @@
 """IG data accessors"""
 
+import itertools
 import logging
 from typing import Hashable, cast
 
 import dateutil.tz
 import numpy as np
 import pandas as pd
+from arcticdb.exceptions import NoSuchVersionException
 from arcticdb.version_store.library import Library
 from tenacity import Retrying, retry_if_exception_type, wait_exponential
 from trading_ig.rest import ApiExceededException, IGService
@@ -69,7 +71,6 @@ def sample_instrument(
             .tz_localize(dateutil.tz.tzlocal())
             .tz_convert("utc")
         )
-
     except Exception as ex:
         if ex.args and (
             ex.args[0] == "Historical price data not found"
@@ -111,6 +112,7 @@ def create_universe(
     instruments: pd.DataFrame,
     end_date: pd.Timestamp,
     start_date: pd.Timestamp,
+    permit_missing: bool = False,
 ) -> tuple[
     pd.DataFrame,
     pd.DataFrame,
@@ -136,31 +138,50 @@ def create_universe(
     start_date = pd.Timestamp(start_date)
     end_date = pd.Timestamp(end_date)
 
+    # TODO: Enhance this with batched reading for speed
     def get_data(symbol: str) -> pd.DataFrame:
-        return pd.concat(
-            (
-                cast(
-                    pd.DataFrame,
-                    pricelib.read(
-                        f"{symbol}.bid", date_range=(start_date, end_date)
-                    ).data,
+        try:
+            return pd.concat(
+                (
+                    cast(
+                        pd.DataFrame,
+                        pricelib.read(
+                            f"{symbol}.bid", date_range=(start_date, end_date)
+                        ).data,
+                    ),
+                    cast(
+                        pd.DataFrame,
+                        pricelib.read(
+                            f"{symbol}.ask", date_range=(start_date, end_date)
+                        ).data,
+                    ),
                 ),
-                cast(
-                    pd.DataFrame,
-                    pricelib.read(
-                        f"{symbol}.ask", date_range=(start_date, end_date)
-                    ).data,
-                ),
-            ),
-            axis=1,
-            keys=("bid", "ask"),
-        )
+                axis=1,
+                keys=("bid", "ask"),
+            )
+        except NoSuchVersionException as ex:
+            if permit_missing:
+                return pd.DataFrame(
+                    data=[],
+                    index=pd.DatetimeIndex([], name="timestamp"),
+                    columns=pd.MultiIndex.from_tuples(
+                        itertools.chain(
+                            (
+                                ((f, "Close"), (f, "Open"), (f, "High"), (f, "Low"))
+                                for f in ("bid", "ask")
+                            )
+                        )
+                    ),
+                )
+            raise ex
 
     result = pd.concat(
         ((get_data(symbol) for symbol in instruments.index.to_list())),
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
+    if permit_missing:
+        result = result.reindex(instruments.index)
     return (
         pd.DataFrame(result["bid"]["Open"]),
         pd.DataFrame(result["bid"]["High"]),
