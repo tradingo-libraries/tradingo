@@ -1,6 +1,5 @@
 """IG data accessors"""
 
-import itertools
 import logging
 from typing import Hashable, cast
 
@@ -16,6 +15,20 @@ from tradingo import symbols
 from tradingo.settings import IGTradingConfig
 
 logger = logging.getLogger(__name__)
+
+
+COLUMNS = pd.MultiIndex.from_tuples(
+    (
+        ("bid", "Open"),
+        ("bid", "High"),
+        ("bid", "Low"),
+        ("bid", "Close"),
+        ("ask", "Open"),
+        ("ask", "High"),
+        ("ask", "Low"),
+        ("ask", "Close"),
+    ),
+)
 
 
 def get_ig_service(
@@ -79,18 +92,7 @@ def sample_instrument(
             logger.warning("Historical price data not found %s", epic)
             result = pd.DataFrame(
                 np.nan,
-                columns=pd.MultiIndex.from_tuples(
-                    (
-                        ("bid", "Open"),
-                        ("bid", "High"),
-                        ("bid", "Low"),
-                        ("bid", "Close"),
-                        ("ask", "Open"),
-                        ("ask", "High"),
-                        ("ask", "Low"),
-                        ("ask", "Close"),
-                    ),
-                ),
+                columns=COLUMNS,
                 index=pd.DatetimeIndex([], name="DateTime", tz="utc"),
             )
             # raise SkipException after return
@@ -164,14 +166,7 @@ def create_universe(
                 return pd.DataFrame(
                     data=[],
                     index=pd.DatetimeIndex([], name="timestamp"),
-                    columns=pd.MultiIndex.from_tuples(
-                        itertools.chain(
-                            (
-                                ((f, "Close"), (f, "Open"), (f, "High"), (f, "Low"))
-                                for f in ("bid", "ask")
-                            )
-                        )
-                    ),
+                    columns=COLUMNS,
                 )
             raise ex
 
