@@ -165,7 +165,7 @@ def create_universe(
             if permit_missing:
                 return pd.DataFrame(
                     data=[],
-                    index=pd.DatetimeIndex([], name="timestamp"),
+                    index=pd.DatetimeIndex([], name="timestamp", tz="utc"),
                     columns=COLUMNS,
                 )
             raise ex
