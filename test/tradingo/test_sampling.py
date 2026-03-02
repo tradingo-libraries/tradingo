@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+from arcticdb import ReadRequest
 
 from tradingo.sampling.yf import (
     ProviderDataError,
@@ -756,15 +757,22 @@ class TestIgCreateUniverse:
             ),
         )
 
-        def read_side_effect(symbol: str, date_range: Any = None) -> MagicMock:
+        def read_side_effect(
+            symbol: str | ReadRequest,
+            date_range: Any = None,
+        ) -> MagicMock:
             mock_item = MagicMock()
             if ".bid" in symbol:
                 mock_item.data = bid_data
             else:
                 mock_item.data = ask_data
+            if isinstance(symbol, ReadRequest):
+                symbol = symbol.symbol
+            mock_item.symbol = symbol
             return mock_item
 
         mock_lib.read.side_effect = read_side_effect
+        mock_lib.read_batch.side_effect = lambda s: [read_side_effect(i) for i in s]
 
         instruments = pd.DataFrame(
             {"name": ["FTSE 100"]},
@@ -780,7 +788,7 @@ class TestIgCreateUniverse:
         )
 
         assert len(result) == 12  # 4 bid + 4 ask + 4 mid
-        assert mock_lib.read.call_count == 2  # bid and ask
+        assert mock_lib.read_batch.call_count == 1  # bid and ask
 
 
 if __name__ == "__main__":
