@@ -1,12 +1,12 @@
 """IG data accessors"""
 
 import logging
-from typing import Hashable, cast
+from typing import Generator, Hashable, TypeVar, cast
 
+import arcticdb as adb
 import dateutil.tz
 import numpy as np
 import pandas as pd
-from arcticdb.exceptions import NoSuchVersionException
 from arcticdb.version_store.library import Library
 from tenacity import Retrying, retry_if_exception_type, wait_exponential
 from trading_ig.rest import ApiExceededException, IGService
@@ -108,6 +108,15 @@ def sample_instrument(
     )
 
 
+T = TypeVar("T")
+
+
+def batch(iterable: list[T], n: int = 1) -> Generator[list[T], None, None]:
+    length = len(iterable)
+    for ndx in range(0, length, n):
+        yield iterable[ndx : min(ndx + n, length)]
+
+
 @symbols.lib_provider(pricelib="{raw_price_lib}")  # pyright: ignore
 def create_universe(
     pricelib: Library,
@@ -140,38 +149,43 @@ def create_universe(
     start_date = pd.Timestamp(start_date)
     end_date = pd.Timestamp(end_date)
 
-    # TODO: Enhance this with batched reading for speed
-    def get_data(symbol: str) -> pd.DataFrame:
-        try:
-            return pd.concat(
-                (
-                    cast(
-                        pd.DataFrame,
-                        pricelib.read(
-                            f"{symbol}.bid", date_range=(start_date, end_date)
-                        ).data,
-                    ),
-                    cast(
-                        pd.DataFrame,
-                        pricelib.read(
-                            f"{symbol}.ask", date_range=(start_date, end_date)
-                        ).data,
-                    ),
-                ),
-                axis=1,
-                keys=("bid", "ask"),
+    symbols_to_read = [(f"{s}.ask", f"{s}.bid") for s in instruments.index.to_list()]
+
+    data = pricelib.read_batch(
+        [
+            adb.ReadRequest(s, date_range=(start_date, end_date))
+            for li in symbols_to_read
+            for s in li
+        ]
+    )
+    assert isinstance(data, list)
+
+    data = batch(data, n=2)
+
+    def get_data(
+        data_pair: tuple[adb.VersionedItem, adb.VersionedItem] | adb.DataError,
+    ) -> pd.DataFrame:
+        bid, ask = data_pair
+        if isinstance(bid, adb.DataError) or isinstance(ask, adb.DataError):
+            return pd.DataFrame(
+                data=[],
+                index=pd.DatetimeIndex([], name="timestamp", tz="utc"),
+                columns=COLUMNS,
             )
-        except NoSuchVersionException as ex:
-            if permit_missing:
-                return pd.DataFrame(
-                    data=[],
-                    index=pd.DatetimeIndex([], name="timestamp", tz="utc"),
-                    columns=COLUMNS,
-                )
-            raise ex
+        return pd.concat(
+            (
+                cast(pd.DataFrame, bid.data),
+                cast(pd.DataFrame, ask.data),
+            ),
+            axis=1,
+            keys=(
+                bid.symbol.rsplit(".", maxsplit=1)[-1],
+                ask.symbol.rsplit(".", maxsplit=1)[-1],
+            ),
+        )
 
     result = pd.concat(
-        ((get_data(symbol) for symbol in instruments.index.to_list())),
+        ((get_data(symbol) for symbol in data)),
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
