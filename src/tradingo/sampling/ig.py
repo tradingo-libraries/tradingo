@@ -160,13 +160,15 @@ def create_universe(
     )
     assert isinstance(data, list)
 
-    data = batch(data, n=2)
+    data_ = batch(data, n=2)
 
     def get_data(
-        data_pair: tuple[adb.VersionedItem, adb.VersionedItem] | adb.DataError,
+        data_pair: list[adb.VersionedItem | adb.DataError],
     ) -> pd.DataFrame:
         bid, ask = data_pair
         if isinstance(bid, adb.DataError) or isinstance(ask, adb.DataError):
+            if not permit_missing:
+                raise ValueError(f"Missing data {bid=}, {ask=}")
             return pd.DataFrame(
                 data=[],
                 index=pd.DatetimeIndex([], name="timestamp", tz="utc"),
@@ -185,12 +187,10 @@ def create_universe(
         )
 
     result = pd.concat(
-        ((get_data(symbol) for symbol in data)),
+        ((get_data(symbol) for symbol in data_)),
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
-    if permit_missing:
-        result = result.reindex(instruments.index)
     return (
         pd.DataFrame(result["bid"]["Open"]),
         pd.DataFrame(result["bid"]["High"]),
