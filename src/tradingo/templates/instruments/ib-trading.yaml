@@ -1,0 +1,61 @@
+# Required variables:
+# 1. universe_name: descriptive name of the universe
+# 2. symbols: list of dicts with keys: symbol, currency (default USD),
+#             exchange (default SMART), sec_type (default STK)
+# 3. interval: IB bar size string or resolution key (DAY, HOUR, MINUTE, …)
+# 4. raw_prices_lib: ArcticDB library name for raw price storage
+# 5. data_interval_start: start date for sampling
+# 6. data_interval_end: end date for sampling
+
+"download.{{ universe_name }}":
+  depends_on: []
+  function: tradingo.sampling.ib.download_instruments
+  symbols_out:
+    - "instruments/{{ universe_name }}"
+  publish_args:
+    write_pickle: true
+  params:
+    symbols: {{ symbols }}
+  enabled: {{ TP_INCLUDE_INSTRUMENTS }}
+
+#{% for item in symbols %}
+"sample.{{ item.symbol }}":
+  depends_on: []
+  symbols_out:
+    - "{{ raw_prices_lib }}/{{ item.symbol }}.bid"
+    - "{{ raw_prices_lib }}/{{ item.symbol }}.ask"
+  function: tradingo.sampling.ib.sample_instrument
+  params:
+    symbol: "{{ item.symbol }}"
+    currency: "{{ item.currency | default('USD') }}"
+    exchange: "{{ item.exchange | default('SMART') }}"
+    sec_type: "{{ item.sec_type | default('STK') }}"
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"
+    interval: "{{ interval }}"
+  publish_args:
+    astype: float
+#{% endfor %}
+
+"sample.{{ universe_name }}":
+  function: tradingo.sampling.ib.create_universe
+  params:
+    pricelib: "{{ raw_prices_lib }}"
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"
+  depends_on:
+  #{% for item in symbols %}
+    - "sample.{{ item.symbol }}"
+  #{% endfor %}
+  symbols_in:
+    instruments: "instruments/{{ universe_name }}"
+  load_args:
+    no_date: true
+  publish_args:
+    astype: float
+  symbols_out:
+  #{% for field in ["ask", "mid", "bid"] %}
+  #{% for occurence in ["open", "high", "low", "close"] %}
+  - prices/{{ universe_name }}.{{ field }}.{{ occurence }}
+  #{% endfor %}
+  #{% endfor %}

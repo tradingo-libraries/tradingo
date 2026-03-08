@@ -53,6 +53,63 @@ def get_ib_service(
     return ib
 
 
+def download_instruments(
+    symbols: list[dict[str, str]],
+    service: IB | None = None,
+) -> pd.DataFrame:
+    """Fetch contract details for a list of IB instruments.
+
+    Each entry in *symbols* must have a ``symbol`` key and may optionally
+    supply ``currency`` (default ``"USD"``), ``exchange`` (default
+    ``"SMART"``), and ``sec_type`` (default ``"STK"``).
+
+    Returns a DataFrame indexed by ``symbol`` with contract metadata
+    (currency, exchange, sec_type, long_name, min_tick).  Mirrors the role
+    of ``sampling.instruments.download_instruments`` for IG/yfinance.
+    """
+    ib = service or get_ib_service()
+
+    rows = []
+    for item in symbols:
+        contract = Contract(
+            symbol=item["symbol"],
+            secType=item.get("sec_type", "STK"),
+            exchange=item.get("exchange", "SMART"),
+            currency=item.get("currency", "USD"),
+        )
+        details_list = ib.reqContractDetails(contract)
+
+        if not details_list:
+            logger.warning(
+                "No contract details for %s — using config values", item["symbol"]
+            )
+            rows.append(
+                {
+                    "symbol": item["symbol"],
+                    "currency": item.get("currency", "USD"),
+                    "exchange": item.get("exchange", "SMART"),
+                    "sec_type": item.get("sec_type", "STK"),
+                    "long_name": None,
+                    "min_tick": None,
+                }
+            )
+        else:
+            det = details_list[0]
+            rows.append(
+                {
+                    "symbol": det.contract.symbol,
+                    "currency": det.contract.currency,
+                    "exchange": det.contract.primaryExch or det.contract.exchange,
+                    "sec_type": det.contract.secType,
+                    "long_name": det.longName,
+                    "min_tick": det.minTick,
+                }
+            )
+
+    ib.disconnect()
+    return pd.DataFrame(rows).set_index("symbol")
+
+
 def sample_instrument(
     symbol: str,
     start_date: pd.Timestamp,
