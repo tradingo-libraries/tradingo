@@ -11,7 +11,9 @@ from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
+
+import pandas as pd
 
 from . import symbols
 from .config import ConfigLoadError
@@ -170,7 +172,7 @@ class Task:
         return self._dependencies
 
 
-class Stage:
+class Stage(Task):
     """A group of tasks executed sequentially as a single unit.
 
     Eliminates inter-task overhead (e.g. Celery round-trips) by running
@@ -194,33 +196,30 @@ class Stage:
     """
 
     def __init__(self, name: str, tasks: list[Task]):
-        self.name = name
-        self._tasks = tasks
-        self.state = TaskState.PENDING
-        self.task_args: tuple[Any, ...] = ()
-
-        # Store subtask kwargs in task_kwargs so Airflow can template-render
-        # any Jinja2 variables (e.g. {{ data_interval_start }}) within them.
-        self.task_kwargs: dict[str, Any] = {
-            "_stage_steps": [
-                {"args": list(t.task_args), "kwargs": t.task_kwargs} for t in tasks
-            ]
-        }
-
-        # Aggregate symbols for DAG introspection
-        self.symbols_out: list[str] = [s for t in tasks for s in t.symbols_out]
-        self.symbols_in: dict[str, str] = {}
-        self.load_args: dict[str, Any] = {}
-        self.publish_args: dict[str, Any] = {}
-
-        # External dependencies: deps of members that point outside the stage
         member_names = {t.name for t in tasks}
-        self._dependencies: list[str] = list(
+        external_deps = list(
             dict.fromkeys(
                 dep for t in tasks for dep in t._dependencies if dep not in member_names
             )
         )
-        self._resolved_dependencies: list[Task] = []
+        super().__init__(
+            name=name,
+            function="",  # overridden by property
+            task_args=(),
+            # Store subtask kwargs in task_kwargs so Airflow can template-render
+            # any Jinja2 variables (e.g. {{ data_interval_start }}) within them.
+            task_kwargs={
+                "_stage_steps": [
+                    {"args": list(t.task_args), "kwargs": t.task_kwargs} for t in tasks
+                ]
+            },
+            symbols_out=[s for t in tasks for s in t.symbols_out],
+            symbols_in={},
+            load_args={},
+            publish_args={},
+            dependencies=external_deps,
+        )
+        self._tasks = tasks
 
     def __repr__(self) -> str:
         subtask_names = [t.name for t in self._tasks]
@@ -250,60 +249,66 @@ class Stage:
 
         return run_stage
 
-    def run(
-        self,
-        *args: object,
-        run_dependencies: bool | int = False,
-        skip_deps: re.Pattern[str] | None = None,
-        force_rerun: bool = False,
-        **kwargs: object,
-    ) -> None:
-        """Run all subtasks sequentially, with optional dependency execution."""
-        if run_dependencies:
-            if isinstance(run_dependencies, int):
-                run_dependencies -= 1
-            for dependency in self.dependencies:
-                if skip_deps and skip_deps.match(dependency.name):
-                    continue
-                dependency.run(
-                    *args,
-                    run_dependencies=run_dependencies,
-                    skip_deps=skip_deps,
-                    force_rerun=force_rerun,
-                    **kwargs,
-                )
 
-        state = self.state
-        try:
-            if self.state == TaskState.PENDING or force_rerun:
-                state = TaskState.FAILED
-                print(f"Running {self}")
-                for task in self._tasks:
-                    task_kwargs = {**task.task_kwargs, **kwargs}
-                    task.function(*task.task_args, *args, **task_kwargs)
-                self.state = state = TaskState.SUCCESS
-        finally:
-            self.state = state
+class BatchMode(Enum):
+    """Controls how dependencies are batched relative to time intervals."""
 
-    def add_dependencies(self, *dependency: str) -> None:
-        """add dependencies to this stage"""
-        self._dependencies.extend(dependency)
+    STEPPED = "stepped"
+    TASK = "task"
+    DEPS_FIRST = "deps-first"
 
-    def resolve_dependencies(self, tasks: dict[str, Task]) -> None:
-        """resolve dependencies to this stage"""
-        self._resolved_dependencies.extend(
-            tasks[dep_name] for dep_name in self._dependencies
-        )
 
-    @property
-    def dependencies(self) -> list[Task]:
-        """this stage's external dependency tasks"""
-        return self._resolved_dependencies
+def generate_intervals(
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+    interval: pd.Timedelta,
+) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    """Split [start_date, end_date) into sub-intervals of size ``interval``.
 
-    @property
-    def dependency_names(self) -> list[str]:
-        """this stage's external dependency task names"""
-        return self._dependencies
+    The last chunk may be shorter than ``interval`` if the range is not
+    evenly divisible.
+    """
+    intervals: list[tuple[pd.Timestamp, pd.Timestamp]] = []
+    cursor = start_date
+    while cursor < end_date:
+        chunk_end = min(cursor + interval, end_date)
+        intervals.append((cursor, chunk_end))
+        cursor = chunk_end
+    return intervals
+
+
+def generate_batch_schedule(
+    task_names: list[str],
+    intervals: list[tuple[pd.Timestamp, pd.Timestamp]],
+    batch_mode: BatchMode,
+    full_start: pd.Timestamp,
+    full_end: pd.Timestamp,
+) -> list[tuple[str, pd.Timestamp, pd.Timestamp]]:
+    """Generate an ordered ``(task_name, start, end)`` execution schedule.
+
+    Args:
+        task_names: All tasks (deps + target) in topological order.
+        intervals: The chunked time intervals.
+        batch_mode: One of STEPPED, TASK, DEPS_FIRST.
+        full_start: Original start_date (used in deps-first mode).
+        full_end: Original end_date (used in deps-first mode).
+    """
+    if batch_mode == BatchMode.STEPPED:
+        return [(t, start, end) for start, end in intervals for t in task_names]
+
+    if batch_mode == BatchMode.TASK:
+        return [(t, start, end) for t in task_names for start, end in intervals]
+
+    if batch_mode == BatchMode.DEPS_FIRST:
+        target = task_names[-1]
+        deps = task_names[:-1]
+        schedule: list[tuple[str, pd.Timestamp, pd.Timestamp]] = [
+            (dep, full_start, full_end) for dep in deps
+        ]
+        schedule.extend((target, s, e) for s, e in intervals)
+        return schedule
+
+    raise ValueError(f"Unknown batch mode: {batch_mode}")
 
 
 def collect_task_configs(
@@ -408,7 +413,7 @@ class DAG(dict[str, Task]):
                     if dep not in stage._dependencies:
                         stage._dependencies.append(dep)
 
-            tasks[stage_name] = stage  # type: ignore[assignment]
+            tasks[stage_name] = stage
 
             # Re-wire: any task depending on a stage member now depends
             # on the stage itself
@@ -483,6 +488,217 @@ class DAG(dict[str, Task]):
 
         _walk(task_name, run_dependencies)
         return collected
+
+    def _topo_sort_runnable(self, runnable: set[str]) -> list[str]:
+        """Topologically sort a set of task names by their dependencies."""
+        in_degree: dict[str, int] = {name: 0 for name in runnable}
+        dependents: dict[str, list[str]] = {name: [] for name in runnable}
+
+        for name in runnable:
+            for dep in self[name].dependencies:
+                if dep.name in runnable:
+                    in_degree[name] += 1
+                    dependents[dep.name].append(name)
+
+        sorted_names: list[str] = []
+        ready = [n for n, d in in_degree.items() if d == 0]
+
+        while ready:
+            name = ready.pop(0)
+            sorted_names.append(name)
+            for downstream in dependents[name]:
+                in_degree[downstream] -= 1
+                if in_degree[downstream] == 0:
+                    ready.append(downstream)
+
+        return sorted_names
+
+    def _run_task_across_intervals_parallel(
+        self,
+        task_name: str,
+        intervals: list[tuple[pd.Timestamp, pd.Timestamp]],
+        max_workers: int,
+        force_rerun: bool,
+        **kwargs: object,
+    ) -> None:
+        """Run a single task across all intervals using a thread pool."""
+        task = self[task_name]
+        errors: list[Exception] = []
+        errors_lock = threading.Lock()
+
+        def _run_interval(start: pd.Timestamp, end: pd.Timestamp) -> None:
+            step_kwargs = {**kwargs, "start_date": start, "end_date": end}
+            task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), step_kwargs)
+            logger.info("Running %s [%s -> %s]", task_name, start, end)
+            task.function(*task.task_args, **task_kwargs)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_run_interval, s, e): (s, e) for s, e in intervals
+            }
+            for future in futures:
+                try:
+                    future.result()
+                except Exception as exc:
+                    with errors_lock:
+                        errors.append(exc)
+
+        if errors:
+            raise ExceptionGroup(
+                f"{len(errors)} interval(s) failed for {task_name}", errors
+            )
+
+    def run_batched(
+        self,
+        task_name: str,
+        batch_interval: pd.Timedelta,
+        batch_mode: str,
+        run_dependencies: bool | int,
+        skip_deps: re.Pattern[str] | None = None,
+        force_rerun: bool = False,
+        max_workers: int = 1,
+        **kwargs: object,
+    ) -> None:
+        """Run tasks in batched time intervals."""
+        start_date = cast(pd.Timestamp | None, kwargs.get("start_date"))
+        end_date = cast(pd.Timestamp | None, kwargs.get("end_date"))
+        if start_date is None or end_date is None:
+            raise ValueError(
+                "--start-date and --end-date are required when using --batch-interval"
+            )
+
+        mode = BatchMode(batch_mode)
+        intervals = generate_intervals(
+            pd.Timestamp(start_date), pd.Timestamp(end_date), batch_interval
+        )
+
+        # Collect dependency names in topological order
+        dep_names: list[str] = []
+        if run_dependencies:
+            runnable = self._collect_runnable_tasks(
+                task_name, run_dependencies, skip_deps
+            )
+            runnable.discard(task_name)
+            dep_names = self._topo_sort_runnable(runnable)
+
+        all_task_names = dep_names + [task_name]
+
+        schedule = generate_batch_schedule(
+            task_names=all_task_names,
+            intervals=intervals,
+            batch_mode=mode,
+            full_start=pd.Timestamp(start_date),
+            full_end=pd.Timestamp(end_date),
+        )
+
+        logger.info(
+            "Batch schedule: %d steps across %d intervals (mode=%s)",
+            len(schedule),
+            len(intervals),
+            mode.value,
+        )
+
+        if max_workers > 1:
+            self._run_batched_parallel(
+                task_name=task_name,
+                dep_names=dep_names,
+                intervals=intervals,
+                mode=mode,
+                run_dependencies=run_dependencies,
+                skip_deps=skip_deps,
+                force_rerun=force_rerun,
+                max_workers=max_workers,
+                **kwargs,
+            )
+            return
+
+        # Sequential execution
+        for step_task_name, chunk_start, chunk_end in schedule:
+            task = self[step_task_name]
+            step_kwargs = dict(kwargs)
+            step_kwargs["start_date"] = chunk_start
+            step_kwargs["end_date"] = chunk_end
+            task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), step_kwargs)
+
+            if task.state == TaskState.PENDING or force_rerun:
+                state = TaskState.FAILED
+                try:
+                    logger.info(
+                        "Running %s [%s -> %s]",
+                        step_task_name,
+                        chunk_start,
+                        chunk_end,
+                    )
+                    print(f"Running {task} [{chunk_start} -> {chunk_end}]")
+                    task.function(*task.task_args, **task_kwargs)
+                    state = TaskState.SUCCESS
+                finally:
+                    task.state = state
+
+    def _run_batched_parallel(
+        self,
+        task_name: str,
+        dep_names: list[str],
+        intervals: list[tuple[pd.Timestamp, pd.Timestamp]],
+        mode: BatchMode,
+        run_dependencies: bool | int,
+        skip_deps: re.Pattern[str] | None = None,
+        force_rerun: bool = False,
+        max_workers: int = 4,
+        **kwargs: object,
+    ) -> None:
+        """Parallel execution of a batched schedule."""
+        all_task_names = dep_names + [task_name]
+        start_date = kwargs["start_date"]
+        end_date = kwargs["end_date"]
+
+        if mode == BatchMode.STEPPED:
+            # Each interval is a barrier; within an interval, use run_parallel
+            for chunk_start, chunk_end in intervals:
+                chunk_kwargs = {
+                    **kwargs,
+                    "start_date": chunk_start,
+                    "end_date": chunk_end,
+                }
+                # Reset states so tasks can re-run for next interval
+                for name in all_task_names:
+                    self[name].state = TaskState.PENDING
+                self.run_parallel(
+                    task_name,
+                    run_dependencies=run_dependencies,
+                    skip_deps=skip_deps,
+                    force_rerun=force_rerun,
+                    max_workers=max_workers,
+                    **chunk_kwargs,
+                )
+
+        elif mode == BatchMode.TASK:
+            # Each task is a barrier; fan out intervals per task
+            for t_name in all_task_names:
+                self._run_task_across_intervals_parallel(
+                    t_name, intervals, max_workers, force_rerun, **kwargs
+                )
+
+        elif mode == BatchMode.DEPS_FIRST:
+            # Phase 1: deps on full range in parallel
+            if dep_names:
+                full_kwargs = {
+                    **kwargs,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+                self.run_parallel(
+                    task_name,
+                    run_dependencies=run_dependencies,
+                    skip_deps=skip_deps,
+                    force_rerun=force_rerun,
+                    max_workers=max_workers,
+                    **full_kwargs,
+                )
+            # Phase 2: target batched in parallel
+            self._run_task_across_intervals_parallel(
+                task_name, intervals, max_workers, force_rerun, **kwargs
+            )
 
     def run_parallel(
         self,
@@ -559,12 +775,27 @@ class DAG(dict[str, Task]):
         run_dependencies: bool | int = False,
         force_rerun: bool = False,
         max_workers: int = 1,
+        batch_interval: pd.Timedelta | None = None,
+        batch_mode: str = "stepped",
         *args: object,
         **kwargs: object,
     ) -> None:
         """run a specific task of this DAG."""
         if task_name not in self:
             raise ValueError(f"{task_name} is not a task in the DAG.")
+
+        if batch_interval is not None:
+            self.run_batched(
+                task_name,
+                batch_interval=batch_interval,
+                batch_mode=batch_mode,
+                run_dependencies=run_dependencies,
+                skip_deps=skip_deps,
+                force_rerun=force_rerun,
+                max_workers=max_workers,
+                **kwargs,
+            )
+            return
 
         if max_workers > 1 and run_dependencies:
             self.run_parallel(

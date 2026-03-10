@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import Any
 
 # Shared state for test assertions
 call_log: list[str] = []
 call_log_lock = threading.Lock()
+
+# Dated call log: records (task_label, start_date, end_date) tuples
+call_log_dated: list[tuple[str, Any, Any]] = []
 
 # Events for controlling execution order in tests
 gate_a = threading.Event()
@@ -18,6 +22,7 @@ gate_c = threading.Event()
 def reset() -> None:
     """Reset shared state between tests."""
     call_log.clear()
+    call_log_dated.clear()
     gate_a.clear()
     gate_b.clear()
     gate_c.clear()
@@ -91,3 +96,21 @@ def fail_a(**kwargs: object) -> None:
 def fail_b(**kwargs: object) -> None:
     """Task that always fails."""
     raise RuntimeError("task_b failed")
+
+
+def record_a_dated(**kwargs: Any) -> None:
+    """Record task A with date range."""
+    with call_log_lock:
+        call_log_dated.append(("a", kwargs.get("start_date"), kwargs.get("end_date")))
+
+
+def record_b_dated(**kwargs: Any) -> None:
+    """Record task B with date range."""
+    with call_log_lock:
+        call_log_dated.append(("b", kwargs.get("start_date"), kwargs.get("end_date")))
+
+
+def record_c_dated(**kwargs: Any) -> None:
+    """Record task C with date range."""
+    with call_log_lock:
+        call_log_dated.append(("c", kwargs.get("start_date"), kwargs.get("end_date")))
