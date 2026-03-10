@@ -113,9 +113,6 @@ def sample_instrument(
                 "close": "Close",
             }
         )
-        # Drop volume column if present — not used in downstream pipeline
-        if "volume" in df.columns:
-            df = df.drop(columns=["volume"])
         # Ensure UTC timezone on index
         if not isinstance(df.index, pd.DatetimeIndex):
             raise TypeError(df.index)

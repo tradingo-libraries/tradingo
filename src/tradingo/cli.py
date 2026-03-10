@@ -45,6 +45,32 @@ def setup_logging(config_path: str | None = None) -> None:
     logging.config.dictConfig(cfg)
 
 
+def parse_interval(value: str) -> pd.Timedelta:
+    """Parse a human-readable interval string to pd.Timedelta.
+
+    Accepted formats: ``"3days"``, ``"2months"``, ``"1hour"``, ``"30min"``,
+    ``"1w"``.  Months are approximated as 30-day multiples.
+    """
+    m = re.fullmatch(r"(\d+)\s*([a-zA-Z]+)", value.strip())
+    if not m:
+        raise argparse.ArgumentTypeError(f"Invalid interval format: {value!r}")
+
+    n, unit = int(m.group(1)), m.group(2).lower()
+
+    if unit in {"month", "months", "mo"}:
+        return pd.Timedelta(days=n * 30)
+
+    if unit in {"week", "weeks"}:
+        return pd.Timedelta(weeks=n)
+
+    try:
+        return pd.Timedelta(n, unit=unit)  # type: ignore
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Unrecognized time unit {unit!r} in interval {value!r}"
+        ) from exc
+
+
 def int_or_bool(val: str) -> int | bool:
     if val.lower() in {"true", "yes"}:
         return True
@@ -109,6 +135,18 @@ def cli_app() -> argparse.ArgumentParser:
         "--cache",
         action="store_true",
         help="Wrap Arctic in a write-through in-memory cache for faster reads",
+    )
+    run_tasks.add_argument(
+        "--batch-interval",
+        type=parse_interval,
+        default=None,
+        help="Split the date range into chunks of this size (e.g. '3days', '2months', '1hour')",
+    )
+    run_tasks.add_argument(
+        "--batch-mode",
+        choices=["stepped", "task", "deps-first"],
+        default="stepped",
+        help="How to order batched chunks vs dependencies (default: stepped)",
     )
 
     _ = task_subparsers.add_parser("list")
@@ -218,6 +256,8 @@ def handle_tasks(args: argparse.Namespace, arctic: Arctic | CachingArctic) -> No
                 run_dependencies=args.with_deps,
                 force_rerun=args.force_rerun,
                 max_workers=getattr(args, "n_workers", 1),
+                batch_interval=getattr(args, "batch_interval", None),
+                batch_mode=getattr(args, "batch_mode", "stepped"),
                 arctic=arctic,
                 dry_run=args.dry_run,
                 skip_deps=args.skip_deps,
