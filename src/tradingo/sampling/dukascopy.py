@@ -1,6 +1,7 @@
 """Dukascopy data accessors."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 import dukascopy_python
 import pandas as pd
@@ -87,21 +88,28 @@ def sample_instrument(
 
     logger.info("Fetching %s [%s] %s -> %s", epic, interval, start_dt, end_dt)
 
-    bid = dukascopy_python.fetch(
-        instrument,
-        dk_interval,
-        dukascopy_python.OFFER_SIDE_BID,
-        start_dt.to_pydatetime(),
-        end_dt.to_pydatetime(),
-    )
+    start_pydatetime = start_dt.to_pydatetime()
+    end_pydatetime = end_dt.to_pydatetime()
 
-    ask = dukascopy_python.fetch(
-        instrument,
-        dk_interval,
-        dukascopy_python.OFFER_SIDE_ASK,
-        start_dt,
-        end_dt,
-    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        bid_future = executor.submit(
+            dukascopy_python.fetch,
+            instrument,
+            dk_interval,
+            dukascopy_python.OFFER_SIDE_BID,
+            start_pydatetime,
+            end_pydatetime,
+        )
+        ask_future = executor.submit(
+            dukascopy_python.fetch,
+            instrument,
+            dk_interval,
+            dukascopy_python.OFFER_SIDE_ASK,
+            start_pydatetime,
+            end_pydatetime,
+        )
+        bid = bid_future.result()
+        ask = ask_future.result()
 
     def _normalize(df: pd.DataFrame) -> pd.DataFrame:
         """Rename columns to title case to match IG convention."""
