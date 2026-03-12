@@ -526,15 +526,28 @@ class DAG(dict[str, Task]):
         errors: list[Exception] = []
         errors_lock = threading.Lock()
 
-        def _run_interval(start: pd.Timestamp, end: pd.Timestamp) -> None:
-            step_kwargs = {**kwargs, "start_date": start, "end_date": end}
-            task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), step_kwargs)
+        def _run_interval(
+            start: pd.Timestamp, end: pd.Timestamp, interval_kwargs: dict[str, object]
+        ) -> None:
+            task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), interval_kwargs)
             logger.info("Running %s [%s -> %s]", task_name, start, end)
             task.function(*task.task_args, **task_kwargs)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # --clean should only delete on the first interval; subsequent
+            # intervals append/update into the data written by prior chunks.
             futures = {
-                executor.submit(_run_interval, s, e): (s, e) for s, e in intervals
+                executor.submit(
+                    _run_interval,
+                    s,
+                    e,
+                    (
+                        {**kwargs, "start_date": s, "end_date": e}
+                        if i == 0
+                        else {**kwargs, "start_date": s, "end_date": e, "clean": False}
+                    ),
+                ): (s, e)
+                for i, (s, e) in enumerate(intervals)
             }
             for future in futures:
                 try:
@@ -613,11 +626,16 @@ class DAG(dict[str, Task]):
             return
 
         # Sequential execution
+        # Track which tasks have run at least once so --clean only applies to
+        # the first interval per task (not every subsequent chunk).
+        seen_tasks: set[str] = set()
         for step_task_name, chunk_start, chunk_end in schedule:
             task = self[step_task_name]
             step_kwargs = dict(kwargs)
             step_kwargs["start_date"] = chunk_start
             step_kwargs["end_date"] = chunk_end
+            if step_task_name in seen_tasks:
+                step_kwargs.pop("clean", None)
             task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), step_kwargs)
 
             if task.state == TaskState.PENDING or force_rerun:
@@ -634,6 +652,8 @@ class DAG(dict[str, Task]):
                     state = TaskState.SUCCESS
                 finally:
                     task.state = state
+
+            seen_tasks.add(step_task_name)
 
     def _run_batched_parallel(
         self,
@@ -653,10 +673,12 @@ class DAG(dict[str, Task]):
         end_date = kwargs["end_date"]
 
         if mode == BatchMode.STEPPED:
-            # Each interval is a barrier; within an interval, use run_parallel
+            # Each interval is a barrier; within an interval, use run_parallel.
+            # --clean only applies to the first interval; strip it thereafter.
+            current_kwargs = dict(kwargs)
             for chunk_start, chunk_end in intervals:
                 chunk_kwargs = {
-                    **kwargs,
+                    **current_kwargs,
                     "start_date": chunk_start,
                     "end_date": chunk_end,
                 }
@@ -671,6 +693,7 @@ class DAG(dict[str, Task]):
                     max_workers=max_workers,
                     **chunk_kwargs,
                 )
+                current_kwargs.pop("clean", None)
 
         elif mode == BatchMode.TASK:
             # Each task is a barrier; fan out intervals per task
