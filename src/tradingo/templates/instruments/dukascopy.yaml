@@ -11,19 +11,19 @@
   depends_on: []
   function: tradingo.sampling.instruments.download_instruments
   symbols_out:
-     - "instruments/{{ universe_name }}"
+    - "instruments/{{ universe_name }}"
   publish_args:
     write_pickle: true
   params:
-    dukascopy_instruments: {{ epics }}
-  enabled: {{ TP_INCLUDE_INSTRUMENTS }}
+    dukascopy_instruments: { { epics } }
+  enabled: { { TP_INCLUDE_INSTRUMENTS } }
 
 #{% for epic in epics %}
 "sample.{{ epic }}":
   depends_on: []
   symbols_out:
-   - "{{ raw_prices_lib }}/{{ epic }}.bid"
-   - "{{ raw_prices_lib }}/{{ epic }}.ask"
+    - "{{ raw_prices_lib }}/{{ epic }}.bid"
+    - "{{ raw_prices_lib }}/{{ epic }}.ask"
   function: "{{ samplingFunction }}"
   params:
     epic: "{{ epic }}"
@@ -42,7 +42,7 @@
     end_date: "{{ data_interval_end }}"
     permit_missing: "{{ permit_missing }}"
   depends_on:
-  #{%for epic in epics %}
+    #{%for epic in epics %}
     - "sample.{{ epic }}"
   #{% endfor %}
   symbols_in:
@@ -52,8 +52,8 @@
   publish_args:
     astype: float
   symbols_out:
-  #{% for field in ["ask", "mid", "bid"] %}
-  #{% for occurence in ["open", "high", "low", "close"] %}
-  - prices/{{ universe_name }}.{{ field }}.{{ occurence }}
+    #{% for field in ["ask", "mid", "bid"] %}
+    #{% for occurence in ["open", "high", "low", "close"] %}
+    - "prices_{{ interval }}/{{ universe_name }}.{{ field }}.{{ occurence }}"
   #{% endfor %}
   #{% endfor %}
