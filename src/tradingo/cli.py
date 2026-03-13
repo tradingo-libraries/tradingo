@@ -101,7 +101,10 @@ def cli_app() -> argparse.ArgumentParser:
     )
     app.add_argument(
         "--config",
-        type=lambda i: read_config_template(pathlib.Path(i), dict(os.environ)),
+        type=lambda i: (
+            read_config_template(pathlib.Path(i), dict(os.environ)),
+            str(pathlib.Path(i).resolve()),
+        ),
         required=True,
     )
 
@@ -147,6 +150,12 @@ def cli_app() -> argparse.ArgumentParser:
         choices=["stepped", "task", "deps-first"],
         default="stepped",
         help="How to order batched chunks vs dependencies (default: stepped)",
+    )
+    run_tasks.add_argument(
+        "--recover",
+        action="store_true",
+        default=False,
+        help="Resume a previously failed batched run, skipping completed steps",
     )
 
     _ = task_subparsers.add_parser("list")
@@ -220,14 +229,19 @@ def cli_app() -> argparse.ArgumentParser:
     return app
 
 
+def _unpack_config(raw: Any) -> tuple[Any, str | None]:
+    """Unpack args.config which is either a (config, path) tuple or a plain dict."""
+    if isinstance(raw, tuple):
+        return raw
+    return raw, None
+
+
 def handle_tasks(args: argparse.Namespace, arctic: Arctic | CachingArctic) -> None:
     """inspect or run Tradingo tasks."""
+    config, config_path = _unpack_config(args.config)
 
     if args.list_action == "list":
-        graph = DAG.from_config(
-            args.config,
-        )
-
+        graph = DAG.from_config(config)
         graph.print()
 
     elif args.list_action == "run":
@@ -237,14 +251,19 @@ def handle_tasks(args: argparse.Namespace, arctic: Arctic | CachingArctic) -> No
             caching_arctic.warm_cache()
             arctic = caching_arctic
 
-        graph = DAG.from_config(
-            args.config,
-        )
-
+        graph = DAG.from_config(config)
         graph.update_state()
 
+        # --recover implies force_rerun=False unless explicitly overridden
+        recover = getattr(args, "recover", False)
+        force_rerun = args.force_rerun
+        if recover and force_rerun:
+            # force_rerun defaults to True, so unless the user explicitly
+            # passed --force-rerun alongside --recover, disable it.
+            force_rerun = False
+
         try:
-            extra_kwargs = {}
+            extra_kwargs: dict[str, object] = {}
             if args.start_date:
                 extra_kwargs["start_date"] = args.start_date
             if args.end_date:
@@ -254,10 +273,12 @@ def handle_tasks(args: argparse.Namespace, arctic: Arctic | CachingArctic) -> No
             graph.run(
                 args.task,
                 run_dependencies=args.with_deps,
-                force_rerun=args.force_rerun,
+                force_rerun=force_rerun,
                 max_workers=getattr(args, "n_workers", 1),
                 batch_interval=getattr(args, "batch_interval", None),
                 batch_mode=getattr(args, "batch_mode", "stepped"),
+                recover=recover,
+                config_path=config_path,
                 arctic=arctic,
                 dry_run=args.dry_run,
                 skip_deps=args.skip_deps,
@@ -275,9 +296,11 @@ def handle_tasks(args: argparse.Namespace, arctic: Arctic | CachingArctic) -> No
 def handle_pipeline(args: argparse.Namespace, arctic_uri: str) -> None:
     """Run pipeline with in-memory caching."""
 
+    pipeline_config, _ = _unpack_config(args.config)
+
     if args.pipeline_action == "run":
         runner = PipelineRunner(
-            config=args.config,
+            config=pipeline_config,
             backing_uri=arctic_uri,
             async_write=getattr(args, "async_write", False),
         )
@@ -332,7 +355,7 @@ def handle_pipeline(args: argparse.Namespace, arctic_uri: str) -> None:
             )
 
         app = create_app(
-            config=args.config,
+            config=pipeline_config,
             backing_uri=arctic_uri,
             async_write=getattr(args, "async_write", False),
             warm_range=warm_range,
