@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+import pandas as pd
 import pytest
 
 from tradingo.dag import DAG, TaskState
@@ -167,3 +168,59 @@ class TestParallelExecution:
         assert "a" not in helpers.call_log
         assert "b" in helpers.call_log
         assert "c" in helpers.call_log
+
+
+class TestBatchedParallelSafety:
+    """Verify that same-task intervals run sequentially in TASK mode."""
+
+    def setup_method(self) -> None:
+        helpers.reset()
+        helpers.reset_threaded()
+
+    def test_task_mode_intervals_are_sequential_per_task(self) -> None:
+        """In TASK mode with max_workers>1, each task's intervals run sequentially."""
+        config = {
+            "task.a": {
+                "function": f"{HELPERS}.record_a_threaded",
+                "depends_on": [],
+                "params": {},
+            },
+            "task.b": {
+                "function": f"{HELPERS}.record_b_threaded",
+                "depends_on": ["task.a"],
+                "params": {},
+            },
+        }
+        dag = DAG.from_config(config)
+
+        dag.run(
+            "task.b",
+            run_dependencies=True,
+            force_rerun=True,
+            max_workers=4,
+            batch_interval=pd.Timedelta(days=5),
+            batch_mode="task",
+            start_date=pd.Timestamp("2024-01-01"),
+            end_date=pd.Timestamp("2024-01-16"),
+        )
+
+        # 3 intervals x 2 tasks = 6 entries
+        assert len(helpers.call_log_threaded) == 6
+
+        # All of task a's entries should appear before any of task b's
+        labels = [label for label, _, _, _ in helpers.call_log_threaded]
+        a_indices = [i for i, lbl in enumerate(labels) if lbl == "a"]
+        b_indices = [i for i, lbl in enumerate(labels) if lbl == "b"]
+        assert max(a_indices) < min(
+            b_indices
+        ), "task.a intervals should all complete before task.b starts"
+
+        # Within each task, intervals should be in chronological order
+        a_dates = [
+            (s, e) for label, s, e, _ in helpers.call_log_threaded if label == "a"
+        ]
+        b_dates = [
+            (s, e) for label, s, e, _ in helpers.call_log_threaded if label == "b"
+        ]
+        assert a_dates == sorted(a_dates)
+        assert b_dates == sorted(b_dates)

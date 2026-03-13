@@ -17,6 +17,7 @@ import pandas as pd
 
 from . import symbols
 from .config import ConfigLoadError
+from .execution_plan import ExecutionPlan
 
 logger = logging.getLogger(__name__)
 
@@ -513,53 +514,30 @@ class DAG(dict[str, Task]):
 
         return sorted_names
 
-    def _run_task_across_intervals_parallel(
+    def _run_intervals_sequential(
         self,
         task_name: str,
         intervals: list[tuple[pd.Timestamp, pd.Timestamp]],
-        max_workers: int,
         force_rerun: bool,
         **kwargs: object,
     ) -> None:
-        """Run a single task across all intervals using a thread pool."""
+        """Run one task across all its intervals sequentially.
+
+        ``clean`` is only applied to the first interval; subsequent
+        intervals strip it so they append/update rather than overwrite.
+        """
         task = self[task_name]
-        errors: list[Exception] = []
-        errors_lock = threading.Lock()
-
-        def _run_interval(
-            start: pd.Timestamp, end: pd.Timestamp, interval_kwargs: dict[str, object]
-        ) -> None:
-            task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), interval_kwargs)
-            logger.info("Running %s [%s -> %s]", task_name, start, end)
-            task.function(*task.task_args, **task_kwargs)
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # --clean should only delete on the first interval; subsequent
-            # intervals append/update into the data written by prior chunks.
-            futures = {
-                executor.submit(
-                    _run_interval,
-                    s,
-                    e,
-                    (
-                        {**kwargs, "start_date": s, "end_date": e}
-                        if i == 0
-                        else {**kwargs, "start_date": s, "end_date": e, "clean": False}
-                    ),
-                ): (s, e)
-                for i, (s, e) in enumerate(intervals)
-            }
-            for future in futures:
-                try:
-                    future.result()
-                except Exception as exc:
-                    with errors_lock:
-                        errors.append(exc)
-
-        if errors:
-            raise ExceptionGroup(
-                f"{len(errors)} interval(s) failed for {task_name}", errors
-            )
+        for i, (start, end) in enumerate(intervals):
+            step_kwargs = dict(kwargs)
+            step_kwargs["start_date"] = start
+            step_kwargs["end_date"] = end
+            if i > 0:
+                step_kwargs.pop("clean", None)
+            task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), step_kwargs)
+            if task.state == TaskState.PENDING or force_rerun:
+                logger.info("Running %s [%s -> %s]", task_name, start, end)
+                print(f"Running {task} [{start} -> {end}]")
+                task.function(*task.task_args, **task_kwargs)
 
     def run_batched(
         self,
@@ -570,6 +548,8 @@ class DAG(dict[str, Task]):
         skip_deps: re.Pattern[str] | None = None,
         force_rerun: bool = False,
         max_workers: int = 1,
+        recover: bool = False,
+        config_path: str | None = None,
         **kwargs: object,
     ) -> None:
         """Run tasks in batched time intervals."""
@@ -611,6 +591,42 @@ class DAG(dict[str, Task]):
             mode.value,
         )
 
+        # Build or recover execution plan
+        plan: ExecutionPlan | None = None
+        if config_path is not None:
+            plan_key = ExecutionPlan.make_key(
+                config_path=config_path,
+                task_name=task_name,
+                start_date=str(start_date),
+                end_date=str(end_date),
+                batch_interval=str(batch_interval),
+                batch_mode=batch_mode,
+                with_deps=str(run_dependencies),
+            )
+            plan_params = {
+                "config_path": config_path,
+                "task_name": task_name,
+                "start_date": str(start_date),
+                "end_date": str(end_date),
+                "batch_interval": str(batch_interval),
+                "batch_mode": batch_mode,
+                "with_deps": str(run_dependencies),
+            }
+            if recover and not force_rerun:
+                plan = ExecutionPlan.load(plan_key)
+                if plan is not None:
+                    resume_idx = plan.first_non_success()
+                    if resume_idx is None:
+                        logger.info("All steps already completed — nothing to do.")
+                        return
+                    logger.info(
+                        "Recovering execution plan: skipping %d completed steps",
+                        resume_idx,
+                    )
+            if plan is None:
+                plan = ExecutionPlan.from_schedule(plan_key, plan_params, schedule)
+                plan.save()
+
         if max_workers > 1:
             self._run_batched_parallel(
                 task_name=task_name,
@@ -621,6 +637,7 @@ class DAG(dict[str, Task]):
                 skip_deps=skip_deps,
                 force_rerun=force_rerun,
                 max_workers=max_workers,
+                plan=plan,
                 **kwargs,
             )
             return
@@ -629,8 +646,15 @@ class DAG(dict[str, Task]):
         # Track which tasks have run at least once so --clean only applies to
         # the first interval per task (not every subsequent chunk).
         seen_tasks: set[str] = set()
-        for step_task_name, chunk_start, chunk_end in schedule:
+        for step_idx, (step_task_name, chunk_start, chunk_end) in enumerate(schedule):
+            # Skip completed steps when recovering
+            if plan is not None and plan.steps[step_idx].status == "SUCCESS":
+                seen_tasks.add(step_task_name)
+                continue
+
             task = self[step_task_name]
+            # Reset state so the same task can run again for the next interval
+            task.state = TaskState.PENDING
             step_kwargs = dict(kwargs)
             step_kwargs["start_date"] = chunk_start
             step_kwargs["end_date"] = chunk_end
@@ -650,6 +674,12 @@ class DAG(dict[str, Task]):
                     print(f"Running {task} [{chunk_start} -> {chunk_end}]")
                     task.function(*task.task_args, **task_kwargs)
                     state = TaskState.SUCCESS
+                    if plan is not None:
+                        plan.mark_step(step_idx, "SUCCESS")
+                except Exception:
+                    if plan is not None:
+                        plan.mark_step(step_idx, "FAILED")
+                    raise
                 finally:
                     task.state = state
 
@@ -665,9 +695,15 @@ class DAG(dict[str, Task]):
         skip_deps: re.Pattern[str] | None = None,
         force_rerun: bool = False,
         max_workers: int = 4,
+        plan: ExecutionPlan | None = None,
         **kwargs: object,
     ) -> None:
-        """Parallel execution of a batched schedule."""
+        """Parallel execution of a batched schedule.
+
+        Independent tasks may run in parallel threads, but each task's
+        intervals always run sequentially to avoid concurrent writes to the
+        same ArcticDB symbol.
+        """
         all_task_names = dep_names + [task_name]
         start_date = kwargs["start_date"]
         end_date = kwargs["end_date"]
@@ -696,10 +732,62 @@ class DAG(dict[str, Task]):
                 current_kwargs.pop("clean", None)
 
         elif mode == BatchMode.TASK:
-            # Each task is a barrier; fan out intervals per task
-            for t_name in all_task_names:
-                self._run_task_across_intervals_parallel(
-                    t_name, intervals, max_workers, force_rerun, **kwargs
+            # Each task runs its intervals sequentially; independent tasks
+            # can run in parallel threads.
+            errors: list[Exception] = []
+            errors_lock = threading.Lock()
+
+            def _run_task_intervals(t_name: str) -> None:
+                try:
+                    self._run_intervals_sequential(
+                        t_name, intervals, force_rerun, **kwargs
+                    )
+                except Exception as exc:
+                    with errors_lock:
+                        errors.append(exc)
+
+            # Build dependency graph among the task names to respect ordering
+            runnable_set = set(all_task_names)
+            in_degree: dict[str, int] = {n: 0 for n in all_task_names}
+            dependents: dict[str, list[str]] = {n: [] for n in all_task_names}
+            for name in all_task_names:
+                for dep in self[name].dependencies:
+                    if dep.name in runnable_set:
+                        in_degree[name] += 1
+                        dependents[dep.name].append(name)
+
+            ready = [n for n, d in in_degree.items() if d == 0]
+            pending_futures: set[Future[str]] = set()
+            in_degree_lock = threading.Lock()
+
+            def _submit_task(name: str, executor: ThreadPoolExecutor) -> Future[str]:
+                def _wrapped() -> str:
+                    _run_task_intervals(name)
+                    return name
+
+                return executor.submit(_wrapped)
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for name in ready:
+                    pending_futures.add(_submit_task(name, executor))
+
+                while pending_futures:
+                    done, pending_futures = wait(
+                        pending_futures, return_when=FIRST_COMPLETED
+                    )
+                    for future in done:
+                        finished_name = future.result()
+                        with in_degree_lock:
+                            for dep_name in dependents[finished_name]:
+                                in_degree[dep_name] -= 1
+                                if in_degree[dep_name] == 0:
+                                    pending_futures.add(
+                                        _submit_task(dep_name, executor)
+                                    )
+
+            if errors:
+                raise ExceptionGroup(
+                    f"{len(errors)} task(s) failed in TASK mode", errors
                 )
 
         elif mode == BatchMode.DEPS_FIRST:
@@ -718,10 +806,8 @@ class DAG(dict[str, Task]):
                     max_workers=max_workers,
                     **full_kwargs,
                 )
-            # Phase 2: target batched in parallel
-            self._run_task_across_intervals_parallel(
-                task_name, intervals, max_workers, force_rerun, **kwargs
-            )
+            # Phase 2: target batched sequentially (same task, sequential intervals)
+            self._run_intervals_sequential(task_name, intervals, force_rerun, **kwargs)
 
     def run_parallel(
         self,
@@ -800,6 +886,8 @@ class DAG(dict[str, Task]):
         max_workers: int = 1,
         batch_interval: pd.Timedelta | None = None,
         batch_mode: str = "stepped",
+        recover: bool = False,
+        config_path: str | None = None,
         *args: object,
         **kwargs: object,
     ) -> None:
@@ -816,6 +904,8 @@ class DAG(dict[str, Task]):
                 skip_deps=skip_deps,
                 force_rerun=force_rerun,
                 max_workers=max_workers,
+                recover=recover,
+                config_path=config_path,
                 **kwargs,
             )
             return

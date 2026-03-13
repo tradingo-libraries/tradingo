@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, cast
 
 import pandas as pd
@@ -614,6 +615,184 @@ class TestRunBatched:
         assert labels.count("a") == 2
         assert labels.count("b") == 2
         assert labels.count("c") == 2
+
+
+class TestRunBatchedRecovery:
+    """Tests for execution plan recovery in DAG.run_batched()."""
+
+    def setup_method(self) -> None:
+        from test.tradingo._dag_helpers import reset, reset_fail_counter
+
+        reset()
+        reset_fail_counter()
+
+    def _make_dag(self) -> DAG:
+        """Create a DAG: a -> b (using dated recording helpers)."""
+        config = {
+            "task.a": _make_dated_task(
+                "task.a",
+                "test.tradingo._dag_helpers.record_a_dated",
+            ),
+            "task.b": _make_dated_task(
+                "task.b",
+                "test.tradingo._dag_helpers.record_b_dated",
+                depends_on=["task.a"],
+            ),
+        }
+        return DAG.from_config(config)
+
+    def test_plan_created_on_batched_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A plan file is created when config_path is provided."""
+        from tradingo.execution_plan import ExecutionPlan
+
+        monkeypatch.setattr(ExecutionPlan, "PLANS_DIR", str(tmp_path))
+
+        from test.tradingo._dag_helpers import call_log_dated
+
+        dag = self._make_dag()
+        dag.run(
+            "task.b",
+            run_dependencies=True,
+            force_rerun=True,
+            batch_interval=pd.Timedelta(days=5),
+            batch_mode="stepped",
+            config_path="/test/config.yaml",
+            start_date=pd.Timestamp("2024-01-01"),
+            end_date=pd.Timestamp("2024-01-11"),
+        )
+
+        assert len(call_log_dated) == 4  # 2 intervals x 2 tasks
+        plan_files = list(tmp_path.glob("*.json"))
+        assert len(plan_files) == 1
+
+        # All steps should be SUCCESS
+        plan = ExecutionPlan.load(plan_files[0].stem)
+        assert plan is not None
+        assert all(s.status == "SUCCESS" for s in plan.steps)
+
+    def test_recover_skips_completed_steps(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--recover skips steps already marked SUCCESS."""
+        from tradingo.execution_plan import ExecutionPlan
+
+        monkeypatch.setattr(ExecutionPlan, "PLANS_DIR", str(tmp_path))
+
+        from test.tradingo._dag_helpers import call_log_dated
+
+        dag = self._make_dag()
+
+        # First run: complete all steps
+        dag.run(
+            "task.b",
+            run_dependencies=True,
+            force_rerun=True,
+            batch_interval=pd.Timedelta(days=5),
+            batch_mode="task",
+            config_path="/test/config.yaml",
+            start_date=pd.Timestamp("2024-01-01"),
+            end_date=pd.Timestamp("2024-01-11"),
+        )
+        assert len(call_log_dated) == 4
+
+        call_log_dated.clear()
+
+        # Second run with recover=True, force_rerun=False: should skip everything
+        dag2 = self._make_dag()
+        dag2.run(
+            "task.b",
+            run_dependencies=True,
+            force_rerun=False,
+            recover=True,
+            batch_interval=pd.Timedelta(days=5),
+            batch_mode="task",
+            config_path="/test/config.yaml",
+            start_date=pd.Timestamp("2024-01-01"),
+            end_date=pd.Timestamp("2024-01-11"),
+        )
+        # All steps were SUCCESS, so nothing should run
+        assert len(call_log_dated) == 0
+
+    def test_recover_resumes_from_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--recover resumes from the first non-SUCCESS step."""
+        from tradingo.execution_plan import ExecutionPlan
+
+        monkeypatch.setattr(ExecutionPlan, "PLANS_DIR", str(tmp_path))
+
+        from test.tradingo._dag_helpers import call_log_dated
+
+        # Use a dag with task.a that fails on 2nd call
+        config = {
+            "task.a": _make_dated_task(
+                "task.a",
+                "test.tradingo._dag_helpers.record_a_fail_second",
+            ),
+            "task.b": _make_dated_task(
+                "task.b",
+                "test.tradingo._dag_helpers.record_b_dated",
+                depends_on=["task.a"],
+            ),
+        }
+        dag = DAG.from_config(config)
+
+        # First run: a(interval1) succeeds, a(interval2) fails
+        with pytest.raises(RuntimeError, match="task_a failed"):
+            dag.run(
+                "task.b",
+                run_dependencies=True,
+                force_rerun=True,
+                batch_interval=pd.Timedelta(days=5),
+                batch_mode="task",
+                config_path="/test/config.yaml",
+                start_date=pd.Timestamp("2024-01-01"),
+                end_date=pd.Timestamp("2024-01-11"),
+            )
+
+        # Check the plan: first step SUCCESS, second FAILED
+        plan_files = list(tmp_path.glob("*.json"))
+        assert len(plan_files) == 1
+        plan = ExecutionPlan.load(plan_files[0].stem)
+        assert plan is not None
+        assert plan.steps[0].status == "SUCCESS"
+        assert plan.steps[1].status == "FAILED"
+
+        # Recovery run: should skip the first step
+        call_log_dated.clear()
+        from test.tradingo._dag_helpers import reset_fail_counter
+
+        reset_fail_counter()
+
+        dag2 = DAG.from_config(
+            {
+                "task.a": _make_dated_task(
+                    "task.a",
+                    "test.tradingo._dag_helpers.record_a_dated",
+                ),
+                "task.b": _make_dated_task(
+                    "task.b",
+                    "test.tradingo._dag_helpers.record_b_dated",
+                    depends_on=["task.a"],
+                ),
+            }
+        )
+        dag2.run(
+            "task.b",
+            run_dependencies=True,
+            force_rerun=False,
+            recover=True,
+            batch_interval=pd.Timedelta(days=5),
+            batch_mode="task",
+            config_path="/test/config.yaml",
+            start_date=pd.Timestamp("2024-01-01"),
+            end_date=pd.Timestamp("2024-01-11"),
+        )
+
+        # Should have run the remaining 3 steps (a[interval2], b[interval1], b[interval2])
+        assert len(call_log_dated) == 3
 
 
 if __name__ == "__main__":

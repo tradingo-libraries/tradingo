@@ -114,3 +114,73 @@ def record_c_dated(**kwargs: Any) -> None:
     """Record task C with date range."""
     with call_log_lock:
         call_log_dated.append(("c", kwargs.get("start_date"), kwargs.get("end_date")))
+
+
+# Thread-aware recording: captures (task_label, start_date, end_date, thread_name)
+call_log_threaded: list[tuple[str, Any, Any, str]] = []
+
+
+def reset_threaded() -> None:
+    """Reset threaded call log."""
+    call_log_threaded.clear()
+
+
+def record_a_threaded(**kwargs: Any) -> None:
+    """Record task A with thread info."""
+    with call_log_lock:
+        call_log_threaded.append(
+            (
+                "a",
+                kwargs.get("start_date"),
+                kwargs.get("end_date"),
+                threading.current_thread().name,
+            )
+        )
+
+
+def record_b_threaded(**kwargs: Any) -> None:
+    """Record task B with thread info."""
+    with call_log_lock:
+        call_log_threaded.append(
+            (
+                "b",
+                kwargs.get("start_date"),
+                kwargs.get("end_date"),
+                threading.current_thread().name,
+            )
+        )
+
+
+def record_c_threaded(**kwargs: Any) -> None:
+    """Record task C with thread info."""
+    with call_log_lock:
+        call_log_threaded.append(
+            (
+                "c",
+                kwargs.get("start_date"),
+                kwargs.get("end_date"),
+                threading.current_thread().name,
+            )
+        )
+
+
+# Fail on specific step for recovery testing
+fail_step_counter: dict[str, int] = {}
+fail_step_counter_lock = threading.Lock()
+
+
+def reset_fail_counter() -> None:
+    """Reset the fail step counter."""
+    fail_step_counter.clear()
+
+
+def record_a_fail_second(**kwargs: Any) -> None:
+    """Record task A; fail on the 2nd call."""
+    with fail_step_counter_lock:
+        fail_step_counter.setdefault("a", 0)
+        fail_step_counter["a"] += 1
+        count = fail_step_counter["a"]
+    if count == 2:
+        raise RuntimeError("task_a failed on call 2")
+    with call_log_lock:
+        call_log_dated.append(("a", kwargs.get("start_date"), kwargs.get("end_date")))
