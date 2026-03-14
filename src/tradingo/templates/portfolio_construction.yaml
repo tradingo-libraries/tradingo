@@ -43,6 +43,7 @@
     model_weights: {{ model_weights }}
     multiplier: {{ portfolio.multiplier }}
     aum: {{ portfolio.aum }}
+    ffill_limit: {{ portfolio.ffill_limit | default(10) }}
 "backtest.{{ name }}":
   depends_on:
     - "portfolio.{{ name }}"
