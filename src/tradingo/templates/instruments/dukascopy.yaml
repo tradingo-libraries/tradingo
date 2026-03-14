@@ -15,8 +15,8 @@
   publish_args:
     write_pickle: true
   params:
-    dukascopy_instruments: { { epics } }
-  enabled: { { TP_INCLUDE_INSTRUMENTS } }
+    dukascopy_instruments: {{ epics }}
+  enabled: {{ TP_INCLUDE_INSTRUMENTS }}
 
 #{% for epic in epics %}
 "sample.{{ epic }}":
