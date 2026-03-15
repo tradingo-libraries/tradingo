@@ -1,7 +1,7 @@
 """IG data accessors"""
 
 import logging
-from typing import Hashable, Optional
+from typing import Hashable, cast
 
 import dateutil.tz
 import numpy as np
@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 def get_ig_service(
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    api_key: Optional[str] = None,
-    acc_type: Optional[str] = None,
+    username: str | None = None,
+    password: str | None = None,
+    api_key: str | None = None,
+    acc_type: str | None = None,
 ) -> IGService:
     config = IGTradingConfig.from_env()
 
@@ -48,7 +48,7 @@ def sample_instrument(
     end_date: pd.Timestamp,
     interval: str,
     wait: int = 0,
-    service: Optional[IGService] = None,
+    service: IGService | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     service = service or get_ig_service()
     try:
@@ -105,7 +105,7 @@ def sample_instrument(
     )
 
 
-@symbols.lib_provider(pricelib="{raw_price_lib}")
+@symbols.lib_provider(pricelib="{raw_price_lib}")  # pyright: ignore
 def create_universe(
     pricelib: Library,
     instruments: pd.DataFrame,
@@ -139,15 +139,17 @@ def create_universe(
     def get_data(symbol: str) -> pd.DataFrame:
         return pd.concat(
             (
-                pd.DataFrame(
+                cast(
+                    pd.DataFrame,
                     pricelib.read(
                         f"{symbol}.bid", date_range=(start_date, end_date)
-                    ).data
+                    ).data,
                 ),
-                pd.DataFrame(
+                cast(
+                    pd.DataFrame,
                     pricelib.read(
                         f"{symbol}.ask", date_range=(start_date, end_date)
-                    ).data
+                    ).data,
                 ),
             ),
             axis=1,
