@@ -414,7 +414,7 @@ def symbol_publisher(
             libraries: DefaultDict[str, dict[str, int]] = defaultdict(dict)
 
             for data, symbol in zip(out, formatted_symbols, strict=True):
-                assert isinstance(data, pd.DataFrame)
+                assert isinstance(data, pd.DataFrame), type(data)
                 if data.empty:
                     continue
 

@@ -17,7 +17,12 @@ import pandas as pd
 import pytest
 from arcticdb import Arctic
 
-from tradingo.portfolio import portfolio_construction
+from tradingo.portfolio import (
+    aggregate_portfolio,
+    apply_dealing_rules,
+    portfolio_construction,
+    volatility_target,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -125,6 +130,8 @@ def instruments_df(symbols: list[str]) -> pd.DataFrame:
             "asset_type": ["equity", "equity", "equity", "equity"],
             "sector": ["tech", "tech", "tech", "consumer"],
             "market_cap": ["large", "large", "large", "large"],
+            "instrument.lotSize": [1, 1, 1, 1],
+            "dealingRules.minDealSize.value": [0, 0, 0, 0],
         },
         index=pd.Index(symbols, name="Symbol"),
     )
@@ -157,6 +164,7 @@ class TestBasicPortfolioConstruction:
         signals_library: None,
         date_range: pd.DatetimeIndex,
         momentum_signal: pd.DataFrame,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Test portfolio construction with a single signal model.
 
@@ -177,6 +185,7 @@ class TestBasicPortfolioConstruction:
             signal_value,
         ) = portfolio_construction(
             arctic=arctic,
+            instruments=instruments_df,
             close=close_prices,
             model_weights={"momentum": 1.0},
             multiplier=1.0,
@@ -216,6 +225,7 @@ class TestBasicPortfolioConstruction:
         date_range: pd.DatetimeIndex,
         momentum_signal: pd.DataFrame,
         value_signal: pd.DataFrame,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Test portfolio construction with multiple weighted models.
 
@@ -236,6 +246,7 @@ class TestBasicPortfolioConstruction:
             _,
             signal_value,
         ) = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 0.6, "value": 0.4},
@@ -279,6 +290,7 @@ class TestModelWeightsParameter:
         close_prices: pd.DataFrame,
         signals_library: None,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Model weights directly scale signal contributions."""
         start_date = date_range[0]
@@ -286,6 +298,7 @@ class TestModelWeightsParameter:
 
         # Single model with weight 1.0
         result_1 = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -297,6 +310,7 @@ class TestModelWeightsParameter:
 
         # Same model with weight 2.0
         result_2 = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 2.0},
@@ -334,12 +348,14 @@ class TestAUMParameter:
         close_prices: pd.DataFrame,
         signals_library: None,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """AUM directly scales the number of shares."""
         start_date = date_range[0]
         end_date = date_range[-1]
 
         small_aum = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -350,6 +366,7 @@ class TestAUMParameter:
         )
 
         large_aum = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -386,6 +403,7 @@ class TestDateRangeFiltering:
         close_prices: pd.DataFrame,
         signals_library: None,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Date range parameters filter the signal data used.
 
@@ -399,6 +417,7 @@ class TestDateRangeFiltering:
         end_date = date_range[mid_point]
 
         result = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -440,9 +459,11 @@ class TestOutputStructure:
         close_prices: pd.DataFrame,
         signals_library: None,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Function returns exactly 7 DataFrames."""
         result = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -461,6 +482,7 @@ class TestOutputStructure:
         close_prices: pd.DataFrame,
         signals_library: None,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """pct_position is normalized by dividing by sum of positions.
 
@@ -468,6 +490,7 @@ class TestOutputStructure:
         This means each row's positions are divided by their sum.
         """
         result = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -488,10 +511,12 @@ class TestOutputStructure:
         close_prices: pd.DataFrame,
         signals_library: None,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """share_position = (pct_position * aum) / close."""
         aum = 100_000.0
         result = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -515,9 +540,11 @@ class TestOutputStructure:
         close_prices: pd.DataFrame,
         signals_library: None,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Verify rounding is applied correctly to outputs."""
         result = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -560,9 +587,11 @@ class TestPositionsFromSignals:
         close_prices: pd.DataFrame,
         signals_library: None,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Positions are forward-filled from signal values."""
         result = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -589,6 +618,7 @@ class TestEdgeCases:
         self,
         arctic: Arctic,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Portfolio with a single instrument."""
         close = pd.DataFrame(
@@ -602,6 +632,7 @@ class TestEdgeCases:
         lib.write("single", signal)
 
         result = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close,
             model_weights={"single": 1.0},
@@ -620,6 +651,7 @@ class TestEdgeCases:
         arctic: Arctic,
         close_prices: pd.DataFrame,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Handle signals with zero values (no position)."""
         lib = arctic.get_library("signals", create_if_missing=True)
@@ -627,6 +659,7 @@ class TestEdgeCases:
         lib.write("zero", zero_signal)
 
         result = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"zero": 1.0},
@@ -644,6 +677,7 @@ class TestEdgeCases:
         arctic: Arctic,
         close_prices: pd.DataFrame,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Negative signal values create short positions."""
         lib = arctic.get_library("signals", create_if_missing=True)
@@ -659,6 +693,7 @@ class TestEdgeCases:
         lib.write("short", short_signal)
 
         result = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"short": 1.0},
@@ -682,10 +717,12 @@ class TestEdgeCases:
         close_prices: pd.DataFrame,
         signals_library: None,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Model weights don't need to sum to 1."""
         # Weights summing to more than 1 (leverage)
         result_high = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 0.8, "value": 0.8},  # Sum = 1.6
@@ -697,6 +734,7 @@ class TestEdgeCases:
 
         # Weights summing to less than 1 (cash position implied)
         result_low = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 0.3, "value": 0.2},  # Sum = 0.5
@@ -717,6 +755,7 @@ class TestIntegrationWithLibProvider:
         self,
         close_prices: pd.DataFrame,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """The signals library is created if it doesn't exist."""
         # Fresh Arctic instance without any libraries
@@ -729,6 +768,7 @@ class TestIntegrationWithLibProvider:
 
         # Should work without errors
         result = portfolio_construction(
+            instruments=instruments_df,
             arctic=fresh_arctic,
             close=close_prices,
             model_weights={"test": 1.0},
@@ -745,6 +785,7 @@ class TestIntegrationWithLibProvider:
         arctic: Arctic,
         close_prices: pd.DataFrame,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Can override the signals library name via kwargs."""
         # Create a custom library
@@ -754,6 +795,7 @@ class TestIntegrationWithLibProvider:
 
         # Use custom library name (the lib_provider decorator allows this)
         result = portfolio_construction(  # type: ignore
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"custom": 1.0},
@@ -783,6 +825,7 @@ class TestUnusedParametersDocumentation:
         close_prices: pd.DataFrame,
         signals_library: None,
         date_range: pd.DatetimeIndex,
+        instruments_df: pd.DataFrame,
     ) -> None:
         """Document that multiplier does not affect output.
 
@@ -793,6 +836,7 @@ class TestUnusedParametersDocumentation:
         end_date = date_range[-1]
 
         result_1x = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -803,6 +847,7 @@ class TestUnusedParametersDocumentation:
         )
 
         result_2x = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -836,6 +881,7 @@ class TestUnusedParametersDocumentation:
         end_date = date_range[-1]
 
         result_no_weights = portfolio_construction(
+            instruments=instruments_df,
             arctic=arctic,
             close=close_prices,
             model_weights={"momentum": 1.0},
@@ -863,6 +909,921 @@ class TestUnusedParametersDocumentation:
             result_no_weights[2].sort_index(axis=1),  # positions
             result_with_weights[2].sort_index(axis=1),
         )
+
+
+class TestApplyDealingRules:
+    """Tests for apply_dealing_rules function.
+
+    This function applies dealing rules to positions:
+    - Rounds positions to lot size multiples
+    - Filters out trades smaller than minimum deal size
+    """
+
+    @pytest.mark.parametrize(
+        "theoretical_position,expected_position,lot_size,min_deal_size",
+        [
+            # Basic lot size rounding (lot_size=2, min_deal=0)
+            pytest.param(
+                [0.0, 2.0, 4.0, 6.0],
+                [0.0, 2.0, 4.0, 6.0],
+                2.0,
+                0.0,
+                id="already_aligned_to_lot_size",
+            ),
+            pytest.param(
+                [0.0, 2.5, 4.7, 6.3],
+                [0.0, 2.0, 4.0, 6.0],
+                2.0,
+                0.0,
+                id="round_down_to_lot_size",
+            ),
+            pytest.param(
+                [0.0, 2.6, 4.8, 6.6],
+                [0.0, 2.0, 4.0, 6.0],
+                2.0,
+                0.0,
+                id="round_nearest_to_lot_size",
+            ),
+            pytest.param(
+                [0.0, 3.0, 5.0, 7.0],
+                [0.0, 4.0, 4.0, 8.0],
+                2.0,
+                0.0,
+                id="round_half_to_even",
+            ),
+            # Lot size = 1 (no rounding effect)
+            pytest.param(
+                [0.0, 1.0, 2.0, 3.0],
+                [0.0, 1.0, 2.0, 3.0],
+                1.0,
+                0.0,
+                id="lot_size_1_no_rounding",
+            ),
+            # Minimum deal size filtering (lot_size=1, min_deal=2)
+            # Trades < min_deal are filtered, position stays the same
+            pytest.param(
+                [0.0, 3.0, 4.0, 7.0],
+                [0.0, 3.0, 3.0, 7.0],
+                1.0,
+                2.0,
+                id="filter_small_trade_in_middle",
+            ),
+            pytest.param(
+                [0.0, 5.0, 6.0, 7.0],
+                [0.0, 5.0, 5.0, 7.0],
+                1.0,
+                2.0,
+                id="small_trade_filtered_but_accumulated_trade_executes",
+            ),
+            pytest.param(
+                [0.0, 1.0, 2.0, 5.0],
+                [0.0, 0.0, 2.0, 5.0],
+                1.0,
+                2.0,
+                id="accumulated_trade_executes_when_threshold_met",
+            ),
+            # Combined lot size and min deal size
+            pytest.param(
+                [0.0, 2.5, 4.5, 8.5],
+                [0.0, 2.0, 4.0, 8.0],
+                2.0,
+                2.0,
+                id="lot_rounding_and_min_deal",
+            ),
+            pytest.param(
+                [0.0, 2.5, 4.5, 6.5],
+                [0.0, 2.0, 4.0, 6.0],
+                2.0,
+                2.0,
+                id="each_trade_meets_threshold",
+            ),
+            # First row filtering (banker's rounding: 0.5->0, 1.5->2, 2.5->2, 3.5->4)
+            pytest.param(
+                [1.0, 3.0, 5.0, 7.0],
+                [0.0, 4.0, 4.0, 8.0],
+                2.0,
+                3.0,
+                id="first_row_below_threshold_stays_zero",
+            ),
+            pytest.param(
+                [4.0, 6.0, 8.0, 10.0],
+                [4.0, 4.0, 8.0, 8.0],
+                2.0,
+                3.0,
+                id="small_trades_filtered_large_trades_execute",
+            ),
+            # Negative positions (short selling)
+            pytest.param(
+                [0.0, -2.0, -4.0, -6.0],
+                [0.0, -2.0, -4.0, -6.0],
+                2.0,
+                0.0,
+                id="negative_positions_lot_aligned",
+            ),
+            pytest.param(
+                [0.0, -5.0, -6.0, -10.0],
+                [0.0, -4.0, -6.0, -10.0],
+                2.0,
+                2.0,
+                id="negative_positions_lot_rounded_and_traded",
+            ),
+        ],
+    )
+    def test_apply_dealing_rules_single_instrument(
+        self,
+        theoretical_position: list[float],
+        expected_position: list[float],
+        lot_size: float,
+        min_deal_size: float,
+    ) -> None:
+        """Test dealing rules on a single instrument."""
+
+        dates = pd.date_range("2024-01-01", periods=len(theoretical_position))
+        positions = pd.DataFrame({"SYM": theoretical_position}, index=dates)
+        instruments = pd.DataFrame(
+            {
+                "instrument.lotSize": [lot_size],
+                "dealingRules.minDealSize.value": [min_deal_size],
+            },
+            index=pd.Index(["SYM"], name="Symbol"),
+        )
+
+        result = apply_dealing_rules(positions, instruments)
+
+        expected = pd.DataFrame({"SYM": expected_position}, index=dates)
+        pd.testing.assert_frame_equal(result, expected)
+
+    def test_apply_dealing_rules_multiple_instruments(self) -> None:
+        """Test dealing rules applied independently per instrument."""
+
+        dates = pd.date_range("2024-01-01", periods=4)
+        positions = pd.DataFrame(
+            {
+                "A": [0.0, 2.5, 4.5, 6.5],  # lot_size=2, min_deal=0
+                "B": [0.0, 1.0, 3.0, 5.0],  # lot_size=1, min_deal=2
+            },
+            index=dates,
+        )
+        instruments = pd.DataFrame(
+            {
+                "instrument.lotSize": [2.0, 1.0],
+                "dealingRules.minDealSize.value": [0.0, 2.0],
+            },
+            index=pd.Index(["A", "B"], name="Symbol"),
+        )
+
+        result = apply_dealing_rules(positions, instruments)
+
+        expected = pd.DataFrame(
+            {
+                "A": [0.0, 2.0, 4.0, 6.0],  # rounded to lot_size=2
+                "B": [0.0, 0.0, 3.0, 5.0],  # first trade filtered (1 < min_deal=2)
+            },
+            index=dates,
+        )
+        pd.testing.assert_frame_equal(result, expected)
+
+    def test_apply_dealing_rules_missing_instruments(self) -> None:
+        """Missing instruments default to lot_size=1, min_deal=0."""
+
+        dates = pd.date_range("2024-01-01", periods=3)
+        positions = pd.DataFrame({"MISSING": [0.0, 1.5, 2.5]}, index=dates)
+        instruments = pd.DataFrame(
+            {
+                "instrument.lotSize": [2.0],
+                "dealingRules.minDealSize.value": [1.0],
+            },
+            index=pd.Index(["OTHER"], name="Symbol"),
+        )
+
+        result = apply_dealing_rules(positions, instruments)
+
+        # With lot_size=1 (default), positions stay as-is rounded to nearest int
+        expected = pd.DataFrame({"MISSING": [0.0, 2.0, 2.0]}, index=dates)
+        pd.testing.assert_frame_equal(result, expected)
+
+
+class TestAggregatePortfolio:
+    """Tests for aggregate_portfolio function.
+
+    The aggregate_portfolio function combines multiple model positions into a single
+    portfolio by applying model weights and gearing, aggregated to instrument level:
+
+        result[instrument] = gearing * sum(model_weight[i] * model_positions[i][instrument])
+
+    These tests use declarative inputs (prices, model_weights, gearing, models)
+    and compare directly to expected positions at instrument level.
+    """
+
+    @pytest.fixture
+    def simple_dates(self) -> pd.DatetimeIndex:
+        """Simple date index for tests."""
+        return pd.DatetimeIndex(
+            ["2024-01-01", "2024-01-02", "2024-01-03"],
+            name="DateTime",
+        )
+
+    @pytest.mark.parametrize(
+        "prices_data,model_weights,gearing,models_data,expected_data",
+        [
+            # Single model, unit weight, unit gearing - passthrough
+            pytest.param(
+                {"A": [100.0, 101.0, 102.0]},
+                {"model1": 1.0},
+                1.0,
+                {"model1": {"A": [1.0, 2.0, 3.0]}},
+                {"A": [1.0, 2.0, 3.0]},
+                id="single_model_unit_weight_unit_gearing",
+            ),
+            # Single model with weight scaling
+            pytest.param(
+                {"A": [100.0, 101.0, 102.0]},
+                {"model1": 0.5},
+                1.0,
+                {"model1": {"A": [2.0, 4.0, 6.0]}},
+                {"A": [1.0, 2.0, 3.0]},
+                id="single_model_half_weight",
+            ),
+            # Single model with gearing
+            pytest.param(
+                {"A": [100.0, 101.0, 102.0]},
+                {"model1": 1.0},
+                2.0,
+                {"model1": {"A": [1.0, 2.0, 3.0]}},
+                {"A": [2.0, 4.0, 6.0]},
+                id="single_model_double_gearing",
+            ),
+            # Single model with weight and gearing combined
+            # gearing=2.0, weight=0.5: result = 2.0 * 0.5 * [4,8,12] = [4,8,12]
+            pytest.param(
+                {"A": [100.0, 101.0, 102.0]},
+                {"model1": 0.5},
+                2.0,
+                {"model1": {"A": [4.0, 8.0, 12.0]}},
+                {"A": [4.0, 8.0, 12.0]},
+                id="single_model_weight_and_gearing",
+            ),
+            # Two models with equal weights - positions are summed
+            # model1: A=[2,4,6] * 0.5 = [1,2,3]
+            # model2: A=[4,2,0] * 0.5 = [2,1,0]
+            # sum: [3,3,3]
+            pytest.param(
+                {"A": [100.0, 100.0, 100.0]},
+                {"model1": 0.5, "model2": 0.5},
+                1.0,
+                {
+                    "model1": {"A": [2.0, 4.0, 6.0]},
+                    "model2": {"A": [4.0, 2.0, 0.0]},
+                },
+                {"A": [3.0, 3.0, 3.0]},
+                id="two_models_equal_weights",
+            ),
+            # Two models with unequal weights
+            # momentum: A=10 * 0.7 = 7
+            # value: A=10 * 0.3 = 3
+            # sum: 10
+            pytest.param(
+                {"A": [100.0, 100.0, 100.0]},
+                {"momentum": 0.7, "value": 0.3},
+                1.0,
+                {
+                    "momentum": {"A": [10.0, 10.0, 10.0]},
+                    "value": {"A": [10.0, 10.0, 10.0]},
+                },
+                {"A": [10.0, 10.0, 10.0]},
+                id="two_models_70_30_split",
+            ),
+            # Multiple instruments
+            pytest.param(
+                {"A": [100.0, 100.0, 100.0], "B": [50.0, 50.0, 50.0]},
+                {"model1": 1.0},
+                1.0,
+                {"model1": {"A": [1.0, 2.0, 3.0], "B": [10.0, 20.0, 30.0]}},
+                {"A": [1.0, 2.0, 3.0], "B": [10.0, 20.0, 30.0]},
+                id="multiple_instruments_single_model",
+            ),
+            # Multiple instruments, multiple models
+            # A: 10*0.6 + 10*0.4 = 10
+            # B: 5*0.6 + 5*0.4 = 5
+            pytest.param(
+                {"A": [100.0, 100.0], "B": [50.0, 50.0]},
+                {"model1": 0.6, "model2": 0.4},
+                1.0,
+                {
+                    "model1": {"A": [10.0, 10.0], "B": [5.0, 5.0]},
+                    "model2": {"A": [10.0, 10.0], "B": [5.0, 5.0]},
+                },
+                {"A": [10.0, 10.0], "B": [5.0, 5.0]},
+                id="multiple_instruments_multiple_models",
+            ),
+            # Zero weight model excluded
+            # active: 5*1.0 = 5, inactive: 100*0.0 = 0, sum = 5
+            pytest.param(
+                {"A": [100.0, 100.0, 100.0]},
+                {"active": 1.0, "inactive": 0.0},
+                1.0,
+                {
+                    "active": {"A": [5.0, 5.0, 5.0]},
+                    "inactive": {"A": [100.0, 100.0, 100.0]},
+                },
+                {"A": [5.0, 5.0, 5.0]},
+                id="zero_weight_model",
+            ),
+            # Negative positions (short)
+            pytest.param(
+                {"A": [100.0, 100.0, 100.0]},
+                {"model1": 1.0},
+                1.0,
+                {"model1": {"A": [-1.0, -2.0, -3.0]}},
+                {"A": [-1.0, -2.0, -3.0]},
+                id="negative_positions_short",
+            ),
+            # Zero gearing (no positions)
+            pytest.param(
+                {"A": [100.0, 100.0, 100.0]},
+                {"model1": 1.0},
+                0.0,
+                {"model1": {"A": [5.0, 10.0, 15.0]}},
+                {"A": [0.0, 0.0, 0.0]},
+                id="zero_gearing",
+            ),
+            # Negative gearing (inverse positions)
+            pytest.param(
+                {"A": [100.0, 100.0, 100.0]},
+                {"model1": 1.0},
+                -1.0,
+                {"model1": {"A": [1.0, 2.0, 3.0]}},
+                {"A": [-1.0, -2.0, -3.0]},
+                id="negative_gearing",
+            ),
+            # Fractional positions
+            # 0.5 * 0.25 * [8,16,24] = [1,2,3]
+            pytest.param(
+                {"A": [100.0, 100.0, 100.0]},
+                {"model1": 0.25},
+                0.5,
+                {"model1": {"A": [8.0, 16.0, 24.0]}},
+                {"A": [1.0, 2.0, 3.0]},
+                id="fractional_weight_and_gearing",
+            ),
+            # Three models
+            # momentum: 10*0.5=5, value: 10*0.3=3, quality: 10*0.2=2, sum=10
+            pytest.param(
+                {"A": [100.0, 100.0]},
+                {"momentum": 0.5, "value": 0.3, "quality": 0.2},
+                1.0,
+                {
+                    "momentum": {"A": [10.0, 10.0]},
+                    "value": {"A": [10.0, 10.0]},
+                    "quality": {"A": [10.0, 10.0]},
+                },
+                {"A": [10.0, 10.0]},
+                id="three_models",
+            ),
+            # Weights summing to more than 1 (leverage)
+            # model1: 5*1.0=5, model2: 5*1.0=5, sum=10
+            pytest.param(
+                {"A": [100.0, 100.0]},
+                {"model1": 1.0, "model2": 1.0},
+                1.0,
+                {
+                    "model1": {"A": [5.0, 5.0]},
+                    "model2": {"A": [5.0, 5.0]},
+                },
+                {"A": [10.0, 10.0]},
+                id="leveraged_weights",
+            ),
+            # Opposing models cancel out
+            # model1: 10*0.5=5, model2: -10*0.5=-5, sum=0
+            pytest.param(
+                {"A": [100.0, 100.0]},
+                {"model1": 0.5, "model2": 0.5},
+                1.0,
+                {
+                    "model1": {"A": [10.0, 10.0]},
+                    "model2": {"A": [-10.0, -10.0]},
+                },
+                {"A": [0.0, 0.0]},
+                id="opposing_models_cancel",
+            ),
+            # Gearing with multiple models
+            # gearing=2: 2 * (10*0.6 + 10*0.4) = 2 * 10 = 20
+            pytest.param(
+                {"A": [100.0, 100.0]},
+                {"model1": 0.6, "model2": 0.4},
+                2.0,
+                {
+                    "model1": {"A": [10.0, 10.0]},
+                    "model2": {"A": [10.0, 10.0]},
+                },
+                {"A": [20.0, 20.0]},
+                id="gearing_with_multiple_models",
+            ),
+        ],
+    )
+    def test_aggregate_portfolio_parametrized(
+        self,
+        simple_dates: pd.DatetimeIndex,
+        prices_data: dict[str, list[float]],
+        model_weights: dict[str, float],
+        gearing: float,
+        models_data: dict[str, dict[str, list[float]]],
+        expected_data: dict[str, list[float]],
+    ) -> None:
+        """Parametrized test for aggregate_portfolio with various inputs."""
+        # Build input DataFrames
+        dates = simple_dates[: len(next(iter(prices_data.values())))]
+        prices = pd.DataFrame(prices_data, index=dates)
+
+        models = {
+            name: pd.DataFrame(data, index=dates) for name, data in models_data.items()
+        }
+
+        # Build expected DataFrame with instrument columns
+        expected = pd.DataFrame(expected_data, index=dates)
+
+        # Run function
+        result = aggregate_portfolio(
+            prices=prices,
+            model_weights=model_weights,
+            gearing=gearing,
+            **models,
+        )
+
+        # Compare
+        pd.testing.assert_frame_equal(
+            result.sort_index(axis=1),
+            expected.sort_index(axis=1),
+        )
+
+    def test_aggregate_portfolio_preserves_index(
+        self, simple_dates: pd.DatetimeIndex
+    ) -> None:
+        """Output preserves the input DataFrame index."""
+        prices = pd.DataFrame({"A": [100.0, 101.0, 102.0]}, index=simple_dates)
+        model1 = pd.DataFrame({"A": [1.0, 2.0, 3.0]}, index=simple_dates)
+
+        result = aggregate_portfolio(
+            prices=prices,
+            model_weights={"model1": 1.0},
+            gearing=1.0,
+            model1=model1,
+        )
+
+        pd.testing.assert_index_equal(result.index, simple_dates)
+
+    def test_aggregate_portfolio_column_structure(
+        self, simple_dates: pd.DatetimeIndex
+    ) -> None:
+        """Output has instrument columns (not MultiIndex)."""
+        prices = pd.DataFrame({"A": [100.0], "B": [50.0]}, index=simple_dates[:1])
+        model1 = pd.DataFrame({"A": [1.0], "B": [2.0]}, index=simple_dates[:1])
+        model2 = pd.DataFrame({"A": [3.0], "B": [4.0]}, index=simple_dates[:1])
+
+        result = aggregate_portfolio(
+            prices=prices,
+            model_weights={"model1": 1.0, "model2": 1.0},
+            gearing=1.0,
+            model1=model1,
+            model2=model2,
+        )
+
+        # Columns should be instrument names, not MultiIndex
+        assert not isinstance(result.columns, pd.MultiIndex)
+        assert set(result.columns) == {"A", "B"}
+
+    def test_aggregate_portfolio_empty_models(
+        self, simple_dates: pd.DatetimeIndex
+    ) -> None:
+        """Handles case with no models passed."""
+        prices = pd.DataFrame({"A": [100.0]}, index=simple_dates[:1])
+
+        result = aggregate_portfolio(
+            prices=prices,
+            model_weights={},
+            gearing=1.0,
+        )
+
+        assert result.empty
+
+    def test_aggregate_portfolio_prices_not_used_in_calculation(
+        self, simple_dates: pd.DatetimeIndex
+    ) -> None:
+        """Prices parameter doesn't affect position calculation.
+
+        The prices parameter is available for potential future use but
+        currently doesn't influence the output positions.
+        """
+        model1 = pd.DataFrame({"A": [1.0, 2.0, 3.0]}, index=simple_dates)
+
+        result_high_prices = aggregate_portfolio(
+            prices=pd.DataFrame({"A": [1000.0, 1000.0, 1000.0]}, index=simple_dates),
+            model_weights={"model1": 1.0},
+            gearing=1.0,
+            model1=model1,
+        )
+
+        result_low_prices = aggregate_portfolio(
+            prices=pd.DataFrame({"A": [1.0, 1.0, 1.0]}, index=simple_dates),
+            model_weights={"model1": 1.0},
+            gearing=1.0,
+            model1=model1,
+        )
+
+        pd.testing.assert_frame_equal(result_high_prices, result_low_prices)
+
+
+class TestVolatilityTarget:
+    """Tests for volatility_target function.
+
+    The volatility_target function scales model weights so each instrument achieves
+    a target volatility on a rolling basis. The scaling factor is:
+        target_volatility / realized_volatility
+    """
+
+    @pytest.fixture
+    def vol_dates(self) -> pd.DatetimeIndex:
+        """Date index with enough periods for rolling volatility calculation."""
+        return pd.bdate_range(start="2024-01-01", periods=50, tz="UTC")
+
+    @pytest.fixture
+    def stable_prices(self, vol_dates: pd.DatetimeIndex) -> pd.DataFrame:
+        """Prices with known volatility for testing.
+
+        Creates price series with approximately 10% annualized volatility.
+        daily_vol = 10% / sqrt(252) ≈ 0.63%
+        """
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.10 / np.sqrt(252)
+
+        # Generate log-normal price paths
+        returns_a = np.random.normal(0, daily_vol, n)
+        returns_b = np.random.normal(0, daily_vol * 2, n)  # B has 2x volatility
+
+        prices_a = 100 * np.exp(np.cumsum(returns_a))
+        prices_b = 100 * np.exp(np.cumsum(returns_b))
+
+        return pd.DataFrame({"A": prices_a, "B": prices_b}, index=vol_dates)
+
+    @pytest.fixture
+    def uniform_model(self, vol_dates: pd.DatetimeIndex) -> pd.DataFrame:
+        """Model with uniform weights of 1.0 for all instruments."""
+        return pd.DataFrame(
+            {"A": np.ones(len(vol_dates)), "B": np.ones(len(vol_dates))},
+            index=vol_dates,
+        )
+
+    def test_basic_scaling(
+        self,
+        vol_dates: pd.DatetimeIndex,
+        stable_prices: pd.DataFrame,
+        uniform_model: pd.DataFrame,
+    ) -> None:
+        """Model weights are scaled by target_vol / realized_vol."""
+        target_vol = 0.10  # 10%
+        window = 20
+
+        result = volatility_target(
+            model=uniform_model,
+            close=stable_prices,
+            target_volatility=target_vol,
+            window=window,
+        )
+
+        # Result should have same shape as model
+        assert result.shape == uniform_model.shape
+
+        # Scaling factor should be approximately 1.0 for A (same vol)
+        # and approximately 0.5 for B (2x vol -> scale down by half)
+        # Check after warm-up period
+        warmup = window + 5
+        assert result["A"].iloc[warmup:].mean() > result["B"].iloc[warmup:].mean()
+
+    def test_higher_vol_gets_scaled_down(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Instruments with higher volatility get scaled down."""
+        np.random.seed(123)
+        n = len(vol_dates)
+
+        # Create two instruments: A with low vol, B with high vol
+        low_vol = 0.05 / np.sqrt(252)
+        high_vol = 0.20 / np.sqrt(252)
+
+        returns_a = np.random.normal(0, low_vol, n)
+        returns_b = np.random.normal(0, high_vol, n)
+
+        prices = pd.DataFrame(
+            {
+                "LOW_VOL": 100 * np.exp(np.cumsum(returns_a)),
+                "HIGH_VOL": 100 * np.exp(np.cumsum(returns_b)),
+            },
+            index=vol_dates,
+        )
+
+        model = pd.DataFrame(
+            {"LOW_VOL": np.ones(n), "HIGH_VOL": np.ones(n)},
+            index=vol_dates,
+        )
+
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+        )
+
+        # After warmup, LOW_VOL should have higher weights (scaled up)
+        # and HIGH_VOL should have lower weights (scaled down)
+        warmup = 25
+        assert (
+            result["LOW_VOL"].iloc[warmup:].mean()
+            > result["HIGH_VOL"].iloc[warmup:].mean()
+        )
+
+    def test_window_parameter(
+        self, vol_dates: pd.DatetimeIndex, stable_prices: pd.DataFrame
+    ) -> None:
+        """Different window sizes affect the smoothness of scaling."""
+        model = pd.DataFrame(1.0, index=vol_dates, columns=stable_prices.columns)
+
+        result_short = volatility_target(
+            model=model,
+            close=stable_prices,
+            target_volatility=0.10,
+            window=5,
+        )
+
+        result_long = volatility_target(
+            model=model,
+            close=stable_prices,
+            target_volatility=0.10,
+            window=30,
+        )
+
+        # Shorter window should have more volatile scaling factors
+        # (measured by std of the result)
+        short_std = result_short.iloc[30:].std().mean()
+        long_std = result_long.iloc[30:].std().mean()
+        assert short_std > long_std
+
+    def test_annualization_factor(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Annualization factor affects the volatility calculation."""
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.01  # 1% daily
+
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, daily_vol, n)))},
+            index=vol_dates,
+        )
+        model = pd.DataFrame({"A": np.ones(n)}, index=vol_dates)
+
+        # With daily annualization (252 days), annual vol ≈ 1% * sqrt(252) ≈ 15.9%
+        result_daily = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+            annualization_factor=252.0,
+        )
+
+        # With weekly annualization (52 weeks), treats data as weekly
+        # Annual vol would be 1% * sqrt(52) ≈ 7.2%
+        result_weekly = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+            annualization_factor=52.0,
+        )
+
+        # With lower annualization factor, calculated vol is lower,
+        # so scaling factor is higher (target / realized_vol)
+        # Daily: realized_vol ≈ 1% * sqrt(252) ≈ 15.9%, scaling ≈ 0.63
+        # Weekly: realized_vol ≈ 1% * sqrt(52) ≈ 7.2%, scaling ≈ 1.39
+        warmup = 25
+        assert (
+            result_weekly["A"].iloc[warmup:].mean()
+            > result_daily["A"].iloc[warmup:].mean()
+        )
+
+    def test_vol_floor(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Vol floor prevents division by very small volatility values."""
+        n = len(vol_dates)
+
+        # Create nearly constant prices (very low volatility)
+        prices = pd.DataFrame(
+            {"A": np.full(n, 100.0) + np.random.normal(0, 1e-10, n)},
+            index=vol_dates,
+        )
+        model = pd.DataFrame({"A": np.ones(n)}, index=vol_dates)
+
+        # Without sensible vol_floor, we'd get very large scaling factors
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+            vol_floor=0.01,  # 1% floor
+        )
+
+        # Scaling should be capped at target_vol / vol_floor = 0.10 / 0.01 = 10
+        warmup = 25
+        assert result["A"].iloc[warmup:].max() <= 10.1  # Small tolerance
+
+    def test_vol_cap(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Vol cap limits the maximum scaling factor."""
+        np.random.seed(42)
+        n = len(vol_dates)
+
+        # Create low volatility prices
+        low_vol = 0.02 / np.sqrt(252)
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, low_vol, n)))},
+            index=vol_dates,
+        )
+        model = pd.DataFrame({"A": np.ones(n)}, index=vol_dates)
+
+        # Target vol is much higher than realized, so scaling would be high
+        result_uncapped = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.20,  # 20% target
+            window=20,
+            vol_cap=None,
+        )
+
+        result_capped = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.20,
+            window=20,
+            vol_cap=3.0,  # Cap at 3x
+        )
+
+        warmup = 25
+        assert result_capped["A"].iloc[warmup:].max() <= 3.0
+        assert (
+            result_uncapped["A"].iloc[warmup:].max()
+            > result_capped["A"].iloc[warmup:].max()
+        )
+
+    def test_min_periods(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Min periods affects when scaling starts."""
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.10 / np.sqrt(252)
+
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, daily_vol, n)))},
+            index=vol_dates,
+        )
+        model = pd.DataFrame({"A": np.ones(n)}, index=vol_dates)
+
+        result_early = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+            min_periods=5,  # Start calculating vol after 5 periods
+        )
+
+        result_late = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+            min_periods=20,  # Start calculating vol after 20 periods
+        )
+
+        # Early result should have non-zero values earlier
+        # (after filling NaN with 0)
+        early_first_nonzero = cast(pd.Timestamp, (result_early["A"] != 0).idxmax())
+        late_first_nonzero = cast(pd.Timestamp, (result_late["A"] != 0).idxmax())
+        assert early_first_nonzero < late_first_nonzero
+
+    def test_model_alignment(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Model is aligned to close prices via reindex and ffill."""
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.10 / np.sqrt(252)
+
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, daily_vol, n)))},
+            index=vol_dates,
+        )
+
+        # Model has fewer rows (sparse signal)
+        sparse_index = vol_dates[::5]  # Every 5th date
+        model = pd.DataFrame(
+            {"A": np.linspace(1.0, 2.0, len(sparse_index))},
+            index=sparse_index,
+        )
+
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+        )
+
+        # Result should have same index as close prices
+        pd.testing.assert_index_equal(result.index, prices.index)
+
+    def test_multiple_instruments_independent(
+        self, vol_dates: pd.DatetimeIndex
+    ) -> None:
+        """Each instrument is scaled independently based on its own volatility."""
+        np.random.seed(42)
+        n = len(vol_dates)
+
+        # Create instruments with different volatilities
+        vol_a = 0.05 / np.sqrt(252)  # 5% annualized
+        vol_b = 0.15 / np.sqrt(252)  # 15% annualized
+        vol_c = 0.25 / np.sqrt(252)  # 25% annualized
+
+        prices = pd.DataFrame(
+            {
+                "A": 100 * np.exp(np.cumsum(np.random.normal(0, vol_a, n))),
+                "B": 100 * np.exp(np.cumsum(np.random.normal(0, vol_b, n))),
+                "C": 100 * np.exp(np.cumsum(np.random.normal(0, vol_c, n))),
+            },
+            index=vol_dates,
+        )
+        model = pd.DataFrame(
+            {"A": np.ones(n), "B": np.ones(n), "C": np.ones(n)},
+            index=vol_dates,
+        )
+
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,  # 10% target
+            window=20,
+        )
+
+        # After warmup:
+        # A (5% vol) should be scaled up (factor ~2)
+        # B (15% vol) should be scaled down (factor ~0.67)
+        # C (25% vol) should be scaled down more (factor ~0.4)
+        warmup = 25
+        mean_a = result["A"].iloc[warmup:].mean()
+        mean_b = result["B"].iloc[warmup:].mean()
+        mean_c = result["C"].iloc[warmup:].mean()
+
+        assert mean_a > mean_b > mean_c
+
+    def test_preserves_signal_direction(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Scaling preserves the sign of model weights."""
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.10 / np.sqrt(252)
+
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, daily_vol, n)))},
+            index=vol_dates,
+        )
+
+        # Model with alternating positive and negative signals
+        model = pd.DataFrame(
+            {"A": np.where(np.arange(n) % 2 == 0, 1.0, -1.0)},
+            index=vol_dates,
+        )
+
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+        )
+
+        # Signs should be preserved after warmup
+        warmup = 25
+        model_signs = pd.Series(np.sign(model["A"].iloc[warmup:].values))
+        result_signs = pd.Series(np.sign(result["A"].iloc[warmup:].values))
+        pd.testing.assert_series_equal(model_signs, result_signs, check_names=False)
+
+    def test_zero_model_stays_zero(self, vol_dates: pd.DatetimeIndex) -> None:
+        """Zero model weights remain zero after scaling."""
+        np.random.seed(42)
+        n = len(vol_dates)
+        daily_vol = 0.10 / np.sqrt(252)
+
+        prices = pd.DataFrame(
+            {"A": 100 * np.exp(np.cumsum(np.random.normal(0, daily_vol, n)))},
+            index=vol_dates,
+        )
+        model = pd.DataFrame({"A": np.zeros(n)}, index=vol_dates)
+
+        result = volatility_target(
+            model=model,
+            close=prices,
+            target_volatility=0.10,
+            window=20,
+        )
+
+        # Zero * anything = zero
+        assert (result["A"] == 0).all()
 
 
 if __name__ == "__main__":

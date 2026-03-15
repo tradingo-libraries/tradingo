@@ -1,5 +1,6 @@
 """Tests for tradingo.engine module - position management."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -15,11 +16,46 @@ from tradingo.engine import (
 )
 
 
+def make_ig_response(
+    epic: str = "IX.D.FTSE.DAILY.IP",
+    deal_id: str = "DIAAAAWGDPHTYA3",
+    direction: str = "BUY",
+    deal_status: str = "ACCEPTED",
+    reason: str = "SUCCESS",
+) -> dict[str, Any]:
+    """Create a mock IG API response dictionary."""
+    return {
+        "date": "2026-01-31T12:42:32.074",
+        "status": None,
+        "reason": reason,
+        "dealStatus": deal_status,
+        "epic": epic,
+        "expiry": None,
+        "dealReference": "6CPJ6GWZ6UGTYPT",
+        "dealId": deal_id,
+        "affectedDeals": [],
+        "level": None,
+        "size": None,
+        "direction": direction,
+        "stopLevel": None,
+        "limitLevel": None,
+        "stopDistance": None,
+        "limitDistance": None,
+        "guaranteedStop": False,
+        "trailingStop": False,
+        "profit": None,
+        "profitCurrency": None,
+    }
+
+
 @pytest.fixture
 def mock_ig_service() -> MagicMock:
     """Create a mock IGService."""
     service = MagicMock()
     service.session = MagicMock()
+    service.close_open_position.return_value = make_ig_response()
+    service.create_open_position.return_value = make_ig_response()
+    service.update_open_position.return_value = make_ig_response()
     return service
 
 
@@ -28,8 +64,8 @@ def instruments() -> pd.DataFrame:
     """Sample instruments dataframe."""
     return pd.DataFrame(
         {
-            "expiry": ["DFB", "DFB"],
-            "name": ["Test £ Asset", "Test $ Asset"],
+            "instrument.expiry": ["DFB", "DFB"],
+            "instrument.name": ["Test £ Asset", "Test $ Asset"],
         },
         index=pd.Index(["IX.D.FTSE.DAILY.IP", "IX.D.DOW.DAILY.IP"], name="epic"),
     )
@@ -64,7 +100,9 @@ class TestClosePosition:
         """Test that a BUY position is closed with a SELL order."""
         position = pd.Series({"direction": "BUY", "size": 2.0})
 
-        close_position(deal_id="DEAL001", position=position, svc=mock_ig_service)
+        result = close_position(
+            deal_id="DEAL001", position=position, svc=mock_ig_service
+        )
 
         mock_ig_service.close_open_position.assert_called_once_with(
             deal_id="DEAL001",
@@ -76,12 +114,17 @@ class TestClosePosition:
             size=2.0,
             quote_id=None,
         )
+        assert isinstance(result, dict)
+        assert "dealId" in result
+        assert "dealStatus" in result
 
     def test_closes_sell_position_with_buy(self, mock_ig_service: MagicMock) -> None:
         """Test that a SELL position is closed with a BUY order."""
         position = pd.Series({"direction": "SELL", "size": -3.0})
 
-        close_position(deal_id="DEAL002", position=position, svc=mock_ig_service)
+        result = close_position(
+            deal_id="DEAL002", position=position, svc=mock_ig_service
+        )
 
         mock_ig_service.close_open_position.assert_called_once_with(
             deal_id="DEAL002",
@@ -93,18 +136,20 @@ class TestClosePosition:
             size=3.0,
             quote_id=None,
         )
+        assert isinstance(result, dict)
 
     def test_closes_partial_position(self, mock_ig_service: MagicMock) -> None:
         """Test partial position close with explicit size."""
         position = pd.Series({"direction": "BUY", "size": 5.0})
 
-        close_position(
+        result = close_position(
             deal_id="DEAL001", position=position, svc=mock_ig_service, size=2.0
         )
 
         mock_ig_service.close_open_position.assert_called_once()
         call_kwargs = mock_ig_service.close_open_position.call_args[1]
         assert call_kwargs["size"] == 2.0
+        assert isinstance(result, dict)
 
 
 class TestCloseAllOpenPosition:
@@ -120,9 +165,12 @@ class TestCloseAllOpenPosition:
             index=pd.Index(["DEAL001", "DEAL002"], name="dealId"),
         )
 
-        close_all_open_position(positions, mock_ig_service)
+        result = close_all_open_position(positions, mock_ig_service)
 
         assert mock_ig_service.close_open_position.call_count == 2
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert all(isinstance(action, dict) for action in result)
 
 
 class TestReduceOpenPositions:
@@ -141,10 +189,19 @@ class TestReduceOpenPositions:
             }
         )
 
-        reduce_open_positions(mock_ig_service, epic="IX.D.FTSE.DAILY.IP", quantity=4)
+        current_pos = get_current_positions(mock_ig_service)
+
+        result = reduce_open_positions(
+            mock_ig_service,
+            epic="IX.D.FTSE.DAILY.IP",
+            quantity=4,
+            current_position=current_pos,
+        )
 
         # Should close positions starting from smallest
         assert mock_ig_service.close_open_position.call_count >= 1
+        assert isinstance(result, list)
+        assert all(isinstance(action, dict) for action in result)
 
 
 class TestGetCurrency:
@@ -191,17 +248,25 @@ class TestAdjustPositionSizes:
         instruments: pd.DataFrame,
     ) -> None:
         """Test opening a new position when no current position exists."""
-        # No existing positions
+        # No existing positions - use proper dtypes for empty DataFrame
         mock_ig_service.fetch_open_positions.return_value = pd.DataFrame(
-            {"epic": [], "dealId": [], "direction": [], "size": []}
+            {
+                "epic": pd.Series([], dtype=str),
+                "dealId": pd.Series([], dtype=str),
+                "direction": pd.Series([], dtype=str),
+                "size": pd.Series([], dtype=float),
+            }
         )
+        current_pos = get_current_positions(mock_ig_service)
 
         target = pd.DataFrame(
             {"IX.D.FTSE.DAILY.IP": [0.0, 3.0]},
             index=pd.date_range("2024-01-01", periods=2),
         )
 
-        adjust_position_sizes(instruments, target, mock_ig_service)
+        result = adjust_position_sizes(
+            instruments, target, None, mock_ig_service, current_positions=current_pos
+        )
 
         # Should create a new position
         mock_ig_service.create_open_position.assert_called_once()
@@ -210,6 +275,13 @@ class TestAdjustPositionSizes:
         assert call_kwargs["size"] == 3.0
         assert call_kwargs["epic"] == "IX.D.FTSE.DAILY.IP"
 
+        # Verify returned DataFrame
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 1
+        assert "dealId" in result.columns
+        assert "dealStatus" in result.columns
+        assert result.index.name == "DateTime"
+
     def test_open_short_position(
         self,
         mock_ig_service: MagicMock,
@@ -217,19 +289,29 @@ class TestAdjustPositionSizes:
     ) -> None:
         """Test opening a new short position."""
         mock_ig_service.fetch_open_positions.return_value = pd.DataFrame(
-            {"epic": [], "dealId": [], "direction": [], "size": []}
+            {
+                "epic": pd.Series([], dtype=str),
+                "dealId": pd.Series([], dtype=str),
+                "direction": pd.Series([], dtype=str),
+                "size": pd.Series([], dtype=float),
+            }
         )
+        current_pos = get_current_positions(mock_ig_service)
 
         target = pd.DataFrame(
             {"IX.D.FTSE.DAILY.IP": [0.0, -2.0]},
             index=pd.date_range("2024-01-01", periods=2),
         )
 
-        adjust_position_sizes(instruments, target, mock_ig_service)
+        result = adjust_position_sizes(
+            instruments, target, None, mock_ig_service, current_positions=current_pos
+        )
 
         call_kwargs = mock_ig_service.create_open_position.call_args[1]
         assert call_kwargs["direction"] == "SELL"
         assert call_kwargs["size"] == 2.0
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 1
 
     def test_close_existing_position_when_changing_sides(
         self,
@@ -246,6 +328,7 @@ class TestAdjustPositionSizes:
                 "size": [2.0],
             }
         )
+        current_pos = get_current_positions(mock_ig_service)
 
         # Target is short
         target = pd.DataFrame(
@@ -253,7 +336,9 @@ class TestAdjustPositionSizes:
             index=pd.date_range("2024-01-01", periods=2),
         )
 
-        adjust_position_sizes(instruments, target, mock_ig_service)
+        result = adjust_position_sizes(
+            instruments, target, None, mock_ig_service, current_positions=current_pos
+        )
 
         # Should close existing position first
         mock_ig_service.close_open_position.assert_called()
@@ -262,6 +347,10 @@ class TestAdjustPositionSizes:
         call_kwargs = mock_ig_service.create_open_position.call_args[1]
         assert call_kwargs["direction"] == "SELL"
         assert call_kwargs["size"] == 3.0
+
+        # Should have at least 2 actions: close + create (may also have stop level update)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) >= 2
 
     def test_increase_existing_position(
         self,
@@ -278,6 +367,7 @@ class TestAdjustPositionSizes:
                 "size": [2.0],
             }
         )
+        current_pos = get_current_positions(mock_ig_service)
 
         # Target is 5 (increase by 3)
         target = pd.DataFrame(
@@ -285,7 +375,9 @@ class TestAdjustPositionSizes:
             index=pd.date_range("2024-01-01", periods=2),
         )
 
-        adjust_position_sizes(instruments, target, mock_ig_service)
+        result = adjust_position_sizes(
+            instruments, target, None, mock_ig_service, current_positions=current_pos
+        )
 
         # Should not close any position
         mock_ig_service.close_open_position.assert_not_called()
@@ -294,6 +386,10 @@ class TestAdjustPositionSizes:
         call_kwargs = mock_ig_service.create_open_position.call_args[1]
         assert call_kwargs["direction"] == "BUY"
         assert call_kwargs["size"] == 3.0  # 5 - 2 = 3
+
+        # May also include stop level update action
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) >= 1
 
     def test_increase_short_position(
         self,
@@ -310,6 +406,7 @@ class TestAdjustPositionSizes:
                 "size": [2.0],
             }
         )
+        current_pos = get_current_positions(mock_ig_service)
 
         # Target is -5 (increase short by 3)
         target = pd.DataFrame(
@@ -317,12 +414,18 @@ class TestAdjustPositionSizes:
             index=pd.date_range("2024-01-01", periods=2),
         )
 
-        adjust_position_sizes(instruments, target, mock_ig_service)
+        result = adjust_position_sizes(
+            instruments, target, None, mock_ig_service, current_positions=current_pos
+        )
 
         mock_ig_service.create_open_position.assert_called_once()
         call_kwargs = mock_ig_service.create_open_position.call_args[1]
         assert call_kwargs["direction"] == "SELL"
         assert call_kwargs["size"] == 3.0
+
+        # May also include stop level update action
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) >= 1
 
     def test_decrease_existing_position(
         self,
@@ -339,6 +442,7 @@ class TestAdjustPositionSizes:
                 "size": [5.0],
             }
         )
+        current_pos = get_current_positions(mock_ig_service)
 
         # Target is 2 (decrease by 3)
         target = pd.DataFrame(
@@ -346,12 +450,18 @@ class TestAdjustPositionSizes:
             index=pd.date_range("2024-01-01", periods=2),
         )
 
-        adjust_position_sizes(instruments, target, mock_ig_service)
+        result = adjust_position_sizes(
+            instruments, target, None, mock_ig_service, current_positions=current_pos
+        )
 
         # Should not create new position
         mock_ig_service.create_open_position.assert_not_called()
         # Should close part of existing position
         mock_ig_service.close_open_position.assert_called()
+
+        # May also include stop level update action
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) >= 1
 
     def test_decrease_position_across_multiple_deals(
         self,
@@ -368,6 +478,7 @@ class TestAdjustPositionSizes:
                 "size": [2.0, 3.0],
             }
         )
+        current_pos = get_current_positions(mock_ig_service)
 
         # Target is 1 (decrease by 4, closing multiple positions)
         target = pd.DataFrame(
@@ -375,10 +486,14 @@ class TestAdjustPositionSizes:
             index=pd.date_range("2024-01-01", periods=2),
         )
 
-        adjust_position_sizes(instruments, target, mock_ig_service)
+        result = adjust_position_sizes(
+            instruments, target, None, mock_ig_service, current_positions=current_pos
+        )
 
         # Should close positions to reduce from 5 to 1
         assert mock_ig_service.close_open_position.call_count >= 1
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) >= 1
 
     def test_no_change_when_position_matches_target(
         self,
@@ -395,6 +510,7 @@ class TestAdjustPositionSizes:
                 "size": [3.0],
             }
         )
+        current_pos = get_current_positions(mock_ig_service)
 
         # Target is also 3
         target = pd.DataFrame(
@@ -402,10 +518,15 @@ class TestAdjustPositionSizes:
             index=pd.date_range("2024-01-01", periods=2),
         )
 
-        adjust_position_sizes(instruments, target, mock_ig_service)
+        result = adjust_position_sizes(
+            instruments, target, None, mock_ig_service, current_positions=current_pos
+        )
 
         mock_ig_service.create_open_position.assert_not_called()
         mock_ig_service.close_open_position.assert_not_called()
+
+        # Position unchanged, but may include stop level update action
+        assert isinstance(result, pd.DataFrame)
 
     def test_session_closed_after_adjustment(
         self,
@@ -414,17 +535,26 @@ class TestAdjustPositionSizes:
     ) -> None:
         """Test that the session is closed after adjustments."""
         mock_ig_service.fetch_open_positions.return_value = pd.DataFrame(
-            {"epic": [], "dealId": [], "direction": [], "size": []}
+            {
+                "epic": pd.Series([], dtype=str),
+                "dealId": pd.Series([], dtype=str),
+                "direction": pd.Series([], dtype=str),
+                "size": pd.Series([], dtype=float),
+            }
         )
+        current_pos = get_current_positions(mock_ig_service)
 
         target = pd.DataFrame(
             {"IX.D.FTSE.DAILY.IP": [0.0, 1.0]},
             index=pd.date_range("2024-01-01", periods=2),
         )
 
-        adjust_position_sizes(instruments, target, mock_ig_service)
+        result = adjust_position_sizes(
+            instruments, target, None, mock_ig_service, current_positions=current_pos
+        )
 
         mock_ig_service.session.close.assert_called_once()
+        assert isinstance(result, pd.DataFrame)
 
 
 if __name__ == "__main__":
