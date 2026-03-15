@@ -56,6 +56,7 @@
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
     currency: "{{ currency }}"
+    ffill_limit: {{ price_ffill_limit | default(10) }}
   depends_on:
     - "sample.{{ universe_name }}"
     - "sample.{{ fx_universe_name }}"
@@ -77,4 +78,18 @@
     # {% for occurence in ["open", "high", "low", "close"] %}
     - prices/{{ universe_name }}.mid.{{ occurence }}.{{ currency }}
     # {% endfor %}
+
+"check.{{ universe_name }}.{{ currency }}":
+  function: tradingo.sampling.quality.check_price_staleness
+  depends_on:
+    - "sample.{{ universe_name }}.{{ currency }}"
+  symbols_in:
+    prices: "prices/{{ universe_name }}.mid.close.{{ currency }}"
+  load_args:
+    no_date: true
+  symbols_out: []
+  params:
+    universe_name: "{{ universe_name }}"
+    ffill_limit: {{ price_ffill_limit | default(10) }}
+    alert_recipient: "{{ alert_recipient | default('') }}"
 # {% endif %}
