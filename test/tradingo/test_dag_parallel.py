@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from tradingo.dag import DAG, TaskState
+from tradingo.execution_plan import ExecutionPlan
 
 from . import _dag_helpers as helpers
 
@@ -224,3 +226,142 @@ class TestBatchedParallelSafety:
         ]
         assert a_dates == sorted(a_dates)
         assert b_dates == sorted(b_dates)
+
+
+@pytest.fixture()
+def tmp_plans_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(ExecutionPlan, "PLANS_DIR", str(tmp_path))
+    return tmp_path
+
+
+def _make_two_task_dag() -> DAG:
+    config = {
+        "task.a": {
+            "function": f"{HELPERS}.record_a_threaded",
+            "depends_on": [],
+            "params": {},
+        },
+        "task.b": {
+            "function": f"{HELPERS}.record_b_threaded",
+            "depends_on": ["task.a"],
+            "params": {},
+        },
+    }
+    return DAG.from_config(config)
+
+
+def _find_plan(tmp_plans_dir: Path) -> ExecutionPlan:
+    plans = list(tmp_plans_dir.glob("*.json"))
+    assert len(plans) == 1
+    plan = ExecutionPlan.load(plans[0].stem)
+    assert plan is not None
+    return plan
+
+
+class TestBatchedParallelPlanTracking:
+    """Execution plan is updated incrementally during parallel batched runs."""
+
+    def setup_method(self) -> None:
+        helpers.reset()
+        helpers.reset_threaded()
+        helpers.reset_fail_counter()
+
+    def test_task_mode_all_steps_marked_success(self, tmp_plans_dir: Path) -> None:
+        """TASK mode with max_workers>1: every step is marked SUCCESS in the plan."""
+        dag = _make_two_task_dag()
+        dag.run(
+            "task.b",
+            run_dependencies=True,
+            force_rerun=True,
+            max_workers=4,
+            batch_interval=pd.Timedelta(days=5),
+            batch_mode="task",
+            start_date=pd.Timestamp("2024-01-01"),
+            end_date=pd.Timestamp("2024-01-11"),
+            config_path="/fake/config.yaml",
+        )
+
+        plan = _find_plan(tmp_plans_dir)
+        assert all(s.status == "SUCCESS" for s in plan.steps)
+
+    def test_task_mode_failed_step_marked_failed(self, tmp_plans_dir: Path) -> None:
+        """TASK mode: a failing step is marked FAILED in the plan."""
+        config = {
+            "task.a": {
+                "function": f"{HELPERS}.record_a_fail_second",
+                "depends_on": [],
+                "params": {},
+            }
+        }
+        dag = DAG.from_config(config)
+
+        with pytest.raises(ExceptionGroup):
+            dag.run(
+                "task.a",
+                run_dependencies=False,
+                force_rerun=True,
+                max_workers=4,
+                batch_interval=pd.Timedelta(days=5),
+                batch_mode="task",
+                start_date=pd.Timestamp("2024-01-01"),
+                end_date=pd.Timestamp("2024-01-11"),
+                config_path="/fake/config.yaml",
+            )
+
+        plan = _find_plan(tmp_plans_dir)
+        statuses = [s.status for s in plan.steps]
+        assert "FAILED" in statuses
+
+    def test_stepped_mode_all_steps_marked_success(self, tmp_plans_dir: Path) -> None:
+        """STEPPED mode with max_workers>1: every step is marked SUCCESS in the plan."""
+        dag = _make_two_task_dag()
+        dag.run(
+            "task.b",
+            run_dependencies=True,
+            force_rerun=True,
+            max_workers=4,
+            batch_interval=pd.Timedelta(days=5),
+            batch_mode="stepped",
+            start_date=pd.Timestamp("2024-01-01"),
+            end_date=pd.Timestamp("2024-01-11"),
+            config_path="/fake/config.yaml",
+        )
+
+        plan = _find_plan(tmp_plans_dir)
+        assert all(s.status == "SUCCESS" for s in plan.steps)
+
+    def test_deps_first_mode_all_steps_marked_success(
+        self, tmp_plans_dir: Path
+    ) -> None:
+        """DEPS_FIRST mode with max_workers>1: every step is marked SUCCESS in the plan."""
+        dag = _make_two_task_dag()
+        dag.run(
+            "task.b",
+            run_dependencies=True,
+            force_rerun=True,
+            max_workers=4,
+            batch_interval=pd.Timedelta(days=5),
+            batch_mode="deps-first",
+            start_date=pd.Timestamp("2024-01-01"),
+            end_date=pd.Timestamp("2024-01-11"),
+            config_path="/fake/config.yaml",
+        )
+
+        plan = _find_plan(tmp_plans_dir)
+        assert all(s.status == "SUCCESS" for s in plan.steps)
+
+    def test_no_plan_without_config_path(self, tmp_plans_dir: Path) -> None:
+        """No plan file is created when config_path is not provided."""
+        dag = _make_two_task_dag()
+        dag.run(
+            "task.b",
+            run_dependencies=True,
+            force_rerun=True,
+            max_workers=4,
+            batch_interval=pd.Timedelta(days=5),
+            batch_mode="task",
+            start_date=pd.Timestamp("2024-01-01"),
+            end_date=pd.Timestamp("2024-01-11"),
+        )
+
+        assert list(tmp_plans_dir.glob("*.json")) == []
