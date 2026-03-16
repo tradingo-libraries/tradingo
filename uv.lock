@@ -97,6 +97,15 @@ wheels = [
 ]
 
 [[package]]
+name = "annotated-doc"
+version = "0.0.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/57/ba/046ceea27344560984e26a590f90bc7f4a75b06701f653222458922b558c/annotated_doc-0.0.4.tar.gz", hash = "sha256:fbcda96e87e9c92ad167c2e53839e57503ecfda18804ea28102353485033faa4", size = 7288, upload-time = "2025-11-10T22:07:42.062Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1e/d3/26bf1008eb3d2daa8ef4cacc7f3bfdc11818d111f7e2d0201bc6e3b49d45/annotated_doc-0.0.4-py3-none-any.whl", hash = "sha256:571ac1dc6991c450b25a9c2d84a3705e2ae7a53467b5d111c24fa8baabbed320", size = 5303, upload-time = "2025-11-10T22:07:40.673Z" },
+]
+
+[[package]]
 name = "annotated-types"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -801,6 +810,19 @@ toml = [
 ]
 
 [[package]]
+name = "croniter"
+version = "6.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+    { name = "pytz" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ad/2f/44d1ae153a0e27be56be43465e5cb39b9650c781e001e7864389deb25090/croniter-6.0.0.tar.gz", hash = "sha256:37c504b313956114a983ece2c2b07790b1f1094fe9d81cc94739214748255577", size = 64481, upload-time = "2024-12-17T17:17:47.32Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/4b/290b4c3efd6417a8b0c284896de19b1d5855e6dbdb97d2a35e68fa42de85/croniter-6.0.0-py2.py3-none-any.whl", hash = "sha256:2f878c3856f17896979b2a4379ba1f09c83e374931ea15cc835c5dd2eee9b368", size = 25468, upload-time = "2024-12-17T17:17:45.359Z" },
+]
+
+[[package]]
 name = "curl-cffi"
 version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1010,6 +1032,19 @@ wheels = [
 ]
 
 [[package]]
+name = "dukascopy-python"
+version = "4.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pandas" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/34/7f/c054097e4020696ac3c4a9e85ab9a75342e01e593dbe60adc14148924ea1/dukascopy_python-4.0.1.tar.gz", hash = "sha256:5bdcf2c8a72d69ec035a56e59b5534a96ccbbbecdbe4f22d74608d88eaf39b64", size = 19326, upload-time = "2025-04-28T19:11:58.519Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e4/0c/bddb653f83f7e721044910e329f4e2b87569e676b58520e91296dc7f7237/dukascopy_python-4.0.1-py3-none-any.whl", hash = "sha256:bb7ccb9b38e43276f08256c41f66ca38fd972d0d5db0081660ee652d14ddf431", size = 17023, upload-time = "2025-04-28T19:11:54.489Z" },
+]
+
+[[package]]
 name = "et-xmlfile"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1042,6 +1077,22 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/91/50/a9d80c47ff289c611ff12e63f7c5d13942c65d68125160cefd768c73e6e4/executing-2.2.0.tar.gz", hash = "sha256:5d108c028108fe2551d1a7b2e8b713341e2cb4fc0aa7dcf966fa4327a5226755", size = 978693, upload-time = "2025-01-22T15:41:29.403Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/8f/c4d9bafc34ad7ad5d8dc16dd1347ee0e507a52c3adb6bfa8887e1c6a26ba/executing-2.2.0-py2.py3-none-any.whl", hash = "sha256:11387150cad388d62750327a53d3339fad4888b39a6fe233c3afbb54ecffd3aa", size = 26702, upload-time = "2025-01-22T15:41:25.929Z" },
+]
+
+[[package]]
+name = "fastapi"
+version = "0.135.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "annotated-doc" },
+    { name = "pydantic" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+    { name = "typing-inspection" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a2/b5/386a9579a299a32365b34097e4eac6a0544ce0d7aa4bb95ce0d71607a999/fastapi-0.135.0.tar.gz", hash = "sha256:bd37903acf014d1284bda027096e460814dca9699f9dacfe11c275749d949f4d", size = 393855, upload-time = "2026-03-01T09:28:46.714Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/56/38/fa5dd0e677e1e2e38f858933c4a125e80103e551151f1f661dd4f227210d/fastapi-0.135.0-py3-none-any.whl", hash = "sha256:31e2ddc78d6406c6f7d5d7b9996a057985e2600fbe7e9ba6ace8205d48dff688", size = 114496, upload-time = "2026-03-01T09:28:48.162Z" },
 ]
 
 [[package]]
@@ -3929,6 +3980,19 @@ wheels = [
 ]
 
 [[package]]
+name = "starlette"
+version = "0.52.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c4/68/79977123bb7be889ad680d79a40f339082c1978b5cfcf62c2d8d196873ac/starlette-0.52.1.tar.gz", hash = "sha256:834edd1b0a23167694292e94f597773bc3f89f362be6effee198165a35d62933", size = 2653702, upload-time = "2026-01-18T13:34:11.062Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/81/0d/13d1d239a25cbfb19e740db83143e95c772a1fe10202dda4b76792b114dd/starlette-0.52.1-py3-none-any.whl", hash = "sha256:0029d43eb3d273bc4f83a08720b4912ea4b071087a3b48db01b7c839f7954d74", size = 74272, upload-time = "2026-01-18T13:34:09.188Z" },
+]
+
+[[package]]
 name = "statsmodels"
 version = "0.14.5"
 source = { registry = "https://pypi.org/simple" }
@@ -4147,6 +4211,7 @@ name = "tradingo"
 source = { editable = "." }
 dependencies = [
     { name = "arcticdb" },
+    { name = "dukascopy-python" },
     { name = "ipython" },
     { name = "lightgbm" },
     { name = "lxml" },
@@ -4169,6 +4234,7 @@ dependencies = [
 dev = [
     { name = "black" },
     { name = "debugpy" },
+    { name = "httpx" },
     { name = "isort" },
     { name = "mypy" },
     { name = "pandas-stubs" },
@@ -4177,6 +4243,8 @@ dev = [
     { name = "pytest-benchmark" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "types-croniter" },
+    { name = "types-requests" },
 ]
 monitor = [
     { name = "dash" },
@@ -4186,10 +4254,15 @@ research = [
     { name = "dtale" },
     { name = "jupyter" },
 ]
+serve = [
+    { name = "croniter" },
+    { name = "fastapi" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "arcticdb" },
+    { name = "dukascopy-python" },
     { name = "ipython", specifier = ">=9.1.0" },
     { name = "lightgbm", specifier = ">=4.6.0" },
     { name = "lxml" },
@@ -4212,6 +4285,7 @@ requires-dist = [
 dev = [
     { name = "black" },
     { name = "debugpy", specifier = ">=1.8.13" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "isort" },
     { name = "mypy", specifier = ">=1.15.0" },
     { name = "pandas-stubs", specifier = ">=2.3.3.260113" },
@@ -4220,6 +4294,8 @@ dev = [
     { name = "pytest-benchmark" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "ruff", specifier = ">=0.11.5" },
+    { name = "types-croniter", specifier = ">=6.0.0.20250809" },
+    { name = "types-requests", specifier = ">=2.32.4.20260107" },
 ]
 monitor = [
     { name = "dash", specifier = ">=2.18.2" },
@@ -4228,6 +4304,10 @@ monitor = [
 research = [
     { name = "dtale" },
     { name = "jupyter" },
+]
+serve = [
+    { name = "croniter", specifier = ">=6.0.0" },
+    { name = "fastapi" },
 ]
 
 [[package]]
@@ -4252,6 +4332,15 @@ wheels = [
 ]
 
 [[package]]
+name = "types-croniter"
+version = "6.0.0.20250809"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/35/ac/7b26a9b19cc2b137293b14af71402ba83d13674c208b141474b6887465ae/types_croniter-6.0.0.20250809.tar.gz", hash = "sha256:c829295d4d65eaddcfafec905b0fbab59e72c3c91ee934a4d504dcafad79ff95", size = 11745, upload-time = "2025-08-09T03:14:10.729Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d1/99/e8e40592fbecb6671b32e4dab4cca2a1d4fa7d5b2f54aece134ccb42e839/types_croniter-6.0.0.20250809-py3-none-any.whl", hash = "sha256:d9f53f3e837eb6af509e2090fd2f5bb29b38425dd78f77d7b3bf37ccd2b2bf93", size = 9712, upload-time = "2025-08-09T03:14:09.966Z" },
+]
+
+[[package]]
 name = "types-python-dateutil"
 version = "2.9.0.20250708"
 source = { registry = "https://pypi.org/simple" }
@@ -4267,6 +4356,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/40/ff/c047ddc68c803b46470a357454ef76f4acd8c1088f5cc4891cdd909bfcf6/types_pytz-2025.2.0.20251108.tar.gz", hash = "sha256:fca87917836ae843f07129567b74c1929f1870610681b4c92cb86a3df5817bdb", size = 10961, upload-time = "2025-11-08T02:55:57.001Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e7/c1/56ef16bf5dcd255155cc736d276efa6ae0a5c26fd685e28f0412a4013c01/types_pytz-2025.2.0.20251108-py3-none-any.whl", hash = "sha256:0f1c9792cab4eb0e46c52f8845c8f77cf1e313cb3d68bf826aa867fe4717d91c", size = 10116, upload-time = "2025-11-08T02:55:56.194Z" },
+]
+
+[[package]]
+name = "types-requests"
+version = "2.32.4.20260107"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0f/f3/a0663907082280664d745929205a89d41dffb29e89a50f753af7d57d0a96/types_requests-2.32.4.20260107.tar.gz", hash = "sha256:018a11ac158f801bfa84857ddec1650750e393df8a004a8a9ae2a9bec6fcb24f", size = 23165, upload-time = "2026-01-07T03:20:54.091Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1c/12/709ea261f2bf91ef0a26a9eed20f2623227a8ed85610c1e54c5805692ecb/types_requests-2.32.4.20260107-py3-none-any.whl", hash = "sha256:b703fe72f8ce5b31ef031264fe9395cac8f46a04661a79f7ed31a80fb308730d", size = 20676, upload-time = "2026-01-07T03:20:52.929Z" },
 ]
 
 [[package]]
@@ -4293,14 +4394,14 @@ wheels = [
 
 [[package]]
 name = "typing-inspection"
-version = "0.4.1"
+version = "0.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f8/b1/0c11f5058406b3af7609f121aaa6b609744687f1d158b3c3a5bf4cc94238/typing_inspection-0.4.1.tar.gz", hash = "sha256:6ae134cc0203c33377d43188d4064e9b357dba58cff3185f22924610e70a9d28", size = 75726, upload-time = "2025-05-21T18:55:23.885Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac53367ae42139cf4b1ca5f36bb3dc6c9d33acdb43655/typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464", size = 75949, upload-time = "2025-10-01T02:14:41.687Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/17/69/cd203477f944c353c31bade965f880aa1061fd6bf05ded0726ca845b6ff7/typing_inspection-0.4.1-py3-none-any.whl", hash = "sha256:389055682238f53b04f7badcb49b989835495a96700ced5dab2d8feae4b26f51", size = 14552, upload-time = "2025-05-21T18:55:22.152Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/9b/47798a6c91d8bdb567fe2698fe81e0c6b7cb7ef4d13da4114b41d239f65d/typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7", size = 14611, upload-time = "2025-10-01T02:14:40.154Z" },
 ]
 
 [[package]]

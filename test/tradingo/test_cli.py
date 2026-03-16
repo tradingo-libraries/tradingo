@@ -24,7 +24,13 @@ import yaml
 from arcticdb.arctic import Library
 
 from tradingo.api import Tradingo
-from tradingo.cli import cli_app, handle_tasks, handle_universes, int_or_bool
+from tradingo.cli import (
+    cli_app,
+    handle_tasks,
+    handle_universes,
+    int_or_bool,
+    parse_interval,
+)
 from tradingo.dag import DAG
 
 # ---------------------------------------------------------------------------
@@ -312,6 +318,41 @@ class TestIntOrBool:
             int_or_bool("invalid")
         with pytest.raises(ValueError):
             int_or_bool("maybe")
+
+
+class TestParseInterval:
+    """Tests for the parse_interval argument parser."""
+
+    def test_days(self) -> None:
+        assert parse_interval("3days") == pd.Timedelta(days=3)
+        assert parse_interval("1day") == pd.Timedelta(days=1)
+
+    def test_hours(self) -> None:
+        assert parse_interval("2hours") == pd.Timedelta(hours=2)
+        assert parse_interval("1h") == pd.Timedelta(hours=1)
+
+    def test_minutes(self) -> None:
+        assert parse_interval("30min") == pd.Timedelta(minutes=30)
+
+    def test_weeks(self) -> None:
+        assert parse_interval("1w") == pd.Timedelta(weeks=1)
+        assert parse_interval("2weeks") == pd.Timedelta(weeks=2)
+
+    def test_months_approximated(self) -> None:
+        assert parse_interval("2months") == pd.Timedelta(days=60)
+        assert parse_interval("1month") == pd.Timedelta(days=30)
+        assert parse_interval("3mo") == pd.Timedelta(days=90)
+
+    def test_with_spaces(self) -> None:
+        assert parse_interval("3 days") == pd.Timedelta(days=3)
+
+    def test_invalid_format(self) -> None:
+        with pytest.raises(argparse.ArgumentTypeError, match="Invalid interval"):
+            parse_interval("abc")
+
+    def test_invalid_unit(self) -> None:
+        with pytest.raises(argparse.ArgumentTypeError, match="Unrecognized"):
+            parse_interval("3foobar")
 
 
 # ---------------------------------------------------------------------------
@@ -1658,7 +1699,7 @@ stage1:
 
         from tradingo.config import read_config_template
 
-        config = read_config_template(config_file, os.environ)
+        config = read_config_template(config_file, dict(os.environ))
 
         args = argparse.Namespace(
             config=config,
