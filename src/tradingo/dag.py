@@ -519,6 +519,8 @@ class DAG(dict[str, Task]):
         task_name: str,
         intervals: list[tuple[pd.Timestamp, pd.Timestamp]],
         force_rerun: bool,
+        plan: ExecutionPlan | None = None,
+        step_index: dict[tuple[str, pd.Timestamp, pd.Timestamp], int] | None = None,
         **kwargs: object,
     ) -> None:
         """Run one task across all its intervals sequentially.
@@ -537,7 +539,18 @@ class DAG(dict[str, Task]):
             if task.state == TaskState.PENDING or force_rerun:
                 logger.info("Running %s [%s -> %s]", task_name, start, end)
                 print(f"Running {task} [{start} -> {end}]")
-                task.function(*task.task_args, **task_kwargs)
+                try:
+                    task.function(*task.task_args, **task_kwargs)
+                    if plan is not None and step_index is not None:
+                        idx = step_index.get((task_name, start, end))
+                        if idx is not None:
+                            plan.mark_step(idx, "SUCCESS")
+                except Exception:
+                    if plan is not None and step_index is not None:
+                        idx = step_index.get((task_name, start, end))
+                        if idx is not None:
+                            plan.mark_step(idx, "FAILED")
+                    raise
 
     def run_batched(
         self,
@@ -627,6 +640,10 @@ class DAG(dict[str, Task]):
                 plan = ExecutionPlan.from_schedule(plan_key, plan_params, schedule)
                 plan.save()
 
+        step_index: dict[tuple[str, pd.Timestamp, pd.Timestamp], int] = {
+            (t, s, e): i for i, (t, s, e) in enumerate(schedule)
+        }
+
         if max_workers > 1:
             self._run_batched_parallel(
                 task_name=task_name,
@@ -638,6 +655,7 @@ class DAG(dict[str, Task]):
                 force_rerun=force_rerun,
                 max_workers=max_workers,
                 plan=plan,
+                step_index=step_index,
                 **kwargs,
             )
             return
@@ -696,6 +714,7 @@ class DAG(dict[str, Task]):
         force_rerun: bool = False,
         max_workers: int = 4,
         plan: ExecutionPlan | None = None,
+        step_index: dict[tuple[str, pd.Timestamp, pd.Timestamp], int] | None = None,
         **kwargs: object,
     ) -> None:
         """Parallel execution of a batched schedule.
@@ -705,8 +724,8 @@ class DAG(dict[str, Task]):
         same ArcticDB symbol.
         """
         all_task_names = dep_names + [task_name]
-        start_date = kwargs["start_date"]
-        end_date = kwargs["end_date"]
+        start_date = cast(pd.Timestamp, kwargs["start_date"])
+        end_date = cast(pd.Timestamp, kwargs["end_date"])
 
         if mode == BatchMode.STEPPED:
             # Each interval is a barrier; within an interval, use run_parallel.
@@ -721,14 +740,27 @@ class DAG(dict[str, Task]):
                 # Reset states so tasks can re-run for next interval
                 for name in all_task_names:
                     self[name].state = TaskState.PENDING
-                self.run_parallel(
-                    task_name,
-                    run_dependencies=run_dependencies,
-                    skip_deps=skip_deps,
-                    force_rerun=force_rerun,
-                    max_workers=max_workers,
-                    **chunk_kwargs,
-                )
+                try:
+                    self.run_parallel(
+                        task_name,
+                        run_dependencies=run_dependencies,
+                        skip_deps=skip_deps,
+                        force_rerun=force_rerun,
+                        max_workers=max_workers,
+                        **chunk_kwargs,
+                    )
+                    if plan is not None and step_index is not None:
+                        for name in all_task_names:
+                            idx = step_index.get((name, chunk_start, chunk_end))
+                            if idx is not None:
+                                plan.mark_step(idx, "SUCCESS")
+                except Exception:
+                    if plan is not None and step_index is not None:
+                        for name in all_task_names:
+                            idx = step_index.get((name, chunk_start, chunk_end))
+                            if idx is not None:
+                                plan.mark_step(idx, "FAILED")
+                    raise
                 current_kwargs.pop("clean", None)
 
         elif mode == BatchMode.TASK:
@@ -740,7 +772,12 @@ class DAG(dict[str, Task]):
             def _run_task_intervals(t_name: str) -> None:
                 try:
                     self._run_intervals_sequential(
-                        t_name, intervals, force_rerun, **kwargs
+                        t_name,
+                        intervals,
+                        force_rerun,
+                        plan=plan,
+                        step_index=step_index,
+                        **kwargs,
                     )
                 except Exception as exc:
                     with errors_lock:
@@ -798,16 +835,36 @@ class DAG(dict[str, Task]):
                     "start_date": start_date,
                     "end_date": end_date,
                 }
-                self.run_parallel(
-                    task_name,
-                    run_dependencies=run_dependencies,
-                    skip_deps=skip_deps,
-                    force_rerun=force_rerun,
-                    max_workers=max_workers,
-                    **full_kwargs,
-                )
+                try:
+                    self.run_parallel(
+                        task_name,
+                        run_dependencies=run_dependencies,
+                        skip_deps=skip_deps,
+                        force_rerun=force_rerun,
+                        max_workers=max_workers,
+                        **full_kwargs,
+                    )
+                    if plan is not None and step_index is not None:
+                        for dep_name in dep_names:
+                            idx = step_index.get((dep_name, start_date, end_date))
+                            if idx is not None:
+                                plan.mark_step(idx, "SUCCESS")
+                except Exception:
+                    if plan is not None and step_index is not None:
+                        for dep_name in dep_names:
+                            idx = step_index.get((dep_name, start_date, end_date))
+                            if idx is not None:
+                                plan.mark_step(idx, "FAILED")
+                    raise
             # Phase 2: target batched sequentially (same task, sequential intervals)
-            self._run_intervals_sequential(task_name, intervals, force_rerun, **kwargs)
+            self._run_intervals_sequential(
+                task_name,
+                intervals,
+                force_rerun,
+                plan=plan,
+                step_index=step_index,
+                **kwargs,
+            )
 
     def run_parallel(
         self,
