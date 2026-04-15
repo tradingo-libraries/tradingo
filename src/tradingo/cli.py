@@ -157,6 +157,20 @@ def cli_app() -> argparse.ArgumentParser:
         default=False,
         help="Resume a previously failed batched run, skipping completed steps",
     )
+    run_tasks.add_argument(
+        "--executor",
+        choices=["thread", "celery"],
+        default="thread",
+        help=(
+            "Execution backend: 'thread' (default, local ThreadPoolExecutor) or "
+            "'celery' (distributed, requires tradingo[worker] and running workers)"
+        ),
+    )
+    run_tasks.add_argument(
+        "--broker-url",
+        default=os.environ.get("TP_CELERY_BROKER_URL"),
+        help="Celery broker URL (default: TP_CELERY_BROKER_URL env var)",
+    )
 
     _ = task_subparsers.add_parser("list")
 
@@ -279,6 +293,8 @@ def handle_tasks(args: argparse.Namespace, arctic: Arctic | CachingArctic) -> No
                 batch_mode=getattr(args, "batch_mode", "stepped"),
                 recover=recover,
                 config_path=config_path,
+                executor=getattr(args, "executor", "thread"),
+                broker_url=getattr(args, "broker_url", None),
                 arctic=arctic,
                 dry_run=args.dry_run,
                 skip_deps=args.skip_deps,

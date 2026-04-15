@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from enum import Enum
@@ -934,6 +935,89 @@ class DAG(dict[str, Task]):
         if errors:
             raise ExceptionGroup(f"{len(errors)} task(s) failed", errors)
 
+    def run_celery(
+        self,
+        task_name: str,
+        run_dependencies: bool | int,
+        broker_url: str | None = None,
+        skip_deps: re.Pattern[str] | None = None,
+        force_rerun: bool = False,
+        **kwargs: object,
+    ) -> None:
+        """Dispatch tasks to Celery workers with topology-preserving dispatch.
+
+        Mirrors ``run_parallel`` but sends each task to a remote Celery worker
+        instead of a local thread.  Requires the ``[worker]`` extra and
+        ``TP_CELERY_BROKER_URL`` / ``TP_ARCTIC_URI`` on all worker nodes.
+
+        Workers are started separately::
+
+            celery -A tradingo.worker worker -Q tradingo --concurrency=4
+        """
+        from tradingo.worker import (
+            QUEUE,
+            require_celery,
+            serialize_kwargs,
+            serialize_task,
+        )
+
+        celery_app = require_celery()
+        if broker_url:
+            celery_app.conf.broker_url = broker_url
+
+        runnable = self._collect_runnable_tasks(task_name, run_dependencies, skip_deps)
+
+        in_degree: dict[str, int] = {name: 0 for name in runnable}
+        dependents: dict[str, list[str]] = {name: [] for name in runnable}
+        for name in runnable:
+            for dep in self[name].dependencies:
+                if dep.name in runnable:
+                    in_degree[name] += 1
+                    dependents[dep.name].append(name)
+
+        serialized_kwargs = serialize_kwargs(dict(kwargs))
+        # pending maps task name → Celery AsyncResult
+        pending: dict[str, Any] = {}
+        errors: list[Exception] = []
+
+        def _submit(name: str) -> None:
+            task_spec = serialize_task(self[name])
+            result = celery_app.send_task(
+                "tradingo.run_task",
+                args=[task_spec, serialized_kwargs],
+                queue=QUEUE,
+            )
+            pending[name] = result
+            logger.info("Submitted %s to Celery queue '%s'", name, QUEUE)
+
+        for name in [n for n, d in in_degree.items() if d == 0]:
+            _submit(name)
+
+        while pending:
+            for name in list(pending):
+                result = pending[name]
+                if not result.ready():
+                    continue
+                del pending[name]
+                if result.failed():
+                    exc = result.result
+                    logger.error("Task %s failed: %s", name, exc)
+                    errors.append(
+                        exc if isinstance(exc, Exception) else Exception(str(exc))
+                    )
+                else:
+                    logger.info("Task %s completed", name)
+                    for dep_name in dependents[name]:
+                        in_degree[dep_name] -= 1
+                        if in_degree[dep_name] == 0:
+                            _submit(dep_name)
+
+            if pending:
+                time.sleep(0.5)
+
+        if errors:
+            raise ExceptionGroup(f"{len(errors)} task(s) failed on Celery", errors)
+
     def run(
         self,
         task_name: str,
@@ -945,12 +1029,25 @@ class DAG(dict[str, Task]):
         batch_mode: str = "stepped",
         recover: bool = False,
         config_path: str | None = None,
+        executor: str = "thread",
+        broker_url: str | None = None,
         *args: object,
         **kwargs: object,
     ) -> None:
         """run a specific task of this DAG."""
         if task_name not in self:
             raise ValueError(f"{task_name} is not a task in the DAG.")
+
+        if executor == "celery":
+            self.run_celery(
+                task_name,
+                run_dependencies=run_dependencies,
+                broker_url=broker_url,
+                skip_deps=skip_deps,
+                force_rerun=force_rerun,
+                **kwargs,
+            )
+            return
 
         if batch_interval is not None:
             self.run_batched(
