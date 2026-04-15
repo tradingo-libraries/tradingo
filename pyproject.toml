@@ -59,6 +59,10 @@ serve = [
   "croniter>=6.0.0",
   "fastapi",
 ]
+worker = [
+  "celery>=5.0",
+  "redis>=4.0",
+]
 
 
 [tool.setuptools.packages.find]
@@ -95,6 +99,10 @@ exclude = [
 
 [[tool.mypy.overrides]]
 module = [
+  "celery",
+  "celery.*",
+  "redis",
+  "redis.*",
   "pandas.plotting._matplotlib.style",
   "arcticdb",
   "arcticdb.*",
