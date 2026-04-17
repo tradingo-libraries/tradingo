@@ -1071,6 +1071,187 @@ class DAG(dict[str, Task]):
         if errors:
             raise ExceptionGroup(f"{len(errors)} task(s) failed on Celery", errors)
 
+    def run_batched_celery(
+        self,
+        task_name: str,
+        run_dependencies: bool | int,
+        batch_interval: pd.Timedelta,
+        batch_mode: str = "stepped",
+        broker_url: str | None = None,
+        skip_deps: re.Pattern[str] | None = None,
+        **kwargs: object,
+    ) -> None:
+        """Dispatch batched time-chunk tasks to Celery workers.
+
+        Splits the date range into ``batch_interval`` chunks and dispatches
+        each ``(task, chunk)`` pair as a separate Celery task.  Writer
+        serialization is enforced: chunks of the same task are never
+        dispatched concurrently (ArcticDB does not allow two writers to the
+        same symbol).
+
+        Cross-task dependency semantics follow ``batch_mode``:
+
+        - TASK: all chunks of an upstream task must complete before the
+          first chunk of a downstream task is dispatched.
+        - STEPPED: within each interval, tasks run in topological order;
+          the next interval only starts once all tasks for the current
+          interval are done.
+        - DEPS_FIRST: upstream tasks run across the full date range first,
+          then the target task runs chunked.
+
+        ``clean`` is forwarded only for the first chunk of each task;
+        subsequent chunks strip it so they append rather than overwrite.
+        """
+        from tradingo.worker import (
+            QUEUE,
+            require_celery,
+            serialize_kwargs,
+            serialize_task,
+        )
+
+        celery_app = require_celery()
+        if broker_url:
+            celery_app.conf.broker_url = broker_url
+
+        start_date = cast(pd.Timestamp | None, kwargs.get("start_date"))
+        end_date = cast(pd.Timestamp | None, kwargs.get("end_date"))
+        if start_date is None or end_date is None:
+            raise ValueError(
+                "--start-date and --end-date are required when using --batch-interval"
+            )
+        start_date = pd.Timestamp(start_date)
+        end_date = pd.Timestamp(end_date)
+
+        mode = BatchMode(batch_mode)
+        intervals = generate_intervals(start_date, end_date, batch_interval)
+
+        runnable = self._collect_runnable_tasks(task_name, run_dependencies, skip_deps)
+        runnable.discard(task_name)
+        dep_names = self._topo_sort_runnable(runnable)
+        all_task_names = dep_names + [task_name]
+
+        runnable_set = set(all_task_names)
+        task_upstream: dict[str, list[str]] = {
+            name: [
+                dep.name for dep in self[name].dependencies if dep.name in runnable_set
+            ]
+            for name in all_task_names
+        }
+
+        # Build step-level dependency graph.
+        # Each step is (task_name, chunk_start, chunk_end).
+        # Two constraint types:
+        #   1. Writer-serial: (task, chunk_i) → (task, chunk_{i+1})
+        #   2. Cross-task: determined by batch_mode
+        step_deps: dict[
+            tuple[str, pd.Timestamp, pd.Timestamp],
+            set[tuple[str, pd.Timestamp, pd.Timestamp]],
+        ] = {}
+
+        if mode == BatchMode.TASK:
+            for name in all_task_names:
+                for i, (s, e) in enumerate(intervals):
+                    deps: set[tuple[str, pd.Timestamp, pd.Timestamp]] = set()
+                    if i > 0:
+                        deps.add((name, intervals[i - 1][0], intervals[i - 1][1]))
+                    else:
+                        for up in task_upstream[name]:
+                            for us, ue in intervals:
+                                deps.add((up, us, ue))
+                    step_deps[(name, s, e)] = deps
+
+        elif mode == BatchMode.STEPPED:
+            for name in all_task_names:
+                for i, (s, e) in enumerate(intervals):
+                    deps = set()
+                    if i > 0:
+                        deps.add((name, intervals[i - 1][0], intervals[i - 1][1]))
+                    for up in task_upstream[name]:
+                        deps.add((up, s, e))
+                    step_deps[(name, s, e)] = deps
+
+        elif mode == BatchMode.DEPS_FIRST:
+            target = all_task_names[-1]
+            for name in all_task_names[:-1]:
+                deps = set()
+                for up in task_upstream[name]:
+                    deps.add((up, start_date, end_date))
+                step_deps[(name, start_date, end_date)] = deps
+            for i, (s, e) in enumerate(intervals):
+                deps = set()
+                if i > 0:
+                    deps.add((target, intervals[i - 1][0], intervals[i - 1][1]))
+                else:
+                    for dep_name in all_task_names[:-1]:
+                        deps.add((dep_name, start_date, end_date))
+                step_deps[(target, s, e)] = deps
+
+        pending: dict[tuple[str, pd.Timestamp, pd.Timestamp], Any] = {}
+        completed: set[tuple[str, pd.Timestamp, pd.Timestamp]] = set()
+        errors: list[Exception] = []
+        first_chunk_dispatched: set[str] = set()
+
+        def _is_ready(step: tuple[str, pd.Timestamp, pd.Timestamp]) -> bool:
+            return (
+                step not in completed
+                and step not in pending
+                and step_deps[step].issubset(completed)
+            )
+
+        def _submit(step: tuple[str, pd.Timestamp, pd.Timestamp]) -> None:
+            step_task_name, chunk_start, chunk_end = step
+            raw: dict[str, Any] = dict(kwargs)
+            raw["start_date"] = chunk_start
+            raw["end_date"] = chunk_end
+            if step_task_name in first_chunk_dispatched:
+                raw.pop("clean", None)
+            else:
+                first_chunk_dispatched.add(step_task_name)
+            step_kwargs = serialize_kwargs(raw)
+            task_spec = serialize_task(self[step_task_name])
+            result = celery_app.send_task(
+                "tradingo.run_task",
+                args=[task_spec, step_kwargs],
+                queue=QUEUE,
+            )
+            pending[step] = result
+            logger.info(
+                "Submitted %s [%s -> %s] to Celery queue '%s'",
+                step_task_name,
+                chunk_start,
+                chunk_end,
+                QUEUE,
+            )
+
+        for ready_step in [st for st in step_deps if _is_ready(st)]:
+            _submit(ready_step)
+
+        while pending:
+            for step in list(pending):
+                result = pending[step]
+                if not result.ready():
+                    continue
+                del pending[step]
+                if result.failed():
+                    exc = result.result
+                    logger.error("Step %s [%s -> %s] failed: %s", *step, exc)
+                    errors.append(
+                        exc if isinstance(exc, Exception) else Exception(str(exc))
+                    )
+                else:
+                    completed.add(step)
+                    logger.info("Step %s [%s -> %s] completed", *step)
+                    for ready_step in [st for st in step_deps if _is_ready(st)]:
+                        _submit(ready_step)
+
+            if pending:
+                time.sleep(0.5)
+
+        if errors:
+            raise ExceptionGroup(
+                f"{len(errors)} batched step(s) failed on Celery", errors
+            )
+
     def run(
         self,
         task_name: str,
@@ -1092,14 +1273,25 @@ class DAG(dict[str, Task]):
             raise ValueError(f"{task_name} is not a task in the DAG.")
 
         if executor == "celery":
-            self.run_celery(
-                task_name,
-                run_dependencies=run_dependencies,
-                broker_url=broker_url,
-                skip_deps=skip_deps,
-                force_rerun=force_rerun,
-                **kwargs,
-            )
+            if batch_interval is not None:
+                self.run_batched_celery(
+                    task_name,
+                    run_dependencies=run_dependencies,
+                    batch_interval=batch_interval,
+                    batch_mode=batch_mode,
+                    broker_url=broker_url,
+                    skip_deps=skip_deps,
+                    **kwargs,
+                )
+            else:
+                self.run_celery(
+                    task_name,
+                    run_dependencies=run_dependencies,
+                    broker_url=broker_url,
+                    skip_deps=skip_deps,
+                    force_rerun=force_rerun,
+                    **kwargs,
+                )
             return
 
         if executor == "process":
