@@ -9,7 +9,13 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    Future,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    wait,
+)
 from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, cast
@@ -867,6 +873,61 @@ class DAG(dict[str, Task]):
                 **kwargs,
             )
 
+    def _run_pool(
+        self,
+        make_future: Callable[[str], Future[str]],
+        task_name: str,
+        run_dependencies: bool | int,
+        skip_deps: re.Pattern[str] | None = None,
+    ) -> None:
+        """Topology-aware dispatch loop shared by thread and process pool executors.
+
+        ``make_future`` must be a callable that submits a task by name to the
+        pool and returns the resulting ``Future[str]`` (resolving to the task
+        name on success, raising on failure).  All state updates happen in the
+        calling thread — child workers must not mutate ``self``.
+        """
+        runnable = self._collect_runnable_tasks(task_name, run_dependencies, skip_deps)
+
+        in_degree: dict[str, int] = {name: 0 for name in runnable}
+        dependents: dict[str, list[str]] = {name: [] for name in runnable}
+
+        for name in runnable:
+            for dep in self[name].dependencies:
+                if dep.name in runnable:
+                    in_degree[name] += 1
+                    dependents[dep.name].append(name)
+
+        errors: list[Exception] = []
+        future_to_name: dict[Future[str], str] = {}
+        pending_futures: set[Future[str]] = set()
+
+        def _submit(name: str) -> None:
+            f = make_future(name)
+            future_to_name[f] = name
+            pending_futures.add(f)
+
+        for name in [n for n, d in in_degree.items() if d == 0]:
+            _submit(name)
+
+        while pending_futures:
+            done, pending_futures = wait(pending_futures, return_when=FIRST_COMPLETED)
+            for future in done:
+                name = future_to_name.pop(future)
+                try:
+                    future.result()
+                    self[name].state = TaskState.SUCCESS
+                    for dep_name in dependents[name]:
+                        in_degree[dep_name] -= 1
+                        if in_degree[dep_name] == 0:
+                            _submit(dep_name)
+                except Exception as exc:
+                    self[name].state = TaskState.FAILED
+                    errors.append(exc)
+
+        if errors:
+            raise ExceptionGroup(f"{len(errors)} task(s) failed", errors)
+
     def run_parallel(
         self,
         task_name: str,
@@ -877,63 +938,55 @@ class DAG(dict[str, Task]):
         **kwargs: object,
     ) -> None:
         """Run tasks using a thread pool with dynamic dispatch."""
-        runnable = self._collect_runnable_tasks(task_name, run_dependencies, skip_deps)
-
-        # Build in-degree and reverse-dependency maps (only among runnable tasks)
-        in_degree: dict[str, int] = {name: 0 for name in runnable}
-        dependents: dict[str, list[str]] = {name: [] for name in runnable}
-
-        for name in runnable:
-            task = self[name]
-            for dep in task.dependencies:
-                if dep.name in runnable:
-                    in_degree[name] += 1
-                    dependents[dep.name].append(name)
-
-        errors: list[Exception] = []
-        errors_lock = threading.Lock()
-        in_degree_lock = threading.Lock()
 
         def _run_task(name: str) -> str:
             task = self[name]
-            state = task.state
-            try:
-                task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), dict(kwargs))
-                if task.state == TaskState.PENDING or force_rerun:
-                    state = TaskState.FAILED
-                    print(f"Running {task}")
-                    task.function(*task.task_args, **task_kwargs)
-                    state = TaskState.SUCCESS
-            except Exception as exc:
-                with errors_lock:
-                    errors.append(exc)
-            finally:
-                task.state = state
+            task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), dict(kwargs))
+            if task.state == TaskState.PENDING or force_rerun:
+                print(f"Running {task}")
+                task.function(*task.task_args, **task_kwargs)
             return name
 
-        ready = [name for name, deg in in_degree.items() if deg == 0]
-        pending_futures: set[Future[str]] = set()
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            self._run_pool(
+                lambda name: pool.submit(_run_task, name),
+                task_name,
+                run_dependencies,
+                skip_deps,
+            )
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for name in ready:
-                pending_futures.add(executor.submit(_run_task, name))
+    def run_multiprocess(
+        self,
+        task_name: str,
+        run_dependencies: bool | int,
+        skip_deps: re.Pattern[str] | None = None,
+        force_rerun: bool = False,
+        max_workers: int = 4,
+        **kwargs: object,
+    ) -> None:
+        """Run tasks using a process pool with dynamic dispatch.
 
-            while pending_futures:
-                done, pending_futures = wait(
-                    pending_futures, return_when=FIRST_COMPLETED
-                )
-                for future in done:
-                    finished_name = future.result()
-                    with in_degree_lock:
-                        for dep_name in dependents[finished_name]:
-                            in_degree[dep_name] -= 1
-                            if in_degree[dep_name] == 0:
-                                pending_futures.add(
-                                    executor.submit(_run_task, dep_name)
-                                )
+        Each task is serialised and dispatched to a worker process via
+        ``ProcessPoolExecutor``.  Workers reconstruct the task from its spec
+        and connect to ArcticDB independently using ``TP_ARCTIC_URI``.
+        """
+        from tradingo.worker import (
+            run_task_in_process,
+            serialize_kwargs,
+            serialize_task,
+        )
 
-        if errors:
-            raise ExceptionGroup(f"{len(errors)} task(s) failed", errors)
+        serialized_kwargs = serialize_kwargs(dict(kwargs))
+
+        with ProcessPoolExecutor(max_workers=max_workers) as pool:
+            self._run_pool(
+                lambda name: pool.submit(
+                    run_task_in_process, serialize_task(self[name]), serialized_kwargs
+                ),
+                task_name,
+                run_dependencies,
+                skip_deps,
+            )
 
     def run_celery(
         self,
@@ -1045,6 +1098,17 @@ class DAG(dict[str, Task]):
                 broker_url=broker_url,
                 skip_deps=skip_deps,
                 force_rerun=force_rerun,
+                **kwargs,
+            )
+            return
+
+        if executor == "process":
+            self.run_multiprocess(
+                task_name,
+                run_dependencies=run_dependencies,
+                skip_deps=skip_deps,
+                force_rerun=force_rerun,
+                max_workers=max_workers,
                 **kwargs,
             )
             return
