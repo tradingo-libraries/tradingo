@@ -184,3 +184,41 @@ def record_a_fail_second(**kwargs: Any) -> None:
         raise RuntimeError("task_a failed on call 2")
     with call_log_lock:
         call_log_dated.append(("a", kwargs.get("start_date"), kwargs.get("end_date")))
+
+
+# ---------------------------------------------------------------------------
+# Celery-batched test helpers
+# ---------------------------------------------------------------------------
+
+# Records (task_label, start_date, end_date, clean_flag) for each dispatched step
+celery_batch_log: list[tuple[str, Any, Any, Any]] = []
+celery_batch_log_lock = threading.Lock()
+
+
+def reset_celery_batch_log() -> None:
+    celery_batch_log.clear()
+
+
+def record_a_celery(**kwargs: Any) -> None:
+    with celery_batch_log_lock:
+        celery_batch_log.append(
+            ("a", kwargs.get("start_date"), kwargs.get("end_date"), kwargs.get("clean"))
+        )
+
+
+def record_b_celery(**kwargs: Any) -> None:
+    with celery_batch_log_lock:
+        celery_batch_log.append(
+            ("b", kwargs.get("start_date"), kwargs.get("end_date"), kwargs.get("clean"))
+        )
+
+
+def record_c_celery(**kwargs: Any) -> None:
+    with celery_batch_log_lock:
+        celery_batch_log.append(
+            ("c", kwargs.get("start_date"), kwargs.get("end_date"), kwargs.get("clean"))
+        )
+
+
+def fail_a_celery(**kwargs: Any) -> None:
+    raise RuntimeError("celery task_a failed")
