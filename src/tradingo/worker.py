@@ -71,7 +71,7 @@ try:
             name=task_spec["name"],
             function=task_spec["function"],
             task_args=tuple(task_spec["task_args"]),
-            task_kwargs=task_spec["task_kwargs"],
+            task_kwargs=_deserialize_kwargs(task_spec["task_kwargs"]),
             symbols_out=task_spec["symbols_out"],
             symbols_in=task_spec["symbols_in"],
             load_args=dict(task_spec["load_args"]),
@@ -101,13 +101,34 @@ def require_celery() -> Any:
     return app
 
 
+_TIMESTAMP_TAG = "__pd_timestamp__"
+_PATTERN_TAG = "__re_pattern__"
+
+
+def _serialize_value(v: Any) -> Any:
+    if isinstance(v, pd.Timestamp):
+        return {_TIMESTAMP_TAG: v.isoformat()}
+    elif isinstance(v, re.Pattern):
+        return {_PATTERN_TAG: v.pattern}
+    return v
+
+
+def _deserialize_value(v: Any) -> Any:
+    if isinstance(v, dict):
+        if _TIMESTAMP_TAG in v:
+            return pd.Timestamp(v[_TIMESTAMP_TAG])
+        if _PATTERN_TAG in v:
+            return re.compile(v[_PATTERN_TAG])
+    return v
+
+
 def serialize_task(task: Task) -> dict[str, Any]:
     """Serialise a Task to a JSON-safe dict for transport to a Celery worker."""
     return {
         "name": task.name,
         "function": task._function,
         "task_args": list(task.task_args),
-        "task_kwargs": task.task_kwargs,
+        "task_kwargs": {k: _serialize_value(v) for k, v in task.task_kwargs.items()},
         "symbols_out": task.symbols_out,
         "symbols_in": task.symbols_in,
         "load_args": dict(task.load_args),
@@ -119,31 +140,15 @@ def serialize_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     """Convert DAG global kwargs to a JSON-serialisable dict.
 
     - ``arctic`` is dropped (worker creates its own from ``TP_ARCTIC_URI``)
-    - ``pd.Timestamp`` values are converted to ISO-8601 strings
-    - ``re.Pattern`` values are converted to their pattern string
+    - ``pd.Timestamp`` values are type-tagged for reliable round-trip
+    - ``re.Pattern`` values are type-tagged for reliable round-trip
     """
-    result: dict[str, Any] = {}
-    for k, v in kwargs.items():
-        if k == "arctic":
-            continue
-        elif isinstance(v, pd.Timestamp):
-            result[k] = v.isoformat()
-        elif isinstance(v, re.Pattern):
-            result[k] = v.pattern
-        else:
-            result[k] = v
-    return result
+    return {k: _serialize_value(v) for k, v in kwargs.items() if k != "arctic"}
 
 
 def _deserialize_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     """Reverse of ``serialize_kwargs`` — called on the worker side."""
-    result: dict[str, Any] = {}
-    for k, v in kwargs.items():
-        if k in ("start_date", "end_date") and isinstance(v, str):
-            result[k] = pd.Timestamp(v)
-        else:
-            result[k] = v
-    return result
+    return {k: _deserialize_value(v) for k, v in kwargs.items()}
 
 
 def run_task_in_process(
@@ -169,7 +174,7 @@ def run_task_in_process(
         name=task_spec["name"],
         function=task_spec["function"],
         task_args=tuple(task_spec["task_args"]),
-        task_kwargs=task_spec["task_kwargs"],
+        task_kwargs=_deserialize_kwargs(task_spec["task_kwargs"]),
         symbols_out=task_spec["symbols_out"],
         symbols_in=task_spec["symbols_in"],
         load_args=dict(task_spec["load_args"]),
