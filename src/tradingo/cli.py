@@ -159,10 +159,11 @@ def cli_app() -> argparse.ArgumentParser:
     )
     run_tasks.add_argument(
         "--executor",
-        choices=["thread", "celery"],
+        choices=["thread", "process", "celery"],
         default="thread",
         help=(
-            "Execution backend: 'thread' (default, local ThreadPoolExecutor) or "
+            "Execution backend: 'thread' (default, local ThreadPoolExecutor), "
+            "'process' (local ProcessPoolExecutor, bypasses GIL), or "
             "'celery' (distributed, requires tradingo[worker] and running workers)"
         ),
     )

@@ -144,3 +144,39 @@ def _deserialize_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         else:
             result[k] = v
     return result
+
+
+def run_task_in_process(
+    task_spec: dict[str, Any], global_kwargs: dict[str, Any]
+) -> str:
+    """Execute a single Task in a worker process (``ProcessPoolExecutor`` target).
+
+    Reconstructs the Task from its serialised spec and runs it.  If
+    ``TP_ARCTIC_URI`` is set in the environment an ArcticDB connection is
+    created and injected as ``arctic``; tasks without symbols work without it.
+    """
+    from tradingo.dag import Task
+
+    kwargs = _deserialize_kwargs(global_kwargs)
+
+    arctic_uri = os.environ.get("TP_ARCTIC_URI")
+    if arctic_uri:
+        from arcticdb import Arctic
+
+        kwargs["arctic"] = Arctic(arctic_uri)
+
+    task = Task(
+        name=task_spec["name"],
+        function=task_spec["function"],
+        task_args=tuple(task_spec["task_args"]),
+        task_kwargs=task_spec["task_kwargs"],
+        symbols_out=task_spec["symbols_out"],
+        symbols_in=task_spec["symbols_in"],
+        load_args=dict(task_spec["load_args"]),
+        publish_args=dict(task_spec["publish_args"]),
+    )
+
+    task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), kwargs)
+    logger.info("Process worker executing task: %s", task.name)
+    task.function(*task.task_args, **task_kwargs)
+    return task.name

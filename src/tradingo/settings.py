@@ -247,6 +247,10 @@ class TradingoConfig(EnvProvider):
     arctic_uri: str
     templates: pathlib.Path = pathlib.Path(templates.__file__).parent
     include_instruments: bool = False
+
+    celery_result_backend: str = "redis://:@localhost:6379/1"
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_queue: str = "redis://localhost:6379/1"
     app_prefix = "TP"
 
 
