@@ -42,6 +42,10 @@ class _FakeAsyncResult:
     def result(self) -> Exception | None:
         return self._exception
 
+    def get(self, propagate: bool = True) -> None:
+        if propagate and self._exception is not None:
+            raise self._exception
+
 
 class _FakeCeleryApp:
     """Fake Celery app that executes tradingo.run_task synchronously in-process."""
