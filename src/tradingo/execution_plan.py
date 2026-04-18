@@ -5,10 +5,111 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
+
+
+class _Backend(Protocol):
+    def save(self, plan: ExecutionPlan) -> Path | None: ...
+    def load(self, key: str) -> ExecutionPlan | None: ...
+    def mark_step(self, plan: ExecutionPlan, index: int, status: str) -> None: ...
+
+
+class _FileBackend:
+    def __init__(self, plans_dir: Path) -> None:
+        self._plans_dir = plans_dir
+
+    def _filepath(self, key: str) -> Path:
+        return self._plans_dir / f"{key}.json"
+
+    def save(self, plan: ExecutionPlan) -> Path:
+        path = self._filepath(plan.key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(plan._to_dict(), indent=2))
+        return path
+
+    def load(self, key: str) -> ExecutionPlan | None:
+        path = self._filepath(key)
+        if not path.exists():
+            return None
+        return ExecutionPlan._from_dict(json.loads(path.read_text()))
+
+    def mark_step(self, plan: ExecutionPlan, index: int, status: str) -> None:
+        path = self._filepath(plan.key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(plan._to_dict(), indent=2))
+
+
+class _RedisBackend:
+    """Stores plan metadata as a Redis string and step statuses as a hash.
+
+    mark_step() is a single HSET — O(1) regardless of plan size.
+    """
+
+    _META_SUFFIX = ""
+    _STATUSES_SUFFIX = ":statuses"
+    _KEY_PREFIX = "execution_plan"
+
+    def __init__(self, redis_url: str) -> None:
+        import redis
+
+        self._client: redis.Redis[str] = redis.Redis.from_url(
+            redis_url, decode_responses=True
+        )
+
+    def _meta_key(self, key: str) -> str:
+        return f"{self._KEY_PREFIX}:{key}"
+
+    def _statuses_key(self, key: str) -> str:
+        return f"{self._KEY_PREFIX}:{key}:statuses"
+
+    def save(self, plan: ExecutionPlan) -> None:
+        meta = {
+            "key": plan.key,
+            "params": plan.params,
+            "created_at": plan.created_at,
+            "steps_meta": [
+                {
+                    "task_name": s.task_name,
+                    "start_date": s.start_date,
+                    "end_date": s.end_date,
+                }
+                for s in plan.steps
+            ],
+        }
+        statuses = {str(i): s.status for i, s in enumerate(plan.steps)}
+        pipe = self._client.pipeline()
+        pipe.set(self._meta_key(plan.key), json.dumps(meta))
+        pipe.hset(self._statuses_key(plan.key), mapping=statuses)
+        pipe.execute()
+
+    def load(self, key: str) -> ExecutionPlan | None:
+        raw = self._client.get(self._meta_key(key))
+        if raw is None:
+            return None
+        meta = json.loads(raw)
+        statuses = self._client.hgetall(self._statuses_key(key))
+        steps = [
+            ExecutionStep(
+                task_name=s["task_name"],
+                start_date=s["start_date"],
+                end_date=s["end_date"],
+                status=statuses.get(str(i), "PENDING"),
+            )
+            for i, s in enumerate(meta["steps_meta"])
+        ]
+        return ExecutionPlan(
+            key=meta["key"],
+            params=meta["params"],
+            steps=steps,
+            created_at=meta["created_at"],
+        )
+
+    def mark_step(self, plan: ExecutionPlan, index: int, status: str) -> None:
+        self._client.hset(self._statuses_key(plan.key), str(index), status)
 
 
 @dataclasses.dataclass
@@ -27,6 +128,11 @@ class ExecutionPlan:
 
     Tracks per-step completion so a failed run can be resumed
     with ``--recover``.
+
+    Backend selection (in priority order):
+      1. ``REDIS_URL`` class attribute (for testing / programmatic override)
+      2. ``TP_EXECUTION_PLAN_REDIS_URL`` env var
+      3. File backend (default, ``~/.tradingo/execution-plans``)
     """
 
     key: str
@@ -39,6 +145,7 @@ class ExecutionPlan:
     )
 
     PLANS_DIR: str = "~/.tradingo/execution-plans"
+    REDIS_URL: str | None = None  # override in tests or via subclass
 
     # ------------------------------------------------------------------
     # Key generation
@@ -97,6 +204,17 @@ class ExecutionPlan:
         )
 
     # ------------------------------------------------------------------
+    # Backend selection
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _get_backend(cls) -> _Backend:
+        redis_url = cls.REDIS_URL or os.environ.get("TP_EXECUTION_PLAN_REDIS_URL")
+        if redis_url:
+            return _RedisBackend(redis_url)
+        return _FileBackend(Path(cls.PLANS_DIR).expanduser())
+
+    # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
 
@@ -104,25 +222,15 @@ class ExecutionPlan:
     def _plans_dir(cls) -> Path:
         return Path(cls.PLANS_DIR).expanduser()
 
-    def _filepath(self) -> Path:
-        return self._plans_dir() / f"{self.key}.json"
-
-    def save(self) -> Path:
-        """Write the plan to disk (thread-safe)."""
+    def save(self) -> Path | None:
+        """Persist the plan (thread-safe). Returns Path for file backend, None for Redis."""
         with self._lock:
-            path = self._filepath()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(self._to_dict(), indent=2))
-            return path
+            return self._get_backend().save(self)
 
     @classmethod
     def load(cls, key: str) -> ExecutionPlan | None:
         """Load a plan by key, or return None if it doesn't exist."""
-        path = cls._plans_dir() / f"{key}.json"
-        if not path.exists():
-            return None
-        data = json.loads(path.read_text())
-        return cls._from_dict(data)
+        return cls._get_backend().load(key)
 
     def _to_dict(self) -> dict[str, Any]:
         return {
@@ -146,12 +254,10 @@ class ExecutionPlan:
     # ------------------------------------------------------------------
 
     def mark_step(self, index: int, status: str) -> None:
-        """Update a step's status and write-through to disk."""
+        """Update a step's status and write-through to the backend."""
         with self._lock:
             self.steps[index].status = status
-            path = self._filepath()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(self._to_dict(), indent=2))
+            self._get_backend().mark_step(self, index, status)
 
     def first_non_success(self) -> int | None:
         """Return the index of the first non-SUCCESS step, or None."""
