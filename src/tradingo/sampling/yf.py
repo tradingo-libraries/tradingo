@@ -233,6 +233,7 @@ def convert_prices_to_ccy(
     prices: dict[str, pd.DataFrame],
     fx_series: dict[str, pd.DataFrame],
     currency: str,
+    ffill_limit: int = 10,
 ) -> tuple[pd.DataFrame, ...]:
     """
     Convert prices to a common currency using fx_series.
@@ -268,7 +269,18 @@ def convert_prices_to_ccy(
 
         result: list[pd.Series[float]] = []
         for sym in df.columns:
-            df_, fx_ = _align_series(df[sym].ffill(), df_fx[symbols_ccys[sym]])
+            filled = df[sym].ffill(limit=ffill_limit)
+            trailing_nan = next(
+                (i for i, v in enumerate(df[sym].iloc[::-1]) if not pd.isna(v)), 0
+            )
+            if trailing_nan > 0:
+                logger.warning(
+                    "Symbol %s trailing stale for %d days (ffill_limit=%d)",
+                    sym,
+                    trailing_nan,
+                    ffill_limit,
+                )
+            df_, fx_ = _align_series(filled, df_fx[symbols_ccys[sym]])
             result.append(df_.mul(fx_).rename(str(df_.name)))
         converted.append(pd.concat(result, axis=1)[df.columns])
 
