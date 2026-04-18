@@ -91,7 +91,7 @@ except ImportError:
     logger.debug("celery not installed — distributed execution unavailable")
 
 
-def require_celery() -> Any:
+def require_celery() -> Celery:
     """Return the Celery app, raising ImportError if celery is not installed."""
     if app is None:
         raise ImportError(
