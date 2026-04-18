@@ -47,13 +47,28 @@ class _RedisBackend:
     """Stores plan metadata as a Redis string and step statuses as a hash.
 
     mark_step() is a single HSET — O(1) regardless of plan size.
+
+    One instance is reused per URL (class-level cache) so the connection
+    pool is created once, not on every save/load/mark_step call.
     """
 
     _META_SUFFIX = ""
     _STATUSES_SUFFIX = ":statuses"
     _KEY_PREFIX = "execution_plan"
+    _TTL_SECONDS = 7 * 24 * 3600  # 7 days
 
-    def __init__(self, redis_url: str) -> None:
+    _instances: dict[str, _RedisBackend] = {}
+    _instances_lock: threading.Lock = threading.Lock()
+
+    def __new__(cls, redis_url: str) -> _RedisBackend:
+        with cls._instances_lock:
+            if redis_url not in cls._instances:
+                instance = object.__new__(cls)
+                instance._init(redis_url)
+                cls._instances[redis_url] = instance
+            return cls._instances[redis_url]
+
+    def _init(self, redis_url: str) -> None:
         import redis
 
         self._client: redis.Redis[str] = redis.Redis.from_url(
@@ -67,31 +82,40 @@ class _RedisBackend:
         return f"{self._KEY_PREFIX}:{key}:statuses"
 
     def save(self, plan: ExecutionPlan) -> None:
-        meta = {
-            "key": plan.key,
-            "params": plan.params,
-            "created_at": plan.created_at,
-            "steps_meta": [
-                {
-                    "task_name": s.task_name,
-                    "start_date": s.start_date,
-                    "end_date": s.end_date,
-                }
-                for s in plan.steps
-            ],
-        }
+        meta_key = self._meta_key(plan.key)
+        statuses_key = self._statuses_key(plan.key)
         statuses = {str(i): s.status for i, s in enumerate(plan.steps)}
         pipe = self._client.pipeline()
-        pipe.set(self._meta_key(plan.key), json.dumps(meta))
-        pipe.hset(self._statuses_key(plan.key), mapping=statuses)
+        # Only write immutable metadata if this is the first save.
+        if not self._client.exists(meta_key):
+            meta = {
+                "key": plan.key,
+                "params": plan.params,
+                "created_at": plan.created_at,
+                "steps_meta": [
+                    {
+                        "task_name": s.task_name,
+                        "start_date": s.start_date,
+                        "end_date": s.end_date,
+                    }
+                    for s in plan.steps
+                ],
+            }
+            pipe.set(meta_key, json.dumps(meta), ex=self._TTL_SECONDS)
+        else:
+            pipe.expire(meta_key, self._TTL_SECONDS)
+        pipe.hset(statuses_key, mapping=statuses)
+        pipe.expire(statuses_key, self._TTL_SECONDS)
         pipe.execute()
 
     def load(self, key: str) -> ExecutionPlan | None:
-        raw = self._client.get(self._meta_key(key))
+        pipe = self._client.pipeline()
+        pipe.get(self._meta_key(key))
+        pipe.hgetall(self._statuses_key(key))
+        raw, statuses = pipe.execute()
         if raw is None:
             return None
         meta = json.loads(raw)
-        statuses = self._client.hgetall(self._statuses_key(key))
         steps = [
             ExecutionStep(
                 task_name=s["task_name"],
@@ -257,7 +281,7 @@ class ExecutionPlan:
         """Update a step's status and write-through to the backend."""
         with self._lock:
             self.steps[index].status = status
-            self._get_backend().mark_step(self, index, status)
+        self._get_backend().mark_step(self, index, status)
 
     def first_non_success(self) -> int | None:
         """Return the index of the first non-SUCCESS step, or None."""

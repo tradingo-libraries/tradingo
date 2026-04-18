@@ -1238,7 +1238,6 @@ class DAG(dict[str, Task]):
                 plan = ExecutionPlan.from_schedule(plan_key, plan_params, schedule)
                 plan.save()
 
-        pending: dict[tuple[str, pd.Timestamp, pd.Timestamp], Any] = {}
         # Seed completed with any steps already marked SUCCESS in a recovered plan
         completed: set[tuple[str, pd.Timestamp, pd.Timestamp]] = {
             step
@@ -1248,14 +1247,45 @@ class DAG(dict[str, Task]):
         errors: list[Exception] = []
         first_chunk_dispatched: set[str] = set()
 
-        def _is_ready(step: tuple[str, pd.Timestamp, pd.Timestamp]) -> bool:
-            return (
-                step not in completed
-                and step not in pending
-                and step_deps[step].issubset(completed)
+        # Reverse dependency map and blocked-count for O(1) ready-check on completion.
+        # When step S completes we decrement blocked_count for each entry in
+        # reverse_deps[S]; a step becomes dispatchable when its count reaches 0.
+        Step = tuple[str, pd.Timestamp, pd.Timestamp]
+        reverse_deps: dict[Step, list[Step]] = {s: [] for s in step_deps}
+        blocked_count: dict[Step, int] = {}
+        for step, deps in step_deps.items():
+            active = deps - completed
+            blocked_count[step] = len(active)
+            for dep in active:
+                reverse_deps[dep].append(step)
+
+        import queue as _queue
+
+        # Each _await thread polls result.ready() (a single atomic Redis GET) rather
+        # than calling result.get(), which blocks holding a Redis connection and
+        # corrupts other threads' reads when many tasks are in flight concurrently.
+        # After ready() returns True the result is locally cached — no further
+        # Redis calls are needed to read failed()/result.
+        completion_queue: _queue.Queue[tuple[Step, bool, BaseException | None]] = (
+            _queue.Queue()
+        )
+        pending: set[Step] = set()
+
+        def _await(step: Step, async_result: Any) -> None:
+            while not async_result.ready():
+                time.sleep(0.05)
+            completion_queue.put(
+                (
+                    step,
+                    not async_result.failed(),
+                    async_result.result if async_result.failed() else None,
+                )
             )
 
-        def _submit(step: tuple[str, pd.Timestamp, pd.Timestamp]) -> None:
+        # Unbounded thread pool — each thread does lightweight 50 ms polls (I/O bound).
+        executor = ThreadPoolExecutor(thread_name_prefix="celery-await")
+
+        def _submit(step: Step) -> None:
             step_task_name, chunk_start, chunk_end = step
             raw: dict[str, Any] = dict(kwargs)
             raw["start_date"] = chunk_start
@@ -1271,7 +1301,8 @@ class DAG(dict[str, Task]):
                 args=[task_spec, step_kwargs],
                 queue=QUEUE,
             )
-            pending[step] = result
+            pending.add(step)
+            executor.submit(_await, step, result)
             logger.info(
                 "Submitted %s [%s -> %s] to Celery queue '%s'",
                 step_task_name,
@@ -1280,21 +1311,18 @@ class DAG(dict[str, Task]):
                 QUEUE,
             )
 
-        for ready_step in [st for st in step_deps if _is_ready(st)]:
-            _submit(ready_step)
+        for step in step_deps:
+            if blocked_count[step] == 0 and step not in completed:
+                _submit(step)
 
-        while pending:
-            for step in list(pending):
-                result = pending[step]
-                if not result.ready():
-                    continue
-                del pending[step]
-                if result.failed():
-                    exc = result.result
-                    logger.error("Step %s [%s -> %s] failed: %s", *step, exc)
-                    errors.append(
-                        exc if isinstance(exc, Exception) else Exception(str(exc))
-                    )
+        try:
+            while pending:
+                step, success, exc = completion_queue.get()
+                pending.discard(step)
+                if not success:
+                    err = exc if isinstance(exc, Exception) else Exception(str(exc))
+                    logger.error("Step %s [%s -> %s] failed: %s", *step, err)
+                    errors.append(err)
                     if plan is not None:
                         plan.mark_step(step_index[step], "FAILED")
                 else:
@@ -1302,11 +1330,15 @@ class DAG(dict[str, Task]):
                     logger.info("Step %s [%s -> %s] completed", *step)
                     if plan is not None:
                         plan.mark_step(step_index[step], "SUCCESS")
-                    for ready_step in [st for st in step_deps if _is_ready(st)]:
-                        _submit(ready_step)
-
-            if pending:
-                time.sleep(0.5)
+                    for downstream in reverse_deps[step]:
+                        blocked_count[downstream] -= 1
+                        if (
+                            blocked_count[downstream] == 0
+                            and downstream not in completed
+                        ):
+                            _submit(downstream)
+        finally:
+            executor.shutdown(wait=False)
 
         if errors:
             raise ExceptionGroup(
