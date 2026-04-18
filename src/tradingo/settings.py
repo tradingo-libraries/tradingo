@@ -1,6 +1,5 @@
 """Module for handling environment variables"""
 
-# from __future__ import annotations
 import dataclasses
 import json
 import os
@@ -70,7 +69,7 @@ def get_cls(
 
 
 def _read_dict(cls: Any, val: Any) -> Any | None:
-    containercls, kcls, vcls = cls
+    containercls, _, _ = cls
     if isinstance(val, str):
         return containercls(json.loads(val))
     elif isinstance(val, typing.Mapping):

@@ -133,7 +133,10 @@ def handle_universes(args: Any, api: Tradingo) -> None:
         raise ValueError(args.universe_action)
 
 
-def main(_args: argparse.Namespace | None = None) -> None:
+def main(
+    _args: argparse.Namespace | None = None,
+    _arctic: Arctic | None = None,
+) -> None:
     """Tradingo CLI entrypoint"""
 
     envconfig = TradingoConfig.from_env().to_env()
@@ -141,7 +144,7 @@ def main(_args: argparse.Namespace | None = None) -> None:
     IGTradingConfig.from_env().to_env()
     envconfig.to_env()
 
-    arctic = Tradingo(envconfig.arctic_uri)
+    arctic = _arctic or Tradingo(envconfig.arctic_uri)
     if args.entity == "task":
         handle_tasks(args, arctic)
 

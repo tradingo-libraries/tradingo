@@ -4208,6 +4208,7 @@ ib = [
 ]
 monitor = [
     { name = "dash" },
+    { name = "dash-bootstrap-components" },
 ]
 research = [
     { name = "dtale" },
@@ -4249,7 +4250,10 @@ dev = [
     { name = "ruff", specifier = ">=0.11.5" },
 ]
 ib = [{ name = "ib-insync" }]
-monitor = [{ name = "dash", specifier = ">=2.18.2" }]
+monitor = [
+    { name = "dash", specifier = ">=2.18.2" },
+    { name = "dash-bootstrap-components", specifier = ">=1.5.0" },
+]
 research = [
     { name = "dtale" },
     { name = "jupyter" },
