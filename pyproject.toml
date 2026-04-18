@@ -49,6 +49,7 @@ research = [
 ]
 monitor = [
   "dash>=2.18.2",
+  "dash-bootstrap-components>=1.5.0",
 ]
 ib = [
   "ib_insync",
@@ -76,6 +77,7 @@ target-version = ['py311']
 [project.scripts]
 tradingo-cli = "tradingo.cli:main"
 tradingo-engine-ib = "tradingo.engine.ib:main"
+tradingo-monitor = "monitor.app:main"
 
 [tool.setuptools_scm]
 
