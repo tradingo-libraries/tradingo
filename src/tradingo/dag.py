@@ -365,6 +365,127 @@ def _topo_sort_tasks(tasks: list[Task], member_names: set[str]) -> list[Task]:
     return sorted_tasks
 
 
+# Step identity: (task_name, chunk_start, chunk_end)
+Step = tuple[str, pd.Timestamp, pd.Timestamp]
+
+
+class DAGRun:
+    """Live handle to a running batched Celery dispatch.
+
+    Created by ``DAG.run_batched_celery`` which returns immediately;
+    the dispatch loop runs in a background daemon thread.
+
+    Usage::
+
+        dag_run = dag.run_batched_celery(...)
+        print(dag_run.summary())       # check progress while running
+        dag_run.wait()                 # block until done, raises on errors
+
+    Or as a DataFrame in a notebook::
+
+        import pandas as pd
+        pd.DataFrame(dag_run.steps())
+    """
+
+    def __init__(
+        self,
+        plan: ExecutionPlan | None,
+        step_index: dict[Step, int],
+        already_completed: set[Step],
+    ) -> None:
+        self.plan = plan
+        self._step_index = step_index
+        self._lock = threading.Lock()
+        self._not_started: set[Step] = set(step_index.keys()) - already_completed
+        self._submitted: dict[Step, Any] = {}
+        self._completed: set[Step] = set(already_completed)
+        self._failed: dict[Step, BaseException] = {}
+        self._done_event = threading.Event()
+        self._errors: list[BaseException] = []
+
+    # ------------------------------------------------------------------
+    # Internal callbacks (called by the dispatch thread)
+    # ------------------------------------------------------------------
+
+    def _on_submitted(self, step: Step, result: Any) -> None:
+        with self._lock:
+            self._not_started.discard(step)
+            self._submitted[step] = result
+
+    def _on_completed(self, step: Step) -> None:
+        with self._lock:
+            self._submitted.pop(step, None)
+            self._completed.add(step)
+
+    def _on_failed(self, step: Step, exc: BaseException) -> None:
+        with self._lock:
+            self._submitted.pop(step, None)
+            self._failed[step] = exc
+        self._errors.append(exc)
+
+    def _mark_done(self) -> None:
+        self._done_event.set()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    @property
+    def is_done(self) -> bool:
+        """True once the dispatch loop has finished (all steps terminal)."""
+        return self._done_event.is_set()
+
+    def summary(self) -> dict[str, int]:
+        """Snapshot of step counts by state."""
+        with self._lock:
+            return {
+                "not_started": len(self._not_started),
+                "submitted": len(self._submitted),
+                "completed": len(self._completed),
+                "failed": len(self._failed),
+                "total": len(self._step_index),
+            }
+
+    def steps(self) -> list[dict[str, Any]]:
+        """Per-step status snapshot ordered by plan index — suitable for pd.DataFrame."""
+        with self._lock:
+            rows = []
+            for step, idx in sorted(self._step_index.items(), key=lambda x: x[1]):
+                task_name, start, end = step
+                if step in self._failed:
+                    status = "FAILED"
+                elif step in self._completed:
+                    status = "SUCCESS"
+                elif step in self._submitted:
+                    status = "SUBMITTED"
+                else:
+                    status = "PENDING"
+                row: dict[str, Any] = {
+                    "index": idx,
+                    "task_name": task_name,
+                    "start_date": start,
+                    "end_date": end,
+                    "status": status,
+                    "celery_task_id": (
+                        self._submitted[step].id if step in self._submitted else None
+                    ),
+                }
+                rows.append(row)
+            return rows
+
+    def wait(self) -> None:
+        """Block until the run completes, then raise if any steps failed."""
+        self._done_event.wait()
+        if self._errors:
+            raise ExceptionGroup(
+                f"{len(self._errors)} batched step(s) failed on Celery",
+                [
+                    e if isinstance(e, Exception) else Exception(str(e))
+                    for e in self._errors
+                ],
+            )
+
+
 class DAG(dict[str, Task]):
     """Tradingo DAG"""
 
@@ -1084,7 +1205,7 @@ class DAG(dict[str, Task]):
         recover: bool = False,
         config_path: str | None = None,
         **kwargs: object,
-    ) -> None:
+    ) -> DAGRun:
         """Dispatch batched time-chunk tasks to Celery workers.
 
         Splits the date range into ``batch_interval`` chunks and dispatches
@@ -1229,7 +1350,13 @@ class DAG(dict[str, Task]):
                     resume_idx = plan.first_non_success()
                     if resume_idx is None:
                         logger.info("All steps already completed — nothing to do.")
-                        return
+                        done = DAGRun(
+                            plan=plan,
+                            step_index=step_index,
+                            already_completed=set(step_index.keys()),
+                        )
+                        done._mark_done()
+                        return done
                     logger.info(
                         "Recovering execution plan: skipping %d completed steps",
                         resume_idx,
@@ -1238,19 +1365,16 @@ class DAG(dict[str, Task]):
                 plan = ExecutionPlan.from_schedule(plan_key, plan_params, schedule)
                 plan.save()
 
-        # Seed completed with any steps already marked SUCCESS in a recovered plan
-        completed: set[tuple[str, pd.Timestamp, pd.Timestamp]] = {
+        # Seed completed with any steps already marked SUCCESS in a recovered plan.
+        completed: set[Step] = {
             step
             for step, idx in step_index.items()
             if plan is not None and plan.steps[idx].status == "SUCCESS"
         }
-        errors: list[Exception] = []
-        first_chunk_dispatched: set[str] = set()
 
         # Reverse dependency map and blocked-count for O(1) ready-check on completion.
         # When step S completes we decrement blocked_count for each entry in
         # reverse_deps[S]; a step becomes dispatchable when its count reaches 0.
-        Step = tuple[str, pd.Timestamp, pd.Timestamp]
         reverse_deps: dict[Step, list[Step]] = {s: [] for s in step_deps}
         blocked_count: dict[Step, int] = {}
         for step, deps in step_deps.items():
@@ -1259,17 +1383,25 @@ class DAG(dict[str, Task]):
             for dep in active:
                 reverse_deps[dep].append(step)
 
+        dag_run = DAGRun(
+            plan=plan,
+            step_index=step_index,
+            already_completed=completed,
+        )
+
         import queue as _queue
+
+        first_chunk_dispatched: set[str] = set()
+        completion_queue: _queue.Queue[tuple[Step, bool, BaseException | None]] = (
+            _queue.Queue()
+        )
 
         # Each _await thread polls result.ready() (a single atomic Redis GET) rather
         # than calling result.get(), which blocks holding a Redis connection and
         # corrupts other threads' reads when many tasks are in flight concurrently.
         # After ready() returns True the result is locally cached — no further
         # Redis calls are needed to read failed()/result.
-        completion_queue: _queue.Queue[tuple[Step, bool, BaseException | None]] = (
-            _queue.Queue()
-        )
-        pending: set[Step] = set()
+        await_pool = ThreadPoolExecutor(thread_name_prefix="celery-await")
 
         def _await(step: Step, async_result: Any) -> None:
             while not async_result.ready():
@@ -1281,9 +1413,6 @@ class DAG(dict[str, Task]):
                     async_result.result if async_result.failed() else None,
                 )
             )
-
-        # Unbounded thread pool — each thread does lightweight 50 ms polls (I/O bound).
-        executor = ThreadPoolExecutor(thread_name_prefix="celery-await")
 
         def _submit(step: Step) -> None:
             step_task_name, chunk_start, chunk_end = step
@@ -1301,8 +1430,10 @@ class DAG(dict[str, Task]):
                 args=[task_spec, step_kwargs],
                 queue=QUEUE,
             )
-            pending.add(step)
-            executor.submit(_await, step, result)
+            dag_run._on_submitted(step, result)
+            if plan is not None:
+                plan.mark_step_submitted(step_index[step], result.id)
+            await_pool.submit(_await, step, result)
             logger.info(
                 "Submitted %s [%s -> %s] to Celery queue '%s'",
                 step_task_name,
@@ -1311,39 +1442,50 @@ class DAG(dict[str, Task]):
                 QUEUE,
             )
 
-        for step in step_deps:
-            if blocked_count[step] == 0 and step not in completed:
-                _submit(step)
+        def _dispatch_loop() -> None:
+            pending: set[Step] = set()
+            try:
+                for step in step_deps:
+                    if blocked_count[step] == 0 and step not in completed:
+                        _submit(step)
+                        pending.add(step)
 
-        try:
-            while pending:
-                step, success, exc = completion_queue.get()
-                pending.discard(step)
-                if not success:
-                    err = exc if isinstance(exc, Exception) else Exception(str(exc))
-                    logger.error("Step %s [%s -> %s] failed: %s", *step, err)
-                    errors.append(err)
-                    if plan is not None:
-                        plan.mark_step(step_index[step], "FAILED")
-                else:
-                    completed.add(step)
-                    logger.info("Step %s [%s -> %s] completed", *step)
-                    if plan is not None:
-                        plan.mark_step(step_index[step], "SUCCESS")
-                    for downstream in reverse_deps[step]:
-                        blocked_count[downstream] -= 1
-                        if (
-                            blocked_count[downstream] == 0
-                            and downstream not in completed
-                        ):
-                            _submit(downstream)
-        finally:
-            executor.shutdown(wait=False)
+                while pending:
+                    step, success, exc = completion_queue.get()
+                    pending.discard(step)
+                    if not success:
+                        err = exc if isinstance(exc, Exception) else Exception(str(exc))
+                        logger.error("Step %s [%s -> %s] failed: %s", *step, err)
+                        dag_run._on_failed(step, err)
+                        if plan is not None:
+                            plan.mark_step(step_index[step], "FAILED")
+                    else:
+                        dag_run._on_completed(step)
+                        completed.add(step)
+                        logger.info("Step %s [%s -> %s] completed", *step)
+                        if plan is not None:
+                            plan.mark_step(step_index[step], "SUCCESS")
+                        for downstream in reverse_deps[step]:
+                            blocked_count[downstream] -= 1
+                            if (
+                                blocked_count[downstream] == 0
+                                and downstream not in completed
+                            ):
+                                _submit(downstream)
+                                pending.add(downstream)
+            except Exception as exc:
+                dag_run._errors.append(exc)
+            finally:
+                await_pool.shutdown(wait=False)
+                dag_run._mark_done()
 
-        if errors:
-            raise ExceptionGroup(
-                f"{len(errors)} batched step(s) failed on Celery", errors
-            )
+        dispatch_thread = threading.Thread(
+            target=_dispatch_loop,
+            daemon=True,
+            name=f"dag-dispatch-{task_name}",
+        )
+        dispatch_thread.start()
+        return dag_run
 
     def run(
         self,
@@ -1410,7 +1552,7 @@ class DAG(dict[str, Task]):
                     recover=recover,
                     config_path=config_path,
                     **kwargs,
-                )
+                ).wait()
             else:
                 self.run_celery(
                     task_name,

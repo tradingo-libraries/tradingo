@@ -16,6 +16,9 @@ class _Backend(Protocol):
     def save(self, plan: ExecutionPlan) -> Path | None: ...
     def load(self, key: str) -> ExecutionPlan | None: ...
     def mark_step(self, plan: ExecutionPlan, index: int, status: str) -> None: ...
+    def mark_step_submitted(
+        self, plan: ExecutionPlan, index: int, task_id: str
+    ) -> None: ...
 
 
 class _FileBackend:
@@ -25,11 +28,14 @@ class _FileBackend:
     def _filepath(self, key: str) -> Path:
         return self._plans_dir / f"{key}.json"
 
-    def save(self, plan: ExecutionPlan) -> Path:
+    def _write(self, plan: ExecutionPlan) -> Path:
         path = self._filepath(plan.key)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(plan._to_dict(), indent=2))
         return path
+
+    def save(self, plan: ExecutionPlan) -> Path:
+        return self._write(plan)
 
     def load(self, key: str) -> ExecutionPlan | None:
         path = self._filepath(key)
@@ -38,9 +44,13 @@ class _FileBackend:
         return ExecutionPlan._from_dict(json.loads(path.read_text()))
 
     def mark_step(self, plan: ExecutionPlan, index: int, status: str) -> None:
-        path = self._filepath(plan.key)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(plan._to_dict(), indent=2))
+        self._write(plan)
+
+    def mark_step_submitted(
+        self, plan: ExecutionPlan, index: int, task_id: str
+    ) -> None:
+        plan.steps[index].celery_task_id = task_id
+        self._write(plan)
 
 
 class _RedisBackend:
@@ -52,8 +62,6 @@ class _RedisBackend:
     pool is created once, not on every save/load/mark_step call.
     """
 
-    _META_SUFFIX = ""
-    _STATUSES_SUFFIX = ":statuses"
     _KEY_PREFIX = "execution_plan"
     _TTL_SECONDS = 7 * 24 * 3600  # 7 days
 
@@ -81,6 +89,9 @@ class _RedisBackend:
     def _statuses_key(self, key: str) -> str:
         return f"{self._KEY_PREFIX}:{key}:statuses"
 
+    def _task_ids_key(self, key: str) -> str:
+        return f"{self._KEY_PREFIX}:{key}:task_ids"
+
     def save(self, plan: ExecutionPlan) -> None:
         meta_key = self._meta_key(plan.key)
         statuses_key = self._statuses_key(plan.key)
@@ -106,13 +117,24 @@ class _RedisBackend:
             pipe.expire(meta_key, self._TTL_SECONDS)
         pipe.hset(statuses_key, mapping=statuses)
         pipe.expire(statuses_key, self._TTL_SECONDS)
+        # Persist any task IDs already set on steps (e.g. after recovery).
+        task_ids = {
+            str(i): s.celery_task_id
+            for i, s in enumerate(plan.steps)
+            if s.celery_task_id is not None
+        }
+        if task_ids:
+            task_ids_key = self._task_ids_key(plan.key)
+            pipe.hset(task_ids_key, mapping=task_ids)
+            pipe.expire(task_ids_key, self._TTL_SECONDS)
         pipe.execute()
 
     def load(self, key: str) -> ExecutionPlan | None:
         pipe = self._client.pipeline()
         pipe.get(self._meta_key(key))
         pipe.hgetall(self._statuses_key(key))
-        raw, statuses = pipe.execute()
+        pipe.hgetall(self._task_ids_key(key))
+        raw, statuses, task_ids = pipe.execute()
         if raw is None:
             return None
         meta = json.loads(raw)
@@ -122,6 +144,7 @@ class _RedisBackend:
                 start_date=s["start_date"],
                 end_date=s["end_date"],
                 status=statuses.get(str(i), "PENDING"),
+                celery_task_id=task_ids.get(str(i)),
             )
             for i, s in enumerate(meta["steps_meta"])
         ]
@@ -135,6 +158,14 @@ class _RedisBackend:
     def mark_step(self, plan: ExecutionPlan, index: int, status: str) -> None:
         self._client.hset(self._statuses_key(plan.key), str(index), status)
 
+    def mark_step_submitted(
+        self, plan: ExecutionPlan, index: int, task_id: str
+    ) -> None:
+        pipe = self._client.pipeline()
+        pipe.hset(self._statuses_key(plan.key), str(index), "SUBMITTED")
+        pipe.hset(self._task_ids_key(plan.key), str(index), task_id)
+        pipe.execute()
+
 
 @dataclasses.dataclass
 class ExecutionStep:
@@ -143,7 +174,8 @@ class ExecutionStep:
     task_name: str
     start_date: str  # ISO format
     end_date: str  # ISO format
-    status: str = "PENDING"  # PENDING | SUCCESS | FAILED
+    status: str = "PENDING"  # PENDING | SUBMITTED | SUCCESS | FAILED
+    celery_task_id: str | None = None
 
 
 @dataclasses.dataclass
@@ -269,7 +301,16 @@ class ExecutionPlan:
         return cls(
             key=data["key"],
             params=data["params"],
-            steps=[ExecutionStep(**s) for s in data["steps"]],
+            steps=[
+                ExecutionStep(
+                    task_name=s["task_name"],
+                    start_date=s["start_date"],
+                    end_date=s["end_date"],
+                    status=s.get("status", "PENDING"),
+                    celery_task_id=s.get("celery_task_id"),
+                )
+                for s in data["steps"]
+            ],
             created_at=data["created_at"],
         )
 
@@ -283,8 +324,19 @@ class ExecutionPlan:
             self.steps[index].status = status
         self._get_backend().mark_step(self, index, status)
 
+    def mark_step_submitted(self, index: int, task_id: str) -> None:
+        """Record that a step has been dispatched to Celery."""
+        with self._lock:
+            self.steps[index].status = "SUBMITTED"
+            self.steps[index].celery_task_id = task_id
+        self._get_backend().mark_step_submitted(self, index, task_id)
+
     def first_non_success(self) -> int | None:
-        """Return the index of the first non-SUCCESS step, or None."""
+        """Return the index of the first non-SUCCESS step, or None.
+
+        SUBMITTED steps are treated as non-success — if the dispatcher died
+        mid-run those tasks may not have completed.
+        """
         for i, step in enumerate(self.steps):
             if step.status != "SUCCESS":
                 return i

@@ -25,7 +25,11 @@ HELPERS = "test.tradingo._dag_helpers"
 class _FakeAsyncResult:
     """Synchronously-completed fake Celery AsyncResult."""
 
+    _counter = 0
+
     def __init__(self, fn: Any, *args: Any) -> None:
+        _FakeAsyncResult._counter += 1
+        self.id = f"fake-task-{_FakeAsyncResult._counter}"
         self._exception: Exception | None = None
         try:
             fn(*args)
