@@ -126,7 +126,14 @@ def create_universe(
         item = cast(
             VersionedItem, pricelib.read(symbol, date_range=(start_date, end_date))
         )
-        return pd.DataFrame(item.data)
+        df = pd.DataFrame(item.data)
+        if isinstance(df.index, pd.DatetimeIndex):
+            df.index = (
+                df.index.tz_localize("UTC")
+                if df.index.tz is None
+                else df.index.tz_convert("UTC")
+            )
+        return df
 
     available_symbols = pricelib.list_symbols()
     if missing_symbol := set(instruments.index.difference(available_symbols)):
