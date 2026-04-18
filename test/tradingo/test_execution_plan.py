@@ -84,6 +84,7 @@ class TestSaveAndLoad:
             [("t", pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02"))],
         )
         path = plan.save()
+        assert path is not None
         assert path.exists()
 
 
