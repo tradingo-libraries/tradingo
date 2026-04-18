@@ -250,7 +250,7 @@ class TradingoConfig(EnvProvider):
 
     celery_result_backend: str = "redis://:@localhost:6379/1"
     celery_broker_url: str = "redis://localhost:6379/0"
-    celery_queue: str = "redis://localhost:6379/1"
+    celery_queue: str = "tradingo"
     app_prefix = "TP"
 
 

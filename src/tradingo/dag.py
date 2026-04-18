@@ -25,6 +25,7 @@ import pandas as pd
 from . import symbols
 from .config import ConfigLoadError
 from .execution_plan import ExecutionPlan
+from .worker import serialize_task
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,7 @@ class Task:
             function = symbols.symbol_publisher(
                 *self.symbols_out,
                 **self.publish_args,
+                metadata=serialize_task(self),
             )(function)
 
         if self.symbols_in:
@@ -1325,11 +1327,44 @@ class DAG(dict[str, Task]):
         executor: str = "thread",
         broker_url: str | None = None,
         *args: object,
+        background: bool = False,
         **kwargs: object,
-    ) -> None:
-        """run a specific task of this DAG."""
+    ) -> Future[None] | None:
+        """run a specific task of this DAG.
+
+        If ``background=True``, the run is submitted to a daemon thread and a
+        ``Future`` is returned immediately.  Call ``future.result()`` to block
+        and re-raise any exception from the run.
+        """
         if task_name not in self:
             raise ValueError(f"{task_name} is not a task in the DAG.")
+
+        if background:
+            pool = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix=f"dag-{task_name}"
+            )
+
+            def _run() -> None:
+                self.run(
+                    task_name,
+                    skip_deps,
+                    run_dependencies,
+                    force_rerun,
+                    max_workers,
+                    batch_interval,
+                    batch_mode,
+                    recover,
+                    config_path,
+                    executor,
+                    broker_url,
+                    *args,
+                    background=False,
+                    **kwargs,
+                )
+
+            future: Future[None] = pool.submit(_run)
+            pool.shutdown(wait=False)
+            return future
 
         if executor == "celery":
             if batch_interval is not None:
@@ -1353,7 +1388,7 @@ class DAG(dict[str, Task]):
                     force_rerun=force_rerun,
                     **kwargs,
                 )
-            return
+            return None
 
         if executor == "process":
             self.run_multiprocess(
@@ -1364,7 +1399,7 @@ class DAG(dict[str, Task]):
                 max_workers=max_workers,
                 **kwargs,
             )
-            return
+            return None
 
         if batch_interval is not None:
             self.run_batched(
@@ -1379,7 +1414,7 @@ class DAG(dict[str, Task]):
                 config_path=config_path,
                 **kwargs,
             )
-            return
+            return None
 
         if max_workers > 1 and run_dependencies:
             self.run_parallel(
@@ -1390,7 +1425,7 @@ class DAG(dict[str, Task]):
                 max_workers=max_workers,
                 **kwargs,
             )
-            return
+            return None
 
         self[task_name].run(
             *args,
@@ -1399,6 +1434,7 @@ class DAG(dict[str, Task]):
             force_rerun=force_rerun,
             **kwargs,
         )
+        return None
 
     def update_state(self) -> None:
         """update the local json file which keeps the DAG state."""

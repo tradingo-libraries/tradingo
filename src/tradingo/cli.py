@@ -278,7 +278,7 @@ def handle_tasks(args: argparse.Namespace, arctic: Arctic | CachingArctic) -> No
             force_rerun = False
 
         try:
-            extra_kwargs: dict[str, object] = {}
+            extra_kwargs: dict[str, Any] = {}
             if args.start_date:
                 extra_kwargs["start_date"] = args.start_date
             if args.end_date:

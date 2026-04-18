@@ -380,6 +380,7 @@ def symbol_publisher(
     template: str | None = None,
     library_options: adb.LibraryOptions | None = None,
     write_pickle: bool = False,
+    metadata: dict[str, Any] | None = None,
 ) -> Callable[[Callable[P, R]], PublishedFunction[P, R]]:
     def decorator(
         func: Callable[P, R],
@@ -452,13 +453,24 @@ def symbol_publisher(
                             data,
                             upsert=True,
                             date_range=(data.index[0], data.index[-1]),
+                            metadata=metadata,
                             **params,
                         )
                     elif write_pickle:
-                        result = lib.write_pickle(sym, data, **params)
+                        result = lib.write_pickle(
+                            sym,
+                            data,
+                            metadata=metadata,
+                            **params,
+                        )
 
                     else:
-                        result = lib.write(sym, data, **params)
+                        result = lib.write(
+                            sym,
+                            data,
+                            metadata=metadata,
+                            **params,
+                        )
 
                     libraries[lib.name][result.symbol] = result.version
 

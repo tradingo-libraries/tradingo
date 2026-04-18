@@ -20,12 +20,14 @@ Environment variables:
 
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 import re
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+from arcticdb import Arctic
 
 if TYPE_CHECKING:
     from tradingo.dag import Task
@@ -103,13 +105,18 @@ def require_celery() -> Celery:
 
 _TIMESTAMP_TAG = "__pd_timestamp__"
 _PATTERN_TAG = "__re_pattern__"
+_ARCTIC_TAG = "__arctic_Arctic__"
 
 
 def _serialize_value(v: Any) -> Any:
     if isinstance(v, pd.Timestamp):
         return {_TIMESTAMP_TAG: v.isoformat()}
+    elif isinstance(v, datetime.datetime):
+        return {_TIMESTAMP_TAG: pd.Timestamp(v).isoformat()}
     elif isinstance(v, re.Pattern):
         return {_PATTERN_TAG: v.pattern}
+    elif isinstance(v, Arctic):
+        return {_ARCTIC_TAG: v.get_uri()}
     return v
 
 
@@ -119,6 +126,8 @@ def _deserialize_value(v: Any) -> Any:
             return pd.Timestamp(v[_TIMESTAMP_TAG])
         if _PATTERN_TAG in v:
             return re.compile(v[_PATTERN_TAG])
+        if _ARCTIC_TAG in v:
+            return Arctic(v[_ARCTIC_TAG])
     return v
 
 
@@ -128,7 +137,9 @@ def serialize_task(task: Task) -> dict[str, Any]:
         "name": task.name,
         "function": task._function,
         "task_args": list(task.task_args),
-        "task_kwargs": {k: _serialize_value(v) for k, v in task.task_kwargs.items()},
+        "task_kwargs": serialize_kwargs(
+            {k: v for k, v in task.task_kwargs.items() if k != "arctic"}
+        ),
         "symbols_out": task.symbols_out,
         "symbols_in": task.symbols_in,
         "load_args": dict(task.load_args),
@@ -143,7 +154,7 @@ def serialize_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     - ``pd.Timestamp`` values are type-tagged for reliable round-trip
     - ``re.Pattern`` values are type-tagged for reliable round-trip
     """
-    return {k: _serialize_value(v) for k, v in kwargs.items() if k != "arctic"}
+    return {k: _serialize_value(v) for k, v in kwargs.items()}
 
 
 def _deserialize_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -163,12 +174,6 @@ def run_task_in_process(
     from tradingo.dag import Task
 
     kwargs = _deserialize_kwargs(global_kwargs)
-
-    arctic_uri = os.environ.get("TP_ARCTIC_URI")
-    if arctic_uri:
-        from arcticdb import Arctic
-
-        kwargs["arctic"] = Arctic(arctic_uri)
 
     task = Task(
         name=task_spec["name"],
