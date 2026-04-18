@@ -61,8 +61,7 @@ def get_current_positions(
 ) -> pd.DataFrame:
     all_positions = service.fetch_open_positions().set_index(["epic", "dealId"])
     all_positions["size"] = (
-        all_positions["direction"].replace({"BUY": 1, "SELL": -1})
-        * all_positions["size"]
+        all_positions["direction"].map({"BUY": 1, "SELL": -1}) * all_positions["size"]
     )
     return cast(pd.DataFrame, all_positions)
 

@@ -1,3 +1,4 @@
+import importlib
 import os
 import textwrap
 from pathlib import Path
@@ -294,3 +295,106 @@ def test_multiple_models(config_home_two_models: Path) -> None:
         "prices/equities-universe.mid.close.GBP",
         "prices/bonds-universe.mid.close.GBP",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Template function-reference tests
+# ---------------------------------------------------------------------------
+
+
+def _resolve_function(dotted_path: str) -> object:
+    """Import and return the callable identified by a dotted module.name string."""
+    module_path, attr = dotted_path.rsplit(".", maxsplit=1)
+    module = importlib.import_module(module_path)
+    return getattr(module, attr)
+
+
+@pytest.fixture
+def downstream_tasks_config_home(tmp_path: Path) -> Path:
+    """Config that includes the downstream_tasks template with IG defaults."""
+    configs = tmp_path / "configs"
+    configs.mkdir()
+
+    (configs / "trading.yaml").write_text(
+        textwrap.dedent(
+            """\
+            trades:
+                include: "file://{{ TP_TEMPLATES }}/downstream_tasks.yaml"
+                variables:
+                    portfolio_name: myportfolio
+                    universe_name: myuniverse
+                    tradingEnabled: false
+            """
+        )
+    )
+    return configs
+
+
+def test_downstream_tasks_ig_default_function_ref(
+    downstream_tasks_config_home: Path,
+) -> None:
+    """downstream_tasks template default function ref resolves to IG engine callable."""
+    env = TradingoConfig.from_env(
+        env={
+            "TP_CONFIG_HOME": str(downstream_tasks_config_home),
+            "TP_ARCTIC_URI": "mem://",
+        }
+    )
+    env.to_env()
+
+    out = config.read_config_template(
+        downstream_tasks_config_home / "trading.yaml",
+        variables=os.environ,
+    )
+
+    task_config = out["trades"]["trades.myportfolio"]
+    fn_ref = task_config["function"]
+    assert fn_ref == "tradingo.engine.ig.adjust_position_sizes"
+    # Verify it actually resolves to a callable
+    fn = _resolve_function(fn_ref)
+    assert callable(fn)
+
+
+def test_downstream_tasks_ib_function_ref(
+    downstream_tasks_config_home: Path,
+) -> None:
+    """downstream_tasks template accepts explicit IB engine function reference."""
+    configs = downstream_tasks_config_home
+    (configs / "trading_ib.yaml").write_text(
+        textwrap.dedent(
+            """\
+            trades:
+                include: "file://{{ TP_TEMPLATES }}/downstream_tasks.yaml"
+                variables:
+                    portfolio_name: myportfolio
+                    universe_name: myuniverse
+                    tradingEnabled: false
+                    engineFunction: tradingo.engine.ib.adjust_position_sizes
+            """
+        )
+    )
+
+    env = TradingoConfig.from_env(
+        env={
+            "TP_CONFIG_HOME": str(configs),
+            "TP_ARCTIC_URI": "mem://",
+        }
+    )
+    env.to_env()
+
+    out = config.read_config_template(
+        configs / "trading_ib.yaml",
+        variables=os.environ,
+    )
+
+    task_config = out["trades"]["trades.myportfolio"]
+    fn_ref = task_config["function"]
+    assert fn_ref == "tradingo.engine.ib.adjust_position_sizes"
+    # Verify it resolves to a callable even without ib_insync installed
+    import sys
+    from unittest.mock import MagicMock
+
+    if "ib_insync" not in sys.modules:
+        sys.modules["ib_insync"] = MagicMock()
+    fn = _resolve_function(fn_ref)
+    assert callable(fn)
