@@ -1079,6 +1079,8 @@ class DAG(dict[str, Task]):
         batch_mode: str = "stepped",
         broker_url: str | None = None,
         skip_deps: re.Pattern[str] | None = None,
+        recover: bool = False,
+        config_path: str | None = None,
         **kwargs: object,
     ) -> None:
         """Dispatch batched time-chunk tasks to Celery workers.
@@ -1186,8 +1188,61 @@ class DAG(dict[str, Task]):
                         deps.add((dep_name, start_date, end_date))
                 step_deps[(target, s, e)] = deps
 
+        # Build the flat schedule so we can index steps for plan tracking
+        schedule = generate_batch_schedule(
+            task_names=all_task_names,
+            intervals=intervals,
+            batch_mode=mode,
+            full_start=start_date,
+            full_end=end_date,
+        )
+        step_index: dict[tuple[str, pd.Timestamp, pd.Timestamp], int] = {
+            (t, s, e): i for i, (t, s, e) in enumerate(schedule)
+        }
+
+        # Build or recover execution plan
+        plan: ExecutionPlan | None = None
+        if config_path is not None:
+            plan_key = ExecutionPlan.make_key(
+                config_path=config_path,
+                task_name=task_name,
+                start_date=str(start_date),
+                end_date=str(end_date),
+                batch_interval=str(batch_interval),
+                batch_mode=batch_mode,
+                with_deps=str(run_dependencies),
+            )
+            plan_params = {
+                "config_path": config_path,
+                "task_name": task_name,
+                "start_date": str(start_date),
+                "end_date": str(end_date),
+                "batch_interval": str(batch_interval),
+                "batch_mode": batch_mode,
+                "with_deps": str(run_dependencies),
+            }
+            if recover:
+                plan = ExecutionPlan.load(plan_key)
+                if plan is not None:
+                    resume_idx = plan.first_non_success()
+                    if resume_idx is None:
+                        logger.info("All steps already completed — nothing to do.")
+                        return
+                    logger.info(
+                        "Recovering execution plan: skipping %d completed steps",
+                        resume_idx,
+                    )
+            if plan is None:
+                plan = ExecutionPlan.from_schedule(plan_key, plan_params, schedule)
+                plan.save()
+
         pending: dict[tuple[str, pd.Timestamp, pd.Timestamp], Any] = {}
-        completed: set[tuple[str, pd.Timestamp, pd.Timestamp]] = set()
+        # Seed completed with any steps already marked SUCCESS in a recovered plan
+        completed: set[tuple[str, pd.Timestamp, pd.Timestamp]] = {
+            step
+            for step, idx in step_index.items()
+            if plan is not None and plan.steps[idx].status == "SUCCESS"
+        }
         errors: list[Exception] = []
         first_chunk_dispatched: set[str] = set()
 
@@ -1238,9 +1293,13 @@ class DAG(dict[str, Task]):
                     errors.append(
                         exc if isinstance(exc, Exception) else Exception(str(exc))
                     )
+                    if plan is not None:
+                        plan.mark_step(step_index[step], "FAILED")
                 else:
                     completed.add(step)
                     logger.info("Step %s [%s -> %s] completed", *step)
+                    if plan is not None:
+                        plan.mark_step(step_index[step], "SUCCESS")
                     for ready_step in [st for st in step_deps if _is_ready(st)]:
                         _submit(ready_step)
 
@@ -1281,6 +1340,8 @@ class DAG(dict[str, Task]):
                     batch_mode=batch_mode,
                     broker_url=broker_url,
                     skip_deps=skip_deps,
+                    recover=recover,
+                    config_path=config_path,
                     **kwargs,
                 )
             else:

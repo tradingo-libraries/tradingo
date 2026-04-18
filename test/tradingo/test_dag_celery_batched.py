@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ import pandas as pd
 import pytest
 
 from tradingo.dag import DAG
+from tradingo.execution_plan import ExecutionPlan
 
 from . import _dag_helpers as helpers
 
@@ -368,3 +370,135 @@ def test_run_routes_to_run_celery_without_batch_interval() -> None:
 
     mock_celery.assert_called_once()
     mock_batched.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Execution plan recovery tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def tmp_plans_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(ExecutionPlan, "PLANS_DIR", str(tmp_path))
+    return tmp_path
+
+
+def _find_plan(tmp_plans_dir: Path) -> ExecutionPlan:
+    plans = list(tmp_plans_dir.glob("*.json"))
+    assert len(plans) == 1, f"Expected 1 plan file, found {len(plans)}"
+    plan = ExecutionPlan.load(plans[0].stem)
+    assert plan is not None
+    return plan
+
+
+class TestExecutionPlanRecovery:
+    """Celery executor must create, update, and respect execution plans."""
+
+    def setup_method(self) -> None:
+        helpers.reset_celery_batch_log()
+
+    def test_plan_created_when_config_path_given(self, tmp_plans_dir: Path) -> None:
+        """Passing config_path causes a plan file to be written."""
+        dag = _make_dag({"task.a": {"function": f"{HELPERS}.record_a_celery"}})
+        dag.run(
+            "task.a",
+            run_dependencies=False,
+            executor="celery",
+            batch_interval=_INTERVAL,
+            batch_mode="task",
+            start_date=_START,
+            end_date=_END,
+            config_path="/fake/config.yaml",
+        )
+        assert list(tmp_plans_dir.glob("*.json")), "Expected a plan file to be created"
+
+    def test_all_steps_marked_success_after_clean_run(
+        self, tmp_plans_dir: Path
+    ) -> None:
+        """Every step is marked SUCCESS in the plan after a successful run."""
+        dag = _make_dag({"task.a": {"function": f"{HELPERS}.record_a_celery"}})
+        dag.run(
+            "task.a",
+            run_dependencies=False,
+            executor="celery",
+            batch_interval=_INTERVAL,
+            batch_mode="task",
+            start_date=_START,
+            end_date=_END,
+            config_path="/fake/config.yaml",
+        )
+        plan = _find_plan(tmp_plans_dir)
+        assert all(s.status == "SUCCESS" for s in plan.steps)
+
+    def test_failed_step_marked_failed_in_plan(self, tmp_plans_dir: Path) -> None:
+        """A step that raises is marked FAILED in the plan."""
+        dag = _make_dag({"task.a": {"function": f"{HELPERS}.fail_a_celery"}})
+        with pytest.raises(ExceptionGroup):
+            dag.run(
+                "task.a",
+                run_dependencies=False,
+                executor="celery",
+                batch_interval=_INTERVAL,
+                batch_mode="task",
+                start_date=_START,
+                end_date=_END,
+                config_path="/fake/config.yaml",
+            )
+        plan = _find_plan(tmp_plans_dir)
+        assert any(s.status == "FAILED" for s in plan.steps)
+
+    def test_recover_skips_success_steps(self, tmp_plans_dir: Path) -> None:
+        """With recover=True, steps already marked SUCCESS are not dispatched again."""
+        dag = _make_dag({"task.a": {"function": f"{HELPERS}.record_a_celery"}})
+
+        # First run — populates plan with all SUCCESS
+        dag.run(
+            "task.a",
+            run_dependencies=False,
+            executor="celery",
+            batch_interval=_INTERVAL,
+            batch_mode="task",
+            start_date=_START,
+            end_date=_END,
+            config_path="/fake/config.yaml",
+        )
+        plan = _find_plan(tmp_plans_dir)
+        total_steps = len(plan.steps)
+        assert total_steps > 1, "Need at least 2 steps to test partial recovery"
+
+        # Rewind the last step to PENDING to simulate a mid-run failure
+        plan.steps[-1].status = "PENDING"
+        plan.save()
+
+        helpers.reset_celery_batch_log()
+
+        # Second run with recover=True — only the PENDING step should execute
+        dag.run(
+            "task.a",
+            run_dependencies=False,
+            executor="celery",
+            batch_interval=_INTERVAL,
+            batch_mode="task",
+            start_date=_START,
+            end_date=_END,
+            config_path="/fake/config.yaml",
+            recover=True,
+        )
+
+        assert (
+            len(helpers.celery_batch_log) == 1
+        ), f"Expected only 1 step to execute on recovery, got {len(helpers.celery_batch_log)}"
+
+    def test_no_plan_without_config_path(self, tmp_plans_dir: Path) -> None:
+        """No plan file is created when config_path is omitted."""
+        dag = _make_dag({"task.a": {"function": f"{HELPERS}.record_a_celery"}})
+        dag.run(
+            "task.a",
+            run_dependencies=False,
+            executor="celery",
+            batch_interval=_INTERVAL,
+            batch_mode="task",
+            start_date=_START,
+            end_date=_END,
+        )
+        assert list(tmp_plans_dir.glob("*.json")) == []
