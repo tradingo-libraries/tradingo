@@ -1,7 +1,6 @@
 """Dukascopy data accessors."""
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 
 import dukascopy_python
 import pandas as pd
@@ -91,43 +90,36 @@ def sample_instrument(
     start_pydatetime = start_dt.to_pydatetime()
     end_pydatetime = end_dt.to_pydatetime()
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        bid_future = executor.submit(
-            dukascopy_python.fetch,
+    empty = pd.DataFrame(columns=["Open", "High", "Low", "Close"], dtype=float)
+    empty.index = pd.DatetimeIndex([], tz="utc")
+
+    try:
+        bid = dukascopy_python.fetch(
             instrument,
             dk_interval,
             dukascopy_python.OFFER_SIDE_BID,
             start_pydatetime,
             end_pydatetime,
         )
-        ask_future = executor.submit(
-            dukascopy_python.fetch,
+        ask = dukascopy_python.fetch(
             instrument,
             dk_interval,
             dukascopy_python.OFFER_SIDE_ASK,
             start_pydatetime,
             end_pydatetime,
         )
-        try:
-            bid = bid_future.result()
-            ask = ask_future.result()
-        except TypeError as e:
-            # dukascopy_python raises TypeError when no data is available for
-            # the period (row[0] is a string instead of a float timestamp)
-            logger.warning(
-                "No data for %s [%s] %s -> %s: %s",
-                epic,
-                interval,
-                start_dt,
-                end_dt,
-                e,
-            )
-            empty = pd.DataFrame(
-                columns=["Open", "High", "Low", "Close"],
-                dtype=float,
-            )
-            empty.index = pd.DatetimeIndex([], tz="utc")
-            return empty, empty
+    except (TypeError, KeyError) as e:
+        # dukascopy_python raises TypeError (row[0] is a string) or KeyError: 0
+        # (lastUpdates[0] on an empty-dict API response) when no data is available
+        logger.warning(
+            "No data for %s [%s] %s -> %s: %s",
+            epic,
+            interval,
+            start_dt,
+            end_dt,
+            e,
+        )
+        return empty, empty
 
     def _normalize(df: pd.DataFrame) -> pd.DataFrame:
         """Rename columns to title case to match IG convention."""
