@@ -108,8 +108,26 @@ def sample_instrument(
             start_pydatetime,
             end_pydatetime,
         )
-        bid = bid_future.result()
-        ask = ask_future.result()
+        try:
+            bid = bid_future.result()
+            ask = ask_future.result()
+        except TypeError as e:
+            # dukascopy_python raises TypeError when no data is available for
+            # the period (row[0] is a string instead of a float timestamp)
+            logger.warning(
+                "No data for %s [%s] %s -> %s: %s",
+                epic,
+                interval,
+                start_dt,
+                end_dt,
+                e,
+            )
+            empty = pd.DataFrame(
+                columns=["Open", "High", "Low", "Close"],
+                dtype=float,
+            )
+            empty.index = pd.DatetimeIndex([], tz="utc")
+            return empty, empty
 
     def _normalize(df: pd.DataFrame) -> pd.DataFrame:
         """Rename columns to title case to match IG convention."""
