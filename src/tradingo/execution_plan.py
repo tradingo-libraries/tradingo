@@ -79,9 +79,12 @@ class _RedisBackend:
     def _init(self, redis_url: str) -> None:
         import redis
 
-        self._client: redis.Redis[str] = redis.Redis.from_url(
+        self._client: redis.Redis = redis.Redis.from_url(
             redis_url, decode_responses=True
         )
+
+    _INDEX_KEY = "execution_plans:index"
+    _INDEX_META_PREFIX = "execution_plans:meta"
 
     def _meta_key(self, key: str) -> str:
         return f"{self._KEY_PREFIX}:{key}"
@@ -92,13 +95,19 @@ class _RedisBackend:
     def _task_ids_key(self, key: str) -> str:
         return f"{self._KEY_PREFIX}:{key}:task_ids"
 
+    def _index_meta_key(self, key: str) -> str:
+        return f"{self._INDEX_META_PREFIX}:{key}"
+
     def save(self, plan: ExecutionPlan) -> None:
+        import time as _time
+
         meta_key = self._meta_key(plan.key)
         statuses_key = self._statuses_key(plan.key)
         statuses = {str(i): s.status for i, s in enumerate(plan.steps)}
+        is_new = not self._client.exists(meta_key)
         pipe = self._client.pipeline()
         # Only write immutable metadata if this is the first save.
-        if not self._client.exists(meta_key):
+        if is_new:
             meta = {
                 "key": plan.key,
                 "params": plan.params,
@@ -113,6 +122,27 @@ class _RedisBackend:
                 ],
             }
             pipe.set(meta_key, json.dumps(meta), ex=self._TTL_SECONDS)
+            # Add to the discoverable index with creation timestamp as score.
+            created_ts = _time.time()
+            pipe.zadd(self._INDEX_KEY, {plan.key: created_ts})
+            # Human-readable display hash for Grafana / tooling.
+            params = plan.params
+            pipe.hset(
+                self._index_meta_key(plan.key),
+                mapping={
+                    "task_name": params.get("task_name", ""),
+                    "start_date": params.get("start_date", ""),
+                    "end_date": params.get("end_date", ""),
+                    "batch_mode": params.get("batch_mode", ""),
+                    "batch_interval": params.get("batch_interval", ""),
+                    "created_at": plan.created_at,
+                    "total_steps": str(len(plan.steps)),
+                },
+            )
+            pipe.expire(self._index_meta_key(plan.key), self._TTL_SECONDS)
+            # Prune index entries whose plan keys have expired.
+            cutoff = created_ts - self._TTL_SECONDS
+            pipe.zremrangebyscore(self._INDEX_KEY, "-inf", cutoff)
         else:
             pipe.expire(meta_key, self._TTL_SECONDS)
         pipe.hset(statuses_key, mapping=statuses)
