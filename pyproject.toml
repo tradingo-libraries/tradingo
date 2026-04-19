@@ -46,6 +46,7 @@ dev = [
   "types-requests>=2.32.4.20260107",
   "httpx>=0.28.1",
   "types-croniter>=6.0.0.20250809",
+  "fakeredis>=2.35.1",
 ]
 research = [
   "dtale",

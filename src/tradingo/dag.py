@@ -485,6 +485,15 @@ class DAGRun:
                 ],
             )
 
+    def __repr__(self) -> str:
+        s = self.summary()
+        status = "done" if self.is_done else "running"
+        return (
+            f"DAGRun({status}, completed={s['completed']}, "
+            f"submitted={s['submitted']}, failed={s['failed']}, "
+            f"total={s['total']})"
+        )
+
 
 class DAG(dict[str, Task]):
     """Tradingo DAG"""
