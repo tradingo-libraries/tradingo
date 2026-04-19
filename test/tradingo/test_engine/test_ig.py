@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-from tradingo.engine import (
+from tradingo.engine.ig import (
     adjust_position_sizes,
     close_all_open_position,
     close_position,

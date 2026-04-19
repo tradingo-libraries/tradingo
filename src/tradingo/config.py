@@ -15,7 +15,7 @@ class ConfigLoadError(Exception):
 
 def read_config_template(
     filepath: pathlib.Path,
-    variables: MutableMapping[str, str | bool],
+    variables: MutableMapping[str, str | bool] | MutableMapping[str, str],
     path_so_far: list[str] | None = None,
 ) -> dict[str, Any]:
     """read a config template and populate it with values"""

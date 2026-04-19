@@ -245,6 +245,72 @@ class TestConvertPricesToCcy:
         assert isinstance(result[0], pd.DataFrame)
 
 
+class TestCreateUniverse:
+    """Tests for create_universe function."""
+
+    @staticmethod
+    def _make_ohlcv(index: pd.DatetimeIndex) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "Open": [1.0] * len(index),
+                "High": [1.0] * len(index),
+                "Low": [1.0] * len(index),
+                "Close": [1.0] * len(index),
+                "Volume": [1.0] * len(index),
+            },
+            index=index,
+        )
+
+    def _make_pricelib(self, data_by_symbol: dict[str, pd.DataFrame]) -> MagicMock:
+        pricelib = MagicMock()
+        pricelib.list_symbols.return_value = list(data_by_symbol.keys())
+
+        def read(symbol: str, date_range: Any = None) -> MagicMock:
+            item = MagicMock()
+            item.data = data_by_symbol[symbol]
+            return item
+
+        pricelib.read.side_effect = read
+        return pricelib
+
+    def test_mixed_tz_naive_and_aware_symbols_concat(self) -> None:
+        """A tz-naive symbol must not break concat with tz-aware symbols."""
+        naive_idx = pd.date_range("2024-01-01", periods=3, freq="D")
+        aware = self._make_ohlcv(naive_idx.tz_localize("UTC"))
+        naive = self._make_ohlcv(naive_idx)
+        pricelib = self._make_pricelib({"AAA": aware, "BBB": naive})
+        instruments = pd.DataFrame(index=pd.Index(["AAA", "BBB"], name="ticker"))
+
+        open_, *_ = getattr(create_universe, "__wrapped__")(
+            pricelib=pricelib,
+            instruments=instruments,
+            end_date=None,
+            start_date=None,
+        )
+
+        assert isinstance(open_.index, pd.DatetimeIndex)
+        assert str(open_.index.tz) == "UTC"
+        assert list(open_.columns) == ["AAA", "BBB"]
+
+    def test_non_utc_tz_converted_to_utc(self) -> None:
+        """A non-UTC tz-aware symbol is converted to UTC."""
+        ny_idx = pd.date_range("2024-01-01", periods=2, freq="D", tz="US/Eastern")
+        utc_idx = pd.date_range("2024-01-01", periods=2, freq="D", tz="UTC")
+        pricelib = self._make_pricelib(
+            {"NY": self._make_ohlcv(ny_idx), "UTC": self._make_ohlcv(utc_idx)}
+        )
+        instruments = pd.DataFrame(index=pd.Index(["NY", "UTC"], name="ticker"))
+
+        open_, *_ = getattr(create_universe, "__wrapped__")(
+            pricelib=pricelib,
+            instruments=instruments,
+            end_date=None,
+            start_date=None,
+        )
+
+        assert str(open_.index.tz) == "UTC"
+
+
 # =============================================================================
 # IG Trading Tests (ig.py)
 # =============================================================================
