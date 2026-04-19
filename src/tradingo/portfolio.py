@@ -26,6 +26,7 @@ def portfolio_construction(
     instruments: pd.DataFrame | None = None,
     default_instrument_weight: float = 1.0,
     instrument_weights: dict[str, dict[str, float]] | None = None,
+    ffill_limit: int = 10,
 ) -> tuple[
     pd.DataFrame,
     pd.DataFrame,
@@ -89,11 +90,11 @@ def portfolio_construction(
         .groupby(level=[1])
         .sum()
         .transpose()
-        .ffill()
+        .ffill(limit=ffill_limit)
         .fillna(0)
     )
 
-    positions = signal_value.reindex_like(close).ffill()
+    positions = signal_value.reindex_like(close).ffill(limit=ffill_limit)
 
     pct_position = positions.div(positions.transpose().sum(), axis=0).fillna(0.0)
     for col in pct_position.columns:

@@ -2,8 +2,10 @@
 #   setup with portfolio_construction template
 # 2. universe_name: the name of the universe
 # 3. tradingEnabled: If true, enable trading tasks
+# 4. engineFunction: fully-qualified adjust_position_sizes function
+#    (default: tradingo.engine.ig.adjust_position_sizes)
 trades.{{ portfolio_name }}:
-  function: tradingo.engine.adjust_position_sizes
+  function: "{{ engineFunction | default('tradingo.engine.ig.adjust_position_sizes') }}"
   depends_on:
     - "portfolio.{{ portfolio_name }}"
   symbols_in:

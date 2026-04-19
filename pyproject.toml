@@ -64,6 +64,9 @@ worker = [
   "celery>=5.0",
   "redis>=4.0",
 ]
+ib = [
+  "ib_insync",
+]
 
 
 [tool.setuptools.packages.find]
@@ -86,6 +89,7 @@ target-version = ['py311']
 
 [project.scripts]
 tradingo-cli = "tradingo.cli:main"
+tradingo-engine-ib = "tradingo.engine.ib:main"
 tradingo-monitor = "monitor.app:main"
 
 [tool.setuptools_scm]
@@ -121,6 +125,8 @@ module = [
   "trading_ig.*",
   "dukascopy_python",
   "dukascopy_python.*",
+  "ib_insync",
+  "ib_insync.*",
   "Cython.*",
   "dash",
   "requests.exceptions",
