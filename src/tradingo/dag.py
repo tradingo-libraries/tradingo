@@ -485,6 +485,27 @@ class DAGRun:
                 ],
             )
 
+    def stop(self) -> int:
+        """Revoke all in-flight Celery tasks. Returns number of tasks revoked.
+
+        Requires the ``[worker]`` extra. Also marks revoked steps in the
+        execution plan (if one exists) so ``--recover`` will retry them.
+        """
+        from tradingo.worker import require_celery
+
+        celery_app = require_celery()
+        with self._lock:
+            submitted = list(self._submitted.items())
+        revoked = 0
+        for step, result in submitted:
+            celery_app.control.revoke(result.id, terminate=True)
+            if self.plan is not None:
+                idx = self._step_index.get(step)
+                if idx is not None:
+                    self.plan.mark_step(idx, "FAILED")
+            revoked += 1
+        return revoked
+
     def __repr__(self) -> str:
         s = self.summary()
         status = "done" if self.is_done else "running"

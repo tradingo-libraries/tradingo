@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
-from tradingo.dag import DAG
+from tradingo.dag import DAG, DAGRun
 from tradingo.execution_plan import ExecutionPlan
 
 from . import _dag_helpers as helpers
@@ -510,3 +510,103 @@ class TestExecutionPlanRecovery:
             end_date=_END,
         )
         assert list(tmp_plans_dir.glob("*.json")) == []
+
+
+# ---------------------------------------------------------------------------
+# DAGRun.stop() tests
+# ---------------------------------------------------------------------------
+
+_Step = tuple[str, pd.Timestamp, pd.Timestamp]
+
+
+def _make_dag_run(
+    steps: list[_Step],
+    plan: ExecutionPlan | None = None,
+) -> DAGRun:
+    step_index = {s: i for i, s in enumerate(steps)}
+    return DAGRun(plan=plan, step_index=step_index, already_completed=set())
+
+
+def _make_fake_result(task_id: str) -> _FakeAsyncResult:
+    result = _FakeAsyncResult(lambda: None)
+    result.id = task_id
+    return result
+
+
+def _make_celery_with_revoke(
+    revoked: list[tuple[str, bool]],
+) -> MagicMock:
+    fake_app = MagicMock()
+    fake_app.control.revoke.side_effect = lambda tid, terminate=False: revoked.append(
+        (tid, terminate)
+    )
+    return fake_app
+
+
+class TestDAGRunStop:
+    def test_revokes_all_submitted_tasks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        revoked: list[tuple[str, bool]] = []
+        monkeypatch.setattr("tradingo.worker.app", _make_celery_with_revoke(revoked))
+
+        step_a: _Step = ("task.a", _START, _END)
+        step_b: _Step = ("task.b", _START, _END)
+        dag_run = _make_dag_run([step_a, step_b])
+        dag_run._submitted[step_a] = _make_fake_result("id-a")
+        dag_run._submitted[step_b] = _make_fake_result("id-b")
+
+        count = dag_run.stop()
+
+        assert count == 2
+        task_ids = {r[0] for r in revoked}
+        assert task_ids == {"id-a", "id-b"}
+        assert all(terminate for _, terminate in revoked)
+
+    def test_revoke_uses_terminate_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        revoked: list[tuple[str, bool]] = []
+        monkeypatch.setattr("tradingo.worker.app", _make_celery_with_revoke(revoked))
+
+        step: _Step = ("task.a", _START, _END)
+        dag_run = _make_dag_run([step])
+        dag_run._submitted[step] = _make_fake_result("id-x")
+
+        dag_run.stop()
+
+        assert revoked == [("id-x", True)]
+
+    def test_returns_zero_when_nothing_in_flight(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("tradingo.worker.app", _make_celery_with_revoke([]))
+        dag_run = _make_dag_run([])
+        assert dag_run.stop() == 0
+
+    def test_marks_plan_steps_failed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_plans_dir: Path
+    ) -> None:
+        monkeypatch.setattr("tradingo.worker.app", _make_celery_with_revoke([]))
+
+        _PARAMS_STOP = {
+            "config_path": "/cfg.yaml",
+            "task_name": "task.a",
+            "start_date": str(_START),
+            "end_date": str(_END),
+            "batch_interval": "5days",
+            "batch_mode": "task",
+            "with_deps": "False",
+        }
+        plan = ExecutionPlan.from_schedule(
+            "stop-plan",
+            _PARAMS_STOP,
+            [("task.a", _START, _END)],
+        )
+        plan.save()
+
+        step: _Step = ("task.a", _START, _END)
+        dag_run = _make_dag_run([step], plan=plan)
+        dag_run._submitted[step] = _make_fake_result("id-stop")
+
+        dag_run.stop()
+
+        loaded = ExecutionPlan.load("stop-plan")
+        assert loaded is not None
+        assert loaded.steps[0].status == "FAILED"
