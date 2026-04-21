@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Generator, cast
+from unittest.mock import MagicMock
 
 import fakeredis
 import pandas as pd
@@ -387,3 +388,176 @@ class TestRedisIndex:
             list[str], fake_redis_backend.zrange("execution_plans:index", 0, -1)
         )
         assert keys.count("dup1") == 1
+
+
+# ---------------------------------------------------------------------------
+# list_plans — file backend
+# ---------------------------------------------------------------------------
+
+
+class TestListPlansFile:
+    def test_empty_when_no_plans(self, tmp_plans_dir: Path) -> None:
+        assert ExecutionPlan.list_plans() == []
+
+    def test_returns_saved_plan(self, tmp_plans_dir: Path) -> None:
+        ExecutionPlan.from_schedule("lp1", _PARAMS, _SCHEDULE).save()
+        plans = ExecutionPlan.list_plans()
+        assert len(plans) == 1
+        assert plans[0]["key"] == "lp1"
+
+    def test_status_counts(self, tmp_plans_dir: Path) -> None:
+        plan = ExecutionPlan.from_schedule("lp2", _PARAMS, _SCHEDULE)
+        plan.save()
+        plan.mark_step(0, "SUCCESS")
+        plans = ExecutionPlan.list_plans()
+        assert plans[0]["SUCCESS"] == 1
+        assert plans[0]["PENDING"] == 2
+
+    def test_limit_applied(self, tmp_plans_dir: Path) -> None:
+        for key in ("a", "b", "c"):
+            ExecutionPlan.from_schedule(key, _PARAMS, _SCHEDULE).save()
+        assert len(ExecutionPlan.list_plans(limit=2)) == 2
+
+    def test_returns_empty_for_missing_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(ExecutionPlan, "PLANS_DIR", str(tmp_path / "nonexistent"))
+        assert ExecutionPlan.list_plans() == []
+
+
+# ---------------------------------------------------------------------------
+# list_plans — Redis backend
+# ---------------------------------------------------------------------------
+
+
+class TestListPlansRedis:
+    def test_empty_when_no_plans(self, fake_redis_backend: fakeredis.FakeRedis) -> None:
+        assert ExecutionPlan.list_plans() == []
+
+    def test_returns_saved_plan(self, fake_redis_backend: fakeredis.FakeRedis) -> None:
+        ExecutionPlan.from_schedule("rlp1", _PARAMS, _SCHEDULE).save()
+        plans = ExecutionPlan.list_plans()
+        assert len(plans) == 1
+        assert plans[0]["key"] == "rlp1"
+
+    def test_status_counts(self, fake_redis_backend: fakeredis.FakeRedis) -> None:
+        plan = ExecutionPlan.from_schedule("rlp2", _PARAMS, _SCHEDULE)
+        plan.save()
+        plan.mark_step(0, "SUCCESS")
+        plan.mark_step_submitted(1, "tid-x")
+        plans = ExecutionPlan.list_plans()
+        assert plans[0]["SUCCESS"] == 1
+        assert plans[0]["SUBMITTED"] == 1
+        assert plans[0]["PENDING"] == 1
+
+    def test_multiple_plans_newest_first(
+        self, fake_redis_backend: fakeredis.FakeRedis
+    ) -> None:
+        for key in ("old", "mid", "new"):
+            ExecutionPlan.from_schedule(key, _PARAMS, _SCHEDULE).save()
+        plans = ExecutionPlan.list_plans()
+        keys = [p["key"] for p in plans]
+        # newest first — "new" was saved last
+        assert keys.index("new") < keys.index("old")
+
+    def test_limit_applied(self, fake_redis_backend: fakeredis.FakeRedis) -> None:
+        for key in ("r1", "r2", "r3", "r4"):
+            ExecutionPlan.from_schedule(key, _PARAMS, _SCHEDULE).save()
+        assert len(ExecutionPlan.list_plans(limit=2)) == 2
+
+
+# ---------------------------------------------------------------------------
+# revoke_submitted
+# ---------------------------------------------------------------------------
+
+
+def _make_fake_celery(revoked: list[tuple[str, bool]]) -> MagicMock:
+    """Return a fake Celery app that records revoke() calls."""
+    fake_app = MagicMock()
+    fake_app.control.revoke.side_effect = (
+        lambda task_id, terminate=False: revoked.append((task_id, terminate))
+    )
+    return fake_app
+
+
+class TestRevokeSubmittedFile:
+    def test_revokes_submitted_step(
+        self, tmp_plans_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        revoked: list[tuple[str, bool]] = []
+        monkeypatch.setattr("tradingo.worker.app", _make_fake_celery(revoked))
+
+        plan = ExecutionPlan.from_schedule("rv1", _PARAMS, _SCHEDULE)
+        plan.save()
+        plan.mark_step_submitted(0, "tid-001")
+        plan.mark_step(1, "SUCCESS")
+
+        count = plan.revoke_submitted()
+
+        assert count == 1
+        assert revoked == [("tid-001", True)]
+
+    def test_marks_revoked_steps_failed(
+        self, tmp_plans_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("tradingo.worker.app", _make_fake_celery([]))
+
+        plan = ExecutionPlan.from_schedule("rv2", _PARAMS, _SCHEDULE)
+        plan.save()
+        plan.mark_step_submitted(0, "tid-002")
+
+        plan.revoke_submitted()
+
+        loaded = ExecutionPlan.load("rv2")
+        assert loaded is not None
+        assert loaded.steps[0].status == "FAILED"
+
+    def test_skips_non_submitted_steps(
+        self, tmp_plans_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        revoked: list[tuple[str, bool]] = []
+        monkeypatch.setattr("tradingo.worker.app", _make_fake_celery(revoked))
+
+        plan = ExecutionPlan.from_schedule("rv3", _PARAMS, _SCHEDULE)
+        plan.save()
+        plan.mark_step(0, "SUCCESS")  # not submitted
+
+        count = plan.revoke_submitted()
+        assert count == 0
+        assert revoked == []
+
+    def test_returns_zero_when_no_submitted(
+        self, tmp_plans_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("tradingo.worker.app", _make_fake_celery([]))
+        plan = ExecutionPlan.from_schedule("rv4", _PARAMS, _SCHEDULE[:1])
+        plan.save()
+        assert plan.revoke_submitted() == 0
+
+
+class TestRevokeSubmittedRedis:
+    def test_revokes_and_marks_failed(
+        self,
+        fake_redis_backend: fakeredis.FakeRedis,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        revoked: list[tuple[str, bool]] = []
+        monkeypatch.setattr("tradingo.worker.app", _make_fake_celery(revoked))
+
+        plan = ExecutionPlan.from_schedule("rvr1", _PARAMS, _SCHEDULE)
+        plan.save()
+        plan.mark_step_submitted(0, "redis-tid-001")
+        plan.mark_step_submitted(2, "redis-tid-003")
+
+        count = plan.revoke_submitted()
+
+        assert count == 2
+        task_ids = [r[0] for r in revoked]
+        assert "redis-tid-001" in task_ids
+        assert "redis-tid-003" in task_ids
+
+        loaded = ExecutionPlan.load("rvr1")
+        assert loaded is not None
+        assert loaded.steps[0].status == "FAILED"
+        assert loaded.steps[2].status == "FAILED"
+        assert loaded.steps[1].status == "PENDING"

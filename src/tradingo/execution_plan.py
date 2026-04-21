@@ -19,6 +19,7 @@ class _Backend(Protocol):
     def mark_step_submitted(
         self, plan: ExecutionPlan, index: int, task_id: str
     ) -> None: ...
+    def list_plans(self, limit: int = 20) -> list[dict[str, Any]]: ...
 
 
 class _FileBackend:
@@ -51,6 +52,36 @@ class _FileBackend:
     ) -> None:
         plan.steps[index].celery_task_id = task_id
         self._write(plan)
+
+    def list_plans(self, limit: int = 20) -> list[dict[str, Any]]:
+        if not self._plans_dir.exists():
+            return []
+        plans = []
+        paths = sorted(
+            self._plans_dir.glob("*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:limit]
+        for path in paths:
+            try:
+                plan = ExecutionPlan._from_dict(json.loads(path.read_text()))
+            except Exception:
+                continue
+            counts: dict[str, int] = {}
+            for s in plan.steps:
+                counts[s.status] = counts.get(s.status, 0) + 1
+            plans.append(
+                {
+                    "key": plan.key,
+                    "task_name": plan.params.get("task_name", ""),
+                    "start_date": plan.params.get("start_date", ""),
+                    "end_date": plan.params.get("end_date", ""),
+                    "created_at": plan.created_at,
+                    "total_steps": str(len(plan.steps)),
+                    **counts,
+                }
+            )
+        return plans
 
 
 class _RedisBackend:
@@ -195,6 +226,25 @@ class _RedisBackend:
         pipe.hset(self._statuses_key(plan.key), str(index), "SUBMITTED")
         pipe.hset(self._task_ids_key(plan.key), str(index), task_id)
         pipe.execute()
+
+    def list_plans(self, limit: int = 20) -> list[dict[str, Any]]:
+        keys: list[str] = self._client.zrevrange(self._INDEX_KEY, 0, limit - 1)  # type: ignore[assignment]
+        if not keys:
+            return []
+        pipe = self._client.pipeline()
+        for key in keys:
+            pipe.hgetall(self._index_meta_key(key))
+            pipe.hgetall(self._statuses_key(key))
+        results: list[Any] = pipe.execute()
+        plans = []
+        for i, key in enumerate(keys):
+            meta = results[i * 2]
+            statuses = results[i * 2 + 1]
+            counts: dict[str, int] = {}
+            for s in statuses.values():
+                counts[s] = counts.get(s, 0) + 1
+            plans.append({"key": key, **meta, **counts})
+        return plans
 
 
 @dataclasses.dataclass
@@ -360,6 +410,27 @@ class ExecutionPlan:
             self.steps[index].status = "SUBMITTED"
             self.steps[index].celery_task_id = task_id
         self._get_backend().mark_step_submitted(self, index, task_id)
+
+    def revoke_submitted(self) -> int:
+        """Revoke all SUBMITTED Celery tasks and mark those steps FAILED.
+
+        Returns the number of tasks revoked. Requires the ``[worker]`` extra.
+        """
+        from tradingo.worker import require_celery
+
+        celery_app = require_celery()
+        revoked = 0
+        for i, step in enumerate(self.steps):
+            if step.status == "SUBMITTED" and step.celery_task_id is not None:
+                celery_app.control.revoke(step.celery_task_id, terminate=True)
+                self.mark_step(i, "FAILED")
+                revoked += 1
+        return revoked
+
+    @classmethod
+    def list_plans(cls, limit: int = 20) -> list[dict[str, Any]]:
+        """Return recent execution plans from the backend, newest first."""
+        return cls._get_backend().list_plans(limit=limit)
 
     def first_non_success(self) -> int | None:
         """Return the index of the first non-SUCCESS step, or None.

@@ -175,6 +175,18 @@ def cli_app() -> argparse.ArgumentParser:
 
     _ = task_subparsers.add_parser("list")
 
+    stop_tasks = task_subparsers.add_parser(
+        "stop", help="Revoke all SUBMITTED Celery tasks for an execution plan"
+    )
+    stop_tasks.add_argument(
+        "plan_key", help="Execution plan key (shown by 'task list')"
+    )
+    stop_tasks.add_argument(
+        "--broker-url",
+        default=os.environ.get("TP_CELERY_BROKER_URL"),
+        help="Celery broker URL (default: TP_CELERY_BROKER_URL env var)",
+    )
+
     pipeline = entity.add_parser("pipeline")
     pipeline_subparsers = pipeline.add_subparsers(dest="pipeline_action", required=True)
     run_pipeline = pipeline_subparsers.add_parser("run")
@@ -258,6 +270,20 @@ def handle_tasks(args: argparse.Namespace, arctic: Arctic | CachingArctic) -> No
     if args.list_action == "list":
         graph = DAG.from_config(config)
         graph.print()
+        _print_active_plans()
+
+    elif args.list_action == "stop":
+        from tradingo.execution_plan import ExecutionPlan
+
+        if getattr(args, "broker_url", None):
+            os.environ["TP_CELERY_BROKER_URL"] = args.broker_url
+        plan = ExecutionPlan.load(args.plan_key)
+        if plan is None:
+            print(f"No execution plan found for key: {args.plan_key}")
+            return
+        count = plan.revoke_submitted()
+        short_key = args.plan_key[:16]
+        print(f"Revoked {count} Celery task(s) from plan {short_key}...")
 
     elif args.list_action == "run":
         if getattr(args, "cache", False):
@@ -308,6 +334,33 @@ def handle_tasks(args: argparse.Namespace, arctic: Arctic | CachingArctic) -> No
 
     else:
         raise ValueError(args.list_action)
+
+
+def _print_active_plans() -> None:
+    """Print any execution plans that have SUBMITTED steps."""
+    try:
+        from tradingo.execution_plan import ExecutionPlan
+
+        plans = ExecutionPlan.list_plans()
+    except Exception:
+        return
+    active = [p for p in plans if p.get("SUBMITTED", 0) > 0]
+    if not active:
+        return
+    print("Active Celery runs:")
+    for p in active:
+        total = p.get("total_steps", "?")
+        submitted = p.get("SUBMITTED", 0)
+        success = p.get("SUCCESS", 0)
+        failed = p.get("FAILED", 0)
+        key = p["key"]
+        task_name = p.get("task_name", "")
+        print(
+            f"  {key[:16]}  task={task_name}"
+            f"  submitted={submitted} success={success} failed={failed} total={total}"
+            f"\n    stop: tradingo-cli --config <config> task stop {key}"
+        )
+    print()
 
 
 def handle_pipeline(args: argparse.Namespace, arctic_uri: str) -> None:

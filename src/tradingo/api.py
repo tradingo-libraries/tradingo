@@ -8,6 +8,8 @@ import arcticdb as adb
 import pandas as pd
 from arcticdb.version_store.library import AsOf
 
+from .caching import CachingArctic
+
 
 class _Read:
     def __init__(
@@ -152,11 +154,12 @@ class Tradingo(adb.Arctic):  # type: ignore
         return [*self.list_libraries(), *super().__dir__()]
 
 
-_GLOBAL_INSTANCE: Tradingo | None = None
+_GLOBAL_INSTANCE: Tradingo | CachingArctic | None = None
 
 
-def from_env() -> Tradingo:
+def from_env(caching: bool = False) -> Tradingo | CachingArctic:
     global _GLOBAL_INSTANCE
+    cls = Tradingo if not caching else CachingArctic
     if _GLOBAL_INSTANCE is not None:
         return _GLOBAL_INSTANCE
-    return (_GLOBAL_INSTANCE := Tradingo(os.environ["TP_ARCTIC_URI"]))
+    return (_GLOBAL_INSTANCE := cls(os.environ["TP_ARCTIC_URI"]))
