@@ -24,8 +24,16 @@ import yaml
 from arcticdb.arctic import Library
 
 from tradingo.api import Tradingo
-from tradingo.cli import cli_app, handle_tasks, handle_universes, int_or_bool
+from tradingo.cli import (
+    _print_active_plans,
+    cli_app,
+    handle_tasks,
+    handle_universes,
+    int_or_bool,
+    parse_interval,
+)
 from tradingo.dag import DAG
+from tradingo.execution_plan import ExecutionPlan
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -312,6 +320,41 @@ class TestIntOrBool:
             int_or_bool("invalid")
         with pytest.raises(ValueError):
             int_or_bool("maybe")
+
+
+class TestParseInterval:
+    """Tests for the parse_interval argument parser."""
+
+    def test_days(self) -> None:
+        assert parse_interval("3days") == pd.Timedelta(days=3)
+        assert parse_interval("1day") == pd.Timedelta(days=1)
+
+    def test_hours(self) -> None:
+        assert parse_interval("2hours") == pd.Timedelta(hours=2)
+        assert parse_interval("1h") == pd.Timedelta(hours=1)
+
+    def test_minutes(self) -> None:
+        assert parse_interval("30min") == pd.Timedelta(minutes=30)
+
+    def test_weeks(self) -> None:
+        assert parse_interval("1w") == pd.Timedelta(weeks=1)
+        assert parse_interval("2weeks") == pd.Timedelta(weeks=2)
+
+    def test_months_approximated(self) -> None:
+        assert parse_interval("2months") == pd.Timedelta(days=60)
+        assert parse_interval("1month") == pd.Timedelta(days=30)
+        assert parse_interval("3mo") == pd.Timedelta(days=90)
+
+    def test_with_spaces(self) -> None:
+        assert parse_interval("3 days") == pd.Timedelta(days=3)
+
+    def test_invalid_format(self) -> None:
+        with pytest.raises(argparse.ArgumentTypeError, match="Invalid interval"):
+            parse_interval("abc")
+
+    def test_invalid_unit(self) -> None:
+        with pytest.raises(argparse.ArgumentTypeError, match="Unrecognized"):
+            parse_interval("3foobar")
 
 
 # ---------------------------------------------------------------------------
@@ -1658,7 +1701,7 @@ stage1:
 
         from tradingo.config import read_config_template
 
-        config = read_config_template(config_file, os.environ)
+        config = read_config_template(config_file, dict(os.environ))
 
         args = argparse.Namespace(
             config=config,
@@ -1681,6 +1724,200 @@ stage1:
         # Verify the task was executed with correct params
         assert len(_computed_results) == 1
         assert _computed_results[0] == {"a": 10, "b": 20, "result": 30}
+
+
+# ---------------------------------------------------------------------------
+# Fixtures shared by task-stop and active-plans tests
+# ---------------------------------------------------------------------------
+
+_STOP_PARAMS = {
+    "config_path": "/cfg.yaml",
+    "task_name": "task.a",
+    "start_date": "2024-01-01",
+    "end_date": "2024-01-15",
+    "batch_interval": "7days",
+    "batch_mode": "task",
+    "with_deps": "False",
+}
+_STOP_SCHEDULE = [
+    ("task.a", pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-08")),
+    ("task.a", pd.Timestamp("2024-01-08"), pd.Timestamp("2024-01-15")),
+]
+
+
+@pytest.fixture()
+def tmp_plans_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(ExecutionPlan, "PLANS_DIR", str(tmp_path))
+    return tmp_path
+
+
+# ---------------------------------------------------------------------------
+# Tests for task stop command
+# ---------------------------------------------------------------------------
+
+
+class TestTaskStopParsing:
+    def test_stop_parses_plan_key(self) -> None:
+        parser = cli_app()
+        with patch("tradingo.cli.read_config_template", return_value={}):
+            args = parser.parse_args(
+                ["--config", "dummy.yaml", "task", "stop", "abc123"]
+            )
+        assert args.list_action == "stop"
+        assert args.plan_key == "abc123"
+
+    def test_stop_accepts_broker_url(self) -> None:
+        parser = cli_app()
+        with patch("tradingo.cli.read_config_template", return_value={}):
+            args = parser.parse_args(
+                [
+                    "--config",
+                    "dummy.yaml",
+                    "task",
+                    "stop",
+                    "abc123",
+                    "--broker-url",
+                    "redis://myhost:6379/0",
+                ]
+            )
+        assert args.broker_url == "redis://myhost:6379/0"
+
+
+class TestTaskStopCommand:
+    def test_stop_revokes_and_prints_count(
+        self,
+        simple_config: dict[str, Any],
+        tmp_plans_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(
+            "tradingo.worker.app",
+            MagicMock(control=MagicMock(revoke=MagicMock())),
+        )
+        plan = ExecutionPlan.from_schedule("plan-xyz", _STOP_PARAMS, _STOP_SCHEDULE)
+        plan.save()
+        plan.mark_step_submitted(0, "celery-tid-001")
+
+        args = argparse.Namespace(
+            config=simple_config,
+            entity="task",
+            list_action="stop",
+            plan_key="plan-xyz",
+            broker_url=None,
+        )
+        handle_tasks(args, MagicMock())
+
+        captured = capsys.readouterr()
+        assert "Revoked 1" in captured.out
+
+    def test_stop_missing_plan_prints_error(
+        self,
+        simple_config: dict[str, Any],
+        tmp_plans_dir: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        args = argparse.Namespace(
+            config=simple_config,
+            entity="task",
+            list_action="stop",
+            plan_key="nonexistent-key",
+            broker_url=None,
+        )
+        handle_tasks(args, MagicMock())
+
+        captured = capsys.readouterr()
+        assert "No execution plan found" in captured.out
+
+    def test_stop_marks_steps_failed(
+        self,
+        simple_config: dict[str, Any],
+        tmp_plans_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "tradingo.worker.app",
+            MagicMock(control=MagicMock(revoke=MagicMock())),
+        )
+        plan = ExecutionPlan.from_schedule("plan-fail", _STOP_PARAMS, _STOP_SCHEDULE)
+        plan.save()
+        plan.mark_step_submitted(0, "tid-x")
+        plan.mark_step_submitted(1, "tid-y")
+
+        args = argparse.Namespace(
+            config=simple_config,
+            entity="task",
+            list_action="stop",
+            plan_key="plan-fail",
+            broker_url=None,
+        )
+        handle_tasks(args, MagicMock())
+
+        loaded = ExecutionPlan.load("plan-fail")
+        assert loaded is not None
+        assert all(s.status == "FAILED" for s in loaded.steps)
+
+
+# ---------------------------------------------------------------------------
+# Tests for task list — active plans display
+# ---------------------------------------------------------------------------
+
+
+class TestTaskListActivePlans:
+    def test_shows_active_plan(
+        self,
+        simple_config: dict[str, Any],
+        tmp_plans_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        plan = ExecutionPlan.from_schedule("active-plan", _STOP_PARAMS, _STOP_SCHEDULE)
+        plan.save()
+        plan.mark_step_submitted(0, "tid-active")
+
+        args = argparse.Namespace(
+            config=simple_config,
+            entity="task",
+            list_action="list",
+        )
+        handle_tasks(args, MagicMock())
+
+        captured = capsys.readouterr()
+        assert "active-plan" in captured.out
+        assert "task stop" in captured.out
+
+    def test_no_active_plans_section_when_all_done(
+        self,
+        simple_config: dict[str, Any],
+        tmp_plans_dir: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        plan = ExecutionPlan.from_schedule("done-plan", _STOP_PARAMS, _STOP_SCHEDULE)
+        plan.save()
+        plan.mark_step(0, "SUCCESS")
+        plan.mark_step(1, "SUCCESS")
+
+        args = argparse.Namespace(
+            config=simple_config,
+            entity="task",
+            list_action="list",
+        )
+        handle_tasks(args, MagicMock())
+
+        captured = capsys.readouterr()
+        assert "Active Celery runs" not in captured.out
+
+    def test_print_active_plans_silent_on_exception(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """_print_active_plans must not propagate exceptions."""
+        with patch(
+            "tradingo.execution_plan.ExecutionPlan.list_plans",
+            side_effect=RuntimeError("Redis down"),
+        ):
+            _print_active_plans()  # must not raise
+
+        assert capsys.readouterr().out == ""
 
 
 # ---------------------------------------------------------------------------
