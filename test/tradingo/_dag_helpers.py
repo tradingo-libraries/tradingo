@@ -222,3 +222,16 @@ def record_c_celery(**kwargs: Any) -> None:
 
 def fail_a_celery(**kwargs: Any) -> None:
     raise RuntimeError("celery task_a failed")
+
+
+# ---------------------------------------------------------------------------
+# Background execution helpers — gate pattern for deterministic timing tests
+# ---------------------------------------------------------------------------
+
+
+def blocking_a(**kwargs: object) -> None:
+    """Signal that A has started (gate_a), then block until gate_c is set."""
+    gate_a.set()
+    gate_c.wait(timeout=5)
+    with call_log_lock:
+        call_log.append("a")

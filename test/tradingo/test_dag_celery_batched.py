@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from tradingo.dag import DAG, DAGRun
+from tradingo.dag import Step as _Step
 from tradingo.execution_plan import ExecutionPlan
 
 from . import _dag_helpers as helpers
@@ -516,14 +517,12 @@ class TestExecutionPlanRecovery:
 # DAGRun.stop() tests
 # ---------------------------------------------------------------------------
 
-_Step = tuple[str, pd.Timestamp, pd.Timestamp]
-
 
 def _make_dag_run(
     steps: list[_Step],
     plan: ExecutionPlan | None = None,
 ) -> DAGRun:
-    step_index = {s: i for i, s in enumerate(steps)}
+    step_index: dict[_Step, int] = {s: i for i, s in enumerate(steps)}
     return DAGRun(plan=plan, step_index=step_index, already_completed=set())
 
 

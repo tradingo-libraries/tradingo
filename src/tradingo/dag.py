@@ -366,18 +366,24 @@ def _topo_sort_tasks(tasks: list[Task], member_names: set[str]) -> list[Task]:
 
 
 # Step identity: (task_name, chunk_start, chunk_end)
-Step = tuple[str, pd.Timestamp, pd.Timestamp]
+# Timestamps are None for non-batched (single-task) modes.
+Step = tuple[str, pd.Timestamp | None, pd.Timestamp | None]
 
 
 class DAGRun:
-    """Live handle to a running batched Celery dispatch.
+    """Live handle to a running DAG dispatch.
 
-    Created by ``DAG.run_batched_celery`` which returns immediately;
-    the dispatch loop runs in a background daemon thread.
+    Returned by all run methods.  When ``background=True`` the dispatch loop
+    runs in a background daemon thread and this handle is returned
+    immediately.  When ``background=False`` the object is returned after all
+    work has finished.
+
+    Batched modes use ``(task_name, chunk_start, chunk_end)`` as the step
+    identity; non-batched modes use ``(task_name, None, None)``.
 
     Usage::
 
-        dag_run = dag.run_batched_celery(...)
+        dag_run = dag.run_parallel(..., background=True)
         print(dag_run.summary())       # check progress while running
         dag_run.wait()                 # block until done, raises on errors
 
@@ -460,14 +466,15 @@ class DAGRun:
                     status = "SUBMITTED"
                 else:
                     status = "PENDING"
+                handle = self._submitted.get(step)
                 row: dict[str, Any] = {
                     "index": idx,
                     "task_name": task_name,
                     "start_date": start,
                     "end_date": end,
                     "status": status,
-                    "celery_task_id": (
-                        self._submitted[step].id if step in self._submitted else None
+                    "task_id": (
+                        getattr(handle, "id", None) if handle is not None else None
                     ),
                 }
                 rows.append(row)
@@ -478,7 +485,7 @@ class DAGRun:
         self._done_event.wait()
         if self._errors:
             raise ExceptionGroup(
-                f"{len(self._errors)} batched step(s) failed on Celery",
+                f"{len(self._errors)} step(s) failed",
                 [
                     e if isinstance(e, Exception) else Exception(str(e))
                     for e in self._errors
@@ -486,25 +493,32 @@ class DAGRun:
             )
 
     def stop(self) -> int:
-        """Revoke all in-flight Celery tasks. Returns number of tasks revoked.
+        """Cancel or revoke all in-flight tasks. Returns number of tasks stopped.
 
-        Requires the ``[worker]`` extra. Also marks revoked steps in the
-        execution plan (if one exists) so ``--recover`` will retry them.
+        For thread/process pool tasks calls ``Future.cancel()`` (only
+        effective for tasks not yet started).  For Celery tasks revokes via
+        the Celery control API.  Also marks stopped steps in the execution
+        plan (if one exists) so ``--recover`` will retry them.
         """
-        from tradingo.worker import require_celery
-
-        celery_app = require_celery()
         with self._lock:
             submitted = list(self._submitted.items())
-        revoked = 0
-        for step, result in submitted:
-            celery_app.control.revoke(result.id, terminate=True)
+        stopped = 0
+        for step, handle in submitted:
+            if handle is None:
+                pass
+            elif hasattr(handle, "cancel"):  # concurrent.futures.Future
+                handle.cancel()
+            else:  # Celery AsyncResult
+                from tradingo.worker import require_celery
+
+                celery_app = require_celery()
+                celery_app.control.revoke(handle.id, terminate=True)
             if self.plan is not None:
                 idx = self._step_index.get(step)
                 if idx is not None:
                     self.plan.mark_step(idx, "FAILED")
-            revoked += 1
-        return revoked
+            stopped += 1
+        return stopped
 
     def __repr__(self) -> str:
         s = self.summary()
@@ -680,7 +694,8 @@ class DAG(dict[str, Task]):
         intervals: list[tuple[pd.Timestamp, pd.Timestamp]],
         force_rerun: bool,
         plan: ExecutionPlan | None = None,
-        step_index: dict[tuple[str, pd.Timestamp, pd.Timestamp], int] | None = None,
+        step_index: dict[Step, int] | None = None,
+        dag_run: DAGRun | None = None,
         **kwargs: object,
     ) -> None:
         """Run one task across all its intervals sequentially.
@@ -690,6 +705,7 @@ class DAG(dict[str, Task]):
         """
         task = self[task_name]
         for i, (start, end) in enumerate(intervals):
+            step: Step = (task_name, start, end)
             step_kwargs = dict(kwargs)
             step_kwargs["start_date"] = start
             step_kwargs["end_date"] = end
@@ -699,17 +715,23 @@ class DAG(dict[str, Task]):
             if task.state == TaskState.PENDING or force_rerun:
                 logger.info("Running %s [%s -> %s]", task_name, start, end)
                 print(f"Running {task} [{start} -> {end}]")
+                if dag_run is not None:
+                    dag_run._on_submitted(step, None)
                 try:
                     task.function(*task.task_args, **task_kwargs)
                     if plan is not None and step_index is not None:
-                        idx = step_index.get((task_name, start, end))
+                        idx = step_index.get(step)
                         if idx is not None:
                             plan.mark_step(idx, "SUCCESS")
-                except Exception:
+                    if dag_run is not None:
+                        dag_run._on_completed(step)
+                except Exception as exc:
                     if plan is not None and step_index is not None:
-                        idx = step_index.get((task_name, start, end))
+                        idx = step_index.get(step)
                         if idx is not None:
                             plan.mark_step(idx, "FAILED")
+                    if dag_run is not None:
+                        dag_run._on_failed(step, exc)
                     raise
 
     def run_batched(
@@ -723,8 +745,9 @@ class DAG(dict[str, Task]):
         max_workers: int = 1,
         recover: bool = False,
         config_path: str | None = None,
+        background: bool = False,
         **kwargs: object,
-    ) -> None:
+    ) -> DAGRun:
         """Run tasks in batched time intervals."""
         start_date = cast(pd.Timestamp | None, kwargs.get("start_date"))
         end_date = cast(pd.Timestamp | None, kwargs.get("end_date"))
@@ -791,7 +814,15 @@ class DAG(dict[str, Task]):
                     resume_idx = plan.first_non_success()
                     if resume_idx is None:
                         logger.info("All steps already completed — nothing to do.")
-                        return
+                        done = DAGRun(
+                            plan=plan,
+                            step_index={
+                                (t, s, e): i for i, (t, s, e) in enumerate(schedule)
+                            },
+                            already_completed={(t, s, e) for t, s, e in schedule},
+                        )
+                        done._mark_done()
+                        return done
                     logger.info(
                         "Recovering execution plan: skipping %d completed steps",
                         resume_idx,
@@ -800,68 +831,103 @@ class DAG(dict[str, Task]):
                 plan = ExecutionPlan.from_schedule(plan_key, plan_params, schedule)
                 plan.save()
 
-        step_index: dict[tuple[str, pd.Timestamp, pd.Timestamp], int] = {
+        step_index: dict[Step, int] = {
             (t, s, e): i for i, (t, s, e) in enumerate(schedule)
         }
+        already_completed: set[Step] = {
+            (t, s, e)
+            for (t, s, e), idx in step_index.items()
+            if plan is not None and plan.steps[idx].status == "SUCCESS"
+        }
+        dag_run = DAGRun(
+            plan=plan, step_index=step_index, already_completed=already_completed
+        )
 
-        if max_workers > 1:
-            self._run_batched_parallel(
-                task_name=task_name,
-                dep_names=dep_names,
-                intervals=intervals,
-                mode=mode,
-                run_dependencies=run_dependencies,
-                skip_deps=skip_deps,
-                force_rerun=force_rerun,
-                max_workers=max_workers,
-                plan=plan,
-                step_index=step_index,
-                **kwargs,
-            )
-            return
-
-        # Sequential execution
-        # Track which tasks have run at least once so --clean only applies to
-        # the first interval per task (not every subsequent chunk).
-        seen_tasks: set[str] = set()
-        for step_idx, (step_task_name, chunk_start, chunk_end) in enumerate(schedule):
-            # Skip completed steps when recovering
-            if plan is not None and plan.steps[step_idx].status == "SUCCESS":
-                seen_tasks.add(step_task_name)
-                continue
-
-            task = self[step_task_name]
-            # Reset state so the same task can run again for the next interval
-            task.state = TaskState.PENDING
-            step_kwargs = dict(kwargs)
-            step_kwargs["start_date"] = chunk_start
-            step_kwargs["end_date"] = chunk_end
-            if step_task_name in seen_tasks:
-                step_kwargs.pop("clean", None)
-            task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), step_kwargs)
-
-            if task.state == TaskState.PENDING or force_rerun:
-                state = TaskState.FAILED
-                try:
-                    logger.info(
-                        "Running %s [%s -> %s]",
-                        step_task_name,
-                        chunk_start,
-                        chunk_end,
+        def _execute() -> None:
+            try:
+                if max_workers > 1:
+                    self._run_batched_parallel(
+                        task_name=task_name,
+                        dep_names=dep_names,
+                        intervals=intervals,
+                        mode=mode,
+                        run_dependencies=run_dependencies,
+                        skip_deps=skip_deps,
+                        force_rerun=force_rerun,
+                        max_workers=max_workers,
+                        plan=plan,
+                        step_index=step_index,
+                        dag_run=dag_run,
+                        **kwargs,
                     )
-                    print(f"Running {task} [{chunk_start} -> {chunk_end}]")
-                    task.function(*task.task_args, **task_kwargs)
-                    state = TaskState.SUCCESS
-                    if plan is not None:
-                        plan.mark_step(step_idx, "SUCCESS")
-                except Exception:
-                    if plan is not None:
-                        plan.mark_step(step_idx, "FAILED")
-                    raise
-                finally:
-                    task.state = state
+                    return
 
-            seen_tasks.add(step_task_name)
+                # Sequential execution
+                # Track which tasks have run at least once so --clean only applies to
+                # the first interval per task (not every subsequent chunk).
+                seen_tasks: set[str] = set()
+                for step_idx, (step_task_name, chunk_start, chunk_end) in enumerate(
+                    schedule
+                ):
+                    # Skip completed steps when recovering
+                    if plan is not None and plan.steps[step_idx].status == "SUCCESS":
+                        seen_tasks.add(step_task_name)
+                        continue
+
+                    bstep: Step = (step_task_name, chunk_start, chunk_end)
+                    task = self[step_task_name]
+                    # Reset state so the same task can run again for the next interval
+                    task.state = TaskState.PENDING
+                    step_kwargs = dict(kwargs)
+                    step_kwargs["start_date"] = chunk_start
+                    step_kwargs["end_date"] = chunk_end
+                    if step_task_name in seen_tasks:
+                        step_kwargs.pop("clean", None)
+                    task_kwargs = Task.prepare_kwargs(
+                        dict(task.task_kwargs), step_kwargs
+                    )
+
+                    if task.state == TaskState.PENDING or force_rerun:
+                        state = TaskState.FAILED
+                        dag_run._on_submitted(bstep, None)
+                        try:
+                            logger.info(
+                                "Running %s [%s -> %s]",
+                                step_task_name,
+                                chunk_start,
+                                chunk_end,
+                            )
+                            print(f"Running {task} [{chunk_start} -> {chunk_end}]")
+                            task.function(*task.task_args, **task_kwargs)
+                            state = TaskState.SUCCESS
+                            if plan is not None:
+                                plan.mark_step(step_idx, "SUCCESS")
+                            dag_run._on_completed(bstep)
+                        except Exception as exc:
+                            if plan is not None:
+                                plan.mark_step(step_idx, "FAILED")
+                            dag_run._on_failed(bstep, exc)
+                            raise
+                        finally:
+                            task.state = state
+
+                    seen_tasks.add(step_task_name)
+            finally:
+                dag_run._mark_done()
+
+        if background:
+
+            def _bg() -> None:
+                try:
+                    _execute()
+                except Exception:
+                    pass  # errors already captured in dag_run._errors
+
+            threading.Thread(target=_bg, daemon=True, name=f"dag-{task_name}").start()
+        else:
+            _execute()
+
+        return dag_run
 
     def _run_batched_parallel(
         self,
@@ -874,7 +940,8 @@ class DAG(dict[str, Task]):
         force_rerun: bool = False,
         max_workers: int = 4,
         plan: ExecutionPlan | None = None,
-        step_index: dict[tuple[str, pd.Timestamp, pd.Timestamp], int] | None = None,
+        step_index: dict[Step, int] | None = None,
+        dag_run: DAGRun | None = None,
         **kwargs: object,
     ) -> None:
         """Parallel execution of a batched schedule.
@@ -900,6 +967,9 @@ class DAG(dict[str, Task]):
                 # Reset states so tasks can re-run for next interval
                 for name in all_task_names:
                     self[name].state = TaskState.PENDING
+                if dag_run is not None:
+                    for name in all_task_names:
+                        dag_run._on_submitted((name, chunk_start, chunk_end), None)
                 try:
                     self.run_parallel(
                         task_name,
@@ -907,6 +977,7 @@ class DAG(dict[str, Task]):
                         skip_deps=skip_deps,
                         force_rerun=force_rerun,
                         max_workers=max_workers,
+                        background=False,
                         **chunk_kwargs,
                     )
                     if plan is not None and step_index is not None:
@@ -914,12 +985,18 @@ class DAG(dict[str, Task]):
                             idx = step_index.get((name, chunk_start, chunk_end))
                             if idx is not None:
                                 plan.mark_step(idx, "SUCCESS")
-                except Exception:
+                    if dag_run is not None:
+                        for name in all_task_names:
+                            dag_run._on_completed((name, chunk_start, chunk_end))
+                except Exception as exc:
                     if plan is not None and step_index is not None:
                         for name in all_task_names:
                             idx = step_index.get((name, chunk_start, chunk_end))
                             if idx is not None:
                                 plan.mark_step(idx, "FAILED")
+                    if dag_run is not None:
+                        for name in all_task_names:
+                            dag_run._on_failed((name, chunk_start, chunk_end), exc)
                     raise
                 current_kwargs.pop("clean", None)
 
@@ -937,6 +1014,7 @@ class DAG(dict[str, Task]):
                         force_rerun,
                         plan=plan,
                         step_index=step_index,
+                        dag_run=dag_run,
                         **kwargs,
                     )
                 except Exception as exc:
@@ -995,6 +1073,9 @@ class DAG(dict[str, Task]):
                     "start_date": start_date,
                     "end_date": end_date,
                 }
+                if dag_run is not None:
+                    for dep_name in dep_names:
+                        dag_run._on_submitted((dep_name, start_date, end_date), None)
                 try:
                     self.run_parallel(
                         task_name,
@@ -1002,6 +1083,7 @@ class DAG(dict[str, Task]):
                         skip_deps=skip_deps,
                         force_rerun=force_rerun,
                         max_workers=max_workers,
+                        background=False,
                         **full_kwargs,
                     )
                     if plan is not None and step_index is not None:
@@ -1009,12 +1091,18 @@ class DAG(dict[str, Task]):
                             idx = step_index.get((dep_name, start_date, end_date))
                             if idx is not None:
                                 plan.mark_step(idx, "SUCCESS")
-                except Exception:
+                    if dag_run is not None:
+                        for dep_name in dep_names:
+                            dag_run._on_completed((dep_name, start_date, end_date))
+                except Exception as exc:
                     if plan is not None and step_index is not None:
                         for dep_name in dep_names:
                             idx = step_index.get((dep_name, start_date, end_date))
                             if idx is not None:
                                 plan.mark_step(idx, "FAILED")
+                    if dag_run is not None:
+                        for dep_name in dep_names:
+                            dag_run._on_failed((dep_name, start_date, end_date), exc)
                     raise
             # Phase 2: target batched sequentially (same task, sequential intervals)
             self._run_intervals_sequential(
@@ -1023,6 +1111,7 @@ class DAG(dict[str, Task]):
                 force_rerun,
                 plan=plan,
                 step_index=step_index,
+                dag_run=dag_run,
                 **kwargs,
             )
 
@@ -1032,6 +1121,7 @@ class DAG(dict[str, Task]):
         task_name: str,
         run_dependencies: bool | int,
         skip_deps: re.Pattern[str] | None = None,
+        dag_run: DAGRun | None = None,
     ) -> None:
         """Topology-aware dispatch loop shared by thread and process pool executors.
 
@@ -1059,6 +1149,8 @@ class DAG(dict[str, Task]):
             f = make_future(name)
             future_to_name[f] = name
             pending_futures.add(f)
+            if dag_run is not None:
+                dag_run._on_submitted((name, None, None), f)
 
         for name in [n for n, d in in_degree.items() if d == 0]:
             _submit(name)
@@ -1070,14 +1162,20 @@ class DAG(dict[str, Task]):
                 try:
                     future.result()
                     self[name].state = TaskState.SUCCESS
+                    if dag_run is not None:
+                        dag_run._on_completed((name, None, None))
                     for dep_name in dependents[name]:
                         in_degree[dep_name] -= 1
                         if in_degree[dep_name] == 0:
                             _submit(dep_name)
                 except Exception as exc:
                     self[name].state = TaskState.FAILED
+                    if dag_run is not None:
+                        dag_run._on_failed((name, None, None), exc)
                     errors.append(exc)
 
+        if dag_run is not None:
+            dag_run._mark_done()
         if errors:
             raise ExceptionGroup(f"{len(errors)} task(s) failed", errors)
 
@@ -1088,9 +1186,16 @@ class DAG(dict[str, Task]):
         skip_deps: re.Pattern[str] | None = None,
         force_rerun: bool = False,
         max_workers: int = 4,
+        background: bool = False,
         **kwargs: object,
-    ) -> None:
+    ) -> DAGRun:
         """Run tasks using a thread pool with dynamic dispatch."""
+        runnable = self._collect_runnable_tasks(task_name, run_dependencies, skip_deps)
+        step_index: dict[Step, int] = {
+            (name, None, None): i
+            for i, name in enumerate(self._topo_sort_runnable(runnable))
+        }
+        dag_run = DAGRun(plan=None, step_index=step_index, already_completed=set())
 
         def _run_task(name: str) -> str:
             task = self[name]
@@ -1100,13 +1205,29 @@ class DAG(dict[str, Task]):
                 task.function(*task.task_args, **task_kwargs)
             return name
 
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            self._run_pool(
-                lambda name: pool.submit(_run_task, name),
-                task_name,
-                run_dependencies,
-                skip_deps,
-            )
+        def _execute() -> None:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                self._run_pool(
+                    lambda name: pool.submit(_run_task, name),
+                    task_name,
+                    run_dependencies,
+                    skip_deps,
+                    dag_run=dag_run,
+                )
+
+        if background:
+
+            def _bg() -> None:
+                try:
+                    _execute()
+                except Exception:
+                    pass  # errors already captured in dag_run._errors
+
+            threading.Thread(target=_bg, daemon=True, name=f"dag-{task_name}").start()
+        else:
+            _execute()
+
+        return dag_run
 
     def run_multiprocess(
         self,
@@ -1115,8 +1236,9 @@ class DAG(dict[str, Task]):
         skip_deps: re.Pattern[str] | None = None,
         force_rerun: bool = False,
         max_workers: int = 4,
+        background: bool = False,
         **kwargs: object,
-    ) -> None:
+    ) -> DAGRun:
         """Run tasks using a process pool with dynamic dispatch.
 
         Each task is serialised and dispatched to a worker process via
@@ -1129,17 +1251,42 @@ class DAG(dict[str, Task]):
             serialize_task,
         )
 
+        runnable = self._collect_runnable_tasks(task_name, run_dependencies, skip_deps)
+        step_index: dict[Step, int] = {
+            (name, None, None): i
+            for i, name in enumerate(self._topo_sort_runnable(runnable))
+        }
+        dag_run = DAGRun(plan=None, step_index=step_index, already_completed=set())
+
         serialized_kwargs = serialize_kwargs(dict(kwargs))
 
-        with ProcessPoolExecutor(max_workers=max_workers) as pool:
-            self._run_pool(
-                lambda name: pool.submit(
-                    run_task_in_process, serialize_task(self[name]), serialized_kwargs
-                ),
-                task_name,
-                run_dependencies,
-                skip_deps,
-            )
+        def _execute() -> None:
+            with ProcessPoolExecutor(max_workers=max_workers) as pool:
+                self._run_pool(
+                    lambda name: pool.submit(
+                        run_task_in_process,
+                        serialize_task(self[name]),
+                        serialized_kwargs,
+                    ),
+                    task_name,
+                    run_dependencies,
+                    skip_deps,
+                    dag_run=dag_run,
+                )
+
+        if background:
+
+            def _bg() -> None:
+                try:
+                    _execute()
+                except Exception:
+                    pass  # errors already captured in dag_run._errors
+
+            threading.Thread(target=_bg, daemon=True, name=f"dag-{task_name}").start()
+        else:
+            _execute()
+
+        return dag_run
 
     def run_celery(
         self,
@@ -1148,8 +1295,9 @@ class DAG(dict[str, Task]):
         broker_url: str | None = None,
         skip_deps: re.Pattern[str] | None = None,
         force_rerun: bool = False,
+        background: bool = False,
         **kwargs: object,
-    ) -> None:
+    ) -> DAGRun:
         """Dispatch tasks to Celery workers with topology-preserving dispatch.
 
         Mirrors ``run_parallel`` but sends each task to a remote Celery worker
@@ -1172,6 +1320,11 @@ class DAG(dict[str, Task]):
             celery_app.conf.broker_url = broker_url
 
         runnable = self._collect_runnable_tasks(task_name, run_dependencies, skip_deps)
+        sorted_names = self._topo_sort_runnable(runnable)
+        step_index: dict[Step, int] = {
+            (name, None, None): i for i, name in enumerate(sorted_names)
+        }
+        dag_run = DAGRun(plan=None, step_index=step_index, already_completed=set())
 
         in_degree: dict[str, int] = {name: 0 for name in runnable}
         dependents: dict[str, list[str]] = {name: [] for name in runnable}
@@ -1182,47 +1335,66 @@ class DAG(dict[str, Task]):
                     dependents[dep.name].append(name)
 
         serialized_kwargs = serialize_kwargs(dict(kwargs))
-        # pending maps task name → Celery AsyncResult
-        pending: dict[str, Any] = {}
-        errors: list[Exception] = []
 
-        def _submit(name: str) -> None:
-            task_spec = serialize_task(self[name])
-            result = celery_app.send_task(
-                "tradingo.run_task",
-                args=[task_spec, serialized_kwargs],
-                queue=QUEUE,
-            )
-            pending[name] = result
-            logger.info("Submitted %s to Celery queue '%s'", name, QUEUE)
+        def _execute() -> None:
+            # pending maps task name → Celery AsyncResult
+            pending: dict[str, Any] = {}
+            errors: list[Exception] = []
 
-        for name in [n for n, d in in_degree.items() if d == 0]:
-            _submit(name)
+            def _submit(name: str) -> None:
+                task_spec = serialize_task(self[name])
+                result = celery_app.send_task(
+                    "tradingo.run_task",
+                    args=[task_spec, serialized_kwargs],
+                    queue=QUEUE,
+                )
+                pending[name] = result
+                dag_run._on_submitted((name, None, None), result)
+                logger.info("Submitted %s to Celery queue '%s'", name, QUEUE)
 
-        while pending:
-            for name in list(pending):
-                result = pending[name]
-                if not result.ready():
-                    continue
-                del pending[name]
-                if result.failed():
-                    exc = result.result
-                    logger.error("Task %s failed: %s", name, exc)
-                    errors.append(
-                        exc if isinstance(exc, Exception) else Exception(str(exc))
-                    )
-                else:
-                    logger.info("Task %s completed", name)
-                    for dep_name in dependents[name]:
-                        in_degree[dep_name] -= 1
-                        if in_degree[dep_name] == 0:
-                            _submit(dep_name)
+            for name in [n for n, d in in_degree.items() if d == 0]:
+                _submit(name)
 
-            if pending:
-                time.sleep(0.5)
+            while pending:
+                for name in list(pending):
+                    result = pending[name]
+                    if not result.ready():
+                        continue
+                    del pending[name]
+                    if result.failed():
+                        exc = result.result
+                        logger.error("Task %s failed: %s", name, exc)
+                        err = exc if isinstance(exc, Exception) else Exception(str(exc))
+                        dag_run._on_failed((name, None, None), err)
+                        errors.append(err)
+                    else:
+                        logger.info("Task %s completed", name)
+                        dag_run._on_completed((name, None, None))
+                        for dep_name in dependents[name]:
+                            in_degree[dep_name] -= 1
+                            if in_degree[dep_name] == 0:
+                                _submit(dep_name)
 
-        if errors:
-            raise ExceptionGroup(f"{len(errors)} task(s) failed on Celery", errors)
+                if pending:
+                    time.sleep(0.5)
+
+            dag_run._mark_done()
+            if errors:
+                raise ExceptionGroup(f"{len(errors)} task(s) failed on Celery", errors)
+
+        if background:
+
+            def _bg() -> None:
+                try:
+                    _execute()
+                except Exception:
+                    pass  # errors already captured in dag_run._errors
+
+            threading.Thread(target=_bg, daemon=True, name=f"dag-{task_name}").start()
+        else:
+            _execute()
+
+        return dag_run
 
     def run_batched_celery(
         self,
@@ -1298,15 +1470,12 @@ class DAG(dict[str, Task]):
         # Two constraint types:
         #   1. Writer-serial: (task, chunk_i) → (task, chunk_{i+1})
         #   2. Cross-task: determined by batch_mode
-        step_deps: dict[
-            tuple[str, pd.Timestamp, pd.Timestamp],
-            set[tuple[str, pd.Timestamp, pd.Timestamp]],
-        ] = {}
+        step_deps: dict[Step, set[Step]] = {}
 
         if mode == BatchMode.TASK:
             for name in all_task_names:
                 for i, (s, e) in enumerate(intervals):
-                    deps: set[tuple[str, pd.Timestamp, pd.Timestamp]] = set()
+                    deps: set[Step] = set()
                     if i > 0:
                         deps.add((name, intervals[i - 1][0], intervals[i - 1][1]))
                     else:
@@ -1349,7 +1518,7 @@ class DAG(dict[str, Task]):
             full_start=start_date,
             full_end=end_date,
         )
-        step_index: dict[tuple[str, pd.Timestamp, pd.Timestamp], int] = {
+        step_index: dict[Step, int] = {
             (t, s, e): i for i, (t, s, e) in enumerate(schedule)
         }
 
@@ -1533,46 +1702,24 @@ class DAG(dict[str, Task]):
         *args: object,
         background: bool = False,
         **kwargs: object,
-    ) -> Future[None] | None:
-        """run a specific task of this DAG.
+    ) -> DAGRun:
+        """Run a specific task of this DAG.
 
-        If ``background=True``, the run is submitted to a daemon thread and a
-        ``Future`` is returned immediately.  Call ``future.result()`` to block
-        and re-raise any exception from the run.
+        All run modes return a ``DAGRun`` handle.  Pass ``background=True``
+        to any mode to start execution in a daemon thread and return
+        immediately — call ``dag_run.wait()`` to block and re-raise failures.
+        ``background=False`` (default) blocks until complete and still returns
+        a finished ``DAGRun``.
+
+        ``run_batched_celery`` is always non-blocking; ``background=False``
+        causes ``run()`` to call ``dag_run.wait()`` before returning.
         """
         if task_name not in self:
             raise ValueError(f"{task_name} is not a task in the DAG.")
 
-        if background:
-            pool = ThreadPoolExecutor(
-                max_workers=1, thread_name_prefix=f"dag-{task_name}"
-            )
-
-            def _run() -> None:
-                self.run(
-                    task_name,
-                    skip_deps,
-                    run_dependencies,
-                    force_rerun,
-                    max_workers,
-                    batch_interval,
-                    batch_mode,
-                    recover,
-                    config_path,
-                    executor,
-                    broker_url,
-                    *args,
-                    background=False,
-                    **kwargs,
-                )
-
-            future: Future[None] = pool.submit(_run)
-            pool.shutdown(wait=False)
-            return future
-
         if executor == "celery":
             if batch_interval is not None:
-                self.run_batched_celery(
+                dag_run = self.run_batched_celery(
                     task_name,
                     run_dependencies=run_dependencies,
                     batch_interval=batch_interval,
@@ -1582,31 +1729,33 @@ class DAG(dict[str, Task]):
                     recover=recover,
                     config_path=config_path,
                     **kwargs,
-                ).wait()
-            else:
-                self.run_celery(
-                    task_name,
-                    run_dependencies=run_dependencies,
-                    broker_url=broker_url,
-                    skip_deps=skip_deps,
-                    force_rerun=force_rerun,
-                    **kwargs,
                 )
-            return None
+                if not background:
+                    dag_run.wait()
+                return dag_run
+            return self.run_celery(
+                task_name,
+                run_dependencies=run_dependencies,
+                broker_url=broker_url,
+                skip_deps=skip_deps,
+                force_rerun=force_rerun,
+                background=background,
+                **kwargs,
+            )
 
         if executor == "process":
-            self.run_multiprocess(
+            return self.run_multiprocess(
                 task_name,
                 run_dependencies=run_dependencies,
                 skip_deps=skip_deps,
                 force_rerun=force_rerun,
                 max_workers=max_workers,
+                background=background,
                 **kwargs,
             )
-            return None
 
         if batch_interval is not None:
-            self.run_batched(
+            return self.run_batched(
                 task_name,
                 batch_interval=batch_interval,
                 batch_mode=batch_mode,
@@ -1616,29 +1765,59 @@ class DAG(dict[str, Task]):
                 max_workers=max_workers,
                 recover=recover,
                 config_path=config_path,
+                background=background,
                 **kwargs,
             )
-            return None
 
         if max_workers > 1 and run_dependencies:
-            self.run_parallel(
+            return self.run_parallel(
                 task_name,
                 run_dependencies=run_dependencies,
                 skip_deps=skip_deps,
                 force_rerun=force_rerun,
                 max_workers=max_workers,
+                background=background,
                 **kwargs,
             )
-            return None
 
-        self[task_name].run(
-            *args,
-            skip_deps=skip_deps,
-            run_dependencies=run_dependencies,
-            force_rerun=force_rerun,
-            **kwargs,
+        # Single-task path: wrap Task.run() in a DAGRun
+        step: Step = (task_name, None, None)
+        dag_run = DAGRun(
+            plan=None,
+            step_index={step: 0},
+            already_completed=set(),
         )
-        return None
+
+        def _execute() -> None:
+            try:
+                dag_run._on_submitted(step, None)
+                self[task_name].run(
+                    *args,
+                    skip_deps=skip_deps,
+                    run_dependencies=run_dependencies,
+                    force_rerun=force_rerun,
+                    **kwargs,
+                )
+                dag_run._on_completed(step)
+            except Exception as exc:
+                dag_run._on_failed(step, exc)
+                raise
+            finally:
+                dag_run._mark_done()
+
+        if background:
+
+            def _bg() -> None:
+                try:
+                    _execute()
+                except Exception:
+                    pass  # errors already captured in dag_run._errors
+
+            threading.Thread(target=_bg, daemon=True, name=f"dag-{task_name}").start()
+        else:
+            _execute()
+
+        return dag_run
 
     def update_state(self) -> None:
         """update the local json file which keeps the DAG state."""
