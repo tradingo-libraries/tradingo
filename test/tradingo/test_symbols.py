@@ -328,6 +328,24 @@ def test_symbol_provider_with_columns_query_param(arctic: Arctic) -> None:
 # =============================================================================
 
 
+def test_symbol_publisher_no_symbols_acts_as_envelope(arctic: Arctic) -> None:
+    """Publisher with no symbols (sentinel/check task) consumes
+    dry_run/snapshot/clean and dispatches to the inner function without
+    leaking those kwargs into its signature."""
+
+    captured: dict[str, object] = {}
+
+    @symbol_publisher()
+    def check(value: int) -> None:
+        captured["value"] = value
+        return None
+
+    result = check(arctic=arctic, value=7, dry_run=False, snapshot="snap", clean=True)
+
+    assert result is None
+    assert captured == {"value": 7}
+
+
 def test_symbol_publisher_dry_run_returns_concat(arctic: Arctic) -> None:
     @symbol_publisher("lib1/sym1", "lib2/sym2")
     def publisher() -> tuple[pd.DataFrame, pd.DataFrame]:

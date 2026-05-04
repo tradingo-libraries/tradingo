@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 Q = ParamSpec("Q")
-R = TypeVar("R", pd.DataFrame, tuple[pd.DataFrame, ...])
+R = TypeVar("R", pd.DataFrame, tuple[pd.DataFrame, ...], None)
 
 ROpt = TypeVar(
     "ROpt",
@@ -393,13 +393,25 @@ def symbol_publisher(
         ) -> pd.DataFrame | None:
             if args:
                 raise ValueError("Keyword only arguments.")
-            out: tuple[pd.DataFrame, ...] | pd.DataFrame = _envoke_symbology_function(
-                func,
-                arctic,
-                start_date=kwargs.pop("start_date", None),
-                end_date=kwargs.pop("end_date", None),
-                **kwargs,
+            out: tuple[pd.DataFrame, ...] | pd.DataFrame | None = (
+                _envoke_symbology_function(
+                    func,
+                    arctic,
+                    start_date=kwargs.pop("start_date", None),
+                    end_date=kwargs.pop("end_date", None),
+                    **kwargs,
+                )
             )
+
+            # No-publish task (sentinel/check). The publisher is the task
+            # envelope: it has consumed dry_run/snapshot/clean above so they
+            # don't leak into the inner function. With nothing to write,
+            # forward whatever the function returned (typically None).
+            if not symbols and not template:
+                return out  # type: ignore[return-value]
+
+            # Publishing implies the function produced data.
+            assert out is not None
             if not isinstance(out, (tuple, list)):
                 out = (out,)
 
