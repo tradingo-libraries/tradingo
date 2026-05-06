@@ -199,24 +199,24 @@ def reset_celery_batch_log() -> None:
     celery_batch_log.clear()
 
 
-def record_a_celery(**kwargs: Any) -> None:
+def record_a_celery(clean: bool | None = None, **kwargs: Any) -> None:
     with celery_batch_log_lock:
         celery_batch_log.append(
-            ("a", kwargs.get("start_date"), kwargs.get("end_date"), kwargs.get("clean"))
+            ("a", kwargs.get("start_date"), kwargs.get("end_date"), clean)
         )
 
 
-def record_b_celery(**kwargs: Any) -> None:
+def record_b_celery(clean: bool | None = None, **kwargs: Any) -> None:
     with celery_batch_log_lock:
         celery_batch_log.append(
-            ("b", kwargs.get("start_date"), kwargs.get("end_date"), kwargs.get("clean"))
+            ("b", kwargs.get("start_date"), kwargs.get("end_date"), clean)
         )
 
 
-def record_c_celery(**kwargs: Any) -> None:
+def record_c_celery(clean: bool | None = None, **kwargs: Any) -> None:
     with celery_batch_log_lock:
         celery_batch_log.append(
-            ("c", kwargs.get("start_date"), kwargs.get("end_date"), kwargs.get("clean"))
+            ("c", kwargs.get("start_date"), kwargs.get("end_date"), clean)
         )
 
 

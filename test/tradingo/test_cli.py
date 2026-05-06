@@ -163,19 +163,20 @@ def dummy_task(
     name: str,
     start_date: pd.Timestamp | None = None,
     end_date: pd.Timestamp | None = None,
-    dry_run: bool = False,
-    clean: bool = False,
     **kwargs: Any,
 ) -> None:
-    """A dummy task that records its execution."""
+    """A dummy task that records its execution.
+
+    Intentionally does not declare ``dry_run`` / ``snapshot`` / ``clean``:
+    those are task-envelope kwargs owned by ``symbol_publisher`` and must
+    never reach the inner function. ``**kwargs`` captures any leaks.
+    """
     _executed_tasks.append(
         {
             "name": name,
             "task_name": name,  # Alias for compatibility
             "start_date": start_date,
             "end_date": end_date,
-            "dry_run": dry_run,
-            "clean": clean,
             "kwargs": kwargs,
         }
     )
@@ -1041,7 +1042,8 @@ class TestTaskRunCommand:
     def test_run_task_with_dry_run(
         self, simple_config: dict[str, Any], tmp_path: Path
     ) -> None:
-        """Run a task with dry_run flag."""
+        """``dry_run`` is owned by the publisher envelope and must not leak
+        into the inner function."""
         args = argparse.Namespace(
             config=simple_config,
             entity="task",
@@ -1061,12 +1063,14 @@ class TestTaskRunCommand:
             handle_tasks(args, arctic)
 
         assert len(_executed_tasks) == 1
-        assert _executed_tasks[0]["dry_run"] is True
+        assert "dry_run" not in _executed_tasks[0]["kwargs"]
+        assert "snapshot" not in _executed_tasks[0]["kwargs"]
 
     def test_run_task_with_clean(
         self, simple_config: dict[str, Any], tmp_path: Path
     ) -> None:
-        """Run a task with clean flag."""
+        """``clean`` is owned by the publisher envelope and must not leak
+        into the inner function."""
         args = argparse.Namespace(
             config=simple_config,
             entity="task",
@@ -1086,7 +1090,7 @@ class TestTaskRunCommand:
             handle_tasks(args, arctic)
 
         assert len(_executed_tasks) == 1
-        assert _executed_tasks[0]["clean"] is True
+        assert "clean" not in _executed_tasks[0]["kwargs"]
 
     def test_run_task_with_skip_deps(
         self, simple_config: dict[str, Any], tmp_path: Path

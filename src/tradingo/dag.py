@@ -101,12 +101,11 @@ class Task:
             importlib.import_module(module), function_name
         )
 
-        if self.symbols_out:
-            function = symbols.symbol_publisher(
-                *self.symbols_out,
-                **self.publish_args,
-                metadata=serialize_task(self),
-            )(function)
+        function = symbols.symbol_publisher(
+            *self.symbols_out,
+            **self.publish_args,
+            metadata=serialize_task(self),
+        )(function)
 
         if self.symbols_in:
             function = symbols.symbol_provider(
