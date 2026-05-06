@@ -70,11 +70,10 @@ class Task:
             importlib.import_module(module), function_name
         )
 
-        if self.symbols_out:
-            function = symbols.symbol_publisher(
-                *self.symbols_out,
-                **self.publish_args,
-            )(function)
+        function = symbols.symbol_publisher(
+            *self.symbols_out,
+            **self.publish_args,
+        )(function)
 
         if self.symbols_in:
             function = symbols.symbol_provider(
