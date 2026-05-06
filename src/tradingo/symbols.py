@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 Q = ParamSpec("Q")
-R = TypeVar("R", pd.DataFrame, tuple[pd.DataFrame, ...])
+R = TypeVar("R", pd.DataFrame, tuple[pd.DataFrame, ...], None)
 
 ROpt = TypeVar(
     "ROpt",
@@ -337,20 +337,25 @@ def symbol_provider(
 
 def _envoke_symbology_function(
     function: Callable[..., ROpt],
-    arctic: adb.Arctic,
+    arctic: adb.Arctic | None,
     *args: object,
     **kwargs: object,
 ) -> ROpt:
     sig = inspect.signature(function)
+    has_var_keyword = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+    )
 
-    if "start_date" in sig.parameters:
-        kwargs.setdefault("start_date", kwargs.get("start_date", None))
-    else:
-        kwargs.pop("start_date", None)
-    if "end_date" in sig.parameters:
-        kwargs.setdefault("end_date", kwargs.get("end_date", None))
-    else:
-        kwargs.pop("end_date", None)
+    # Data params: forward to **kwargs functions that can accept anything
+    for param in ("start_date", "end_date"):
+        if param not in sig.parameters and not has_var_keyword:
+            kwargs.pop(param, None)
+
+    # Envelope behaviour params: only forward if explicitly declared
+    for param in ("clean", "dry_run", "snapshot"):
+        if param not in sig.parameters:
+            kwargs.pop(param, None)
+
     if "arctic" in sig.parameters:
         kwargs.setdefault("arctic", arctic)
     else:
@@ -363,10 +368,10 @@ class PublishedFunction(Protocol[P, Ret]):
 
     def __call__(
         self,
-        arctic: adb.Arctic,
+        arctic: adb.Arctic | None = None,
         dry_run: bool = True,
         snapshot: str | None = None,
-        clean: bool = False,
+        clean: bool | None = None,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> pd.DataFrame | None: ...
@@ -386,22 +391,38 @@ def symbol_publisher(
         func: Callable[P, R],
     ) -> PublishedFunction[P, R]:
         def wrapper(
-            arctic: adb.Arctic,
+            arctic: adb.Arctic | None = None,
             dry_run: bool = True,
             snapshot: str | None = None,
-            clean: bool = False,
+            clean: bool | None = None,
             *args: P.args,
             **kwargs: P.kwargs,
         ) -> pd.DataFrame | None:
             if args:
                 raise ValueError("Keyword only arguments.")
-            out: tuple[pd.DataFrame, ...] | pd.DataFrame = _envoke_symbology_function(
-                func,
-                arctic,
-                start_date=kwargs.pop("start_date", None),
-                end_date=kwargs.pop("end_date", None),
-                **kwargs,
+            out: tuple[pd.DataFrame, ...] | pd.DataFrame | None = (
+                _envoke_symbology_function(
+                    func,
+                    arctic,
+                    start_date=kwargs.pop("start_date", None),
+                    end_date=kwargs.pop("end_date", None),
+                    clean=clean,
+                    dry_run=dry_run,
+                    snapshot=snapshot,
+                    **kwargs,
+                )
             )
+
+            # No-publish task (sentinel/check). The publisher is the task
+            # envelope: it has consumed dry_run/snapshot/clean above so they
+            # don't leak into the inner function. With nothing to write,
+            # forward whatever the function returned (typically None).
+            if not symbols and not template:
+                return out  # type: ignore[return-value]
+
+            assert arctic is not None, "arctic must be provided when publishing symbols"
+            # Publishing implies the function produced data.
+            assert out is not None
             if not isinstance(out, (tuple, list)):
                 out = (out,)
 
