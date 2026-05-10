@@ -342,14 +342,15 @@ def _envoke_symbology_function(
     **kwargs: object,
 ) -> ROpt:
     sig = inspect.signature(function)
-    has_var_keyword = any(
-        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-    )
 
-    # Data params: forward to **kwargs functions that can accept anything
-    for param in ("start_date", "end_date"):
-        if param not in sig.parameters and not has_var_keyword:
-            kwargs.pop(param, None)
+    if "start_date" in sig.parameters:
+        kwargs.setdefault("start_date", kwargs.get("start_date", None))
+    else:
+        kwargs.pop("start_date", None)
+    if "end_date" in sig.parameters:
+        kwargs.setdefault("end_date", kwargs.get("end_date", None))
+    else:
+        kwargs.pop("end_date", None)
 
     # Envelope behaviour params: only forward if explicitly declared
     for param in ("clean", "dry_run", "snapshot"):
