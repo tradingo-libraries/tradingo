@@ -6,6 +6,8 @@ import threading
 import time
 from typing import Any
 
+import pandas as pd
+
 # Shared state for test assertions
 call_log: list[str] = []
 call_log_lock = threading.Lock()
@@ -98,22 +100,28 @@ def fail_b(**kwargs: object) -> None:
     raise RuntimeError("task_b failed")
 
 
-def record_a_dated(**kwargs: Any) -> None:
+def record_a_dated(
+    start_date: pd.Timestamp, end_date: pd.Timestamp, **kwargs: Any
+) -> None:
     """Record task A with date range."""
     with call_log_lock:
-        call_log_dated.append(("a", kwargs.get("start_date"), kwargs.get("end_date")))
+        call_log_dated.append(("a", start_date, end_date))
 
 
-def record_b_dated(**kwargs: Any) -> None:
+def record_b_dated(
+    start_date: pd.Timestamp, end_date: pd.Timestamp, **kwargs: Any
+) -> None:
     """Record task B with date range."""
     with call_log_lock:
-        call_log_dated.append(("b", kwargs.get("start_date"), kwargs.get("end_date")))
+        call_log_dated.append(("b", start_date, end_date))
 
 
-def record_c_dated(**kwargs: Any) -> None:
+def record_c_dated(
+    start_date: pd.Timestamp, end_date: pd.Timestamp, **kwargs: Any
+) -> None:
     """Record task C with date range."""
     with call_log_lock:
-        call_log_dated.append(("c", kwargs.get("start_date"), kwargs.get("end_date")))
+        call_log_dated.append(("c", start_date, end_date))
 
 
 # Thread-aware recording: captures (task_label, start_date, end_date, thread_name)
@@ -125,42 +133,33 @@ def reset_threaded() -> None:
     call_log_threaded.clear()
 
 
-def record_a_threaded(**kwargs: Any) -> None:
+def record_a_threaded(
+    start_date: Any = None, end_date: Any = None, **kwargs: Any
+) -> None:
     """Record task A with thread info."""
     with call_log_lock:
         call_log_threaded.append(
-            (
-                "a",
-                kwargs.get("start_date"),
-                kwargs.get("end_date"),
-                threading.current_thread().name,
-            )
+            ("a", start_date, end_date, threading.current_thread().name)
         )
 
 
-def record_b_threaded(**kwargs: Any) -> None:
+def record_b_threaded(
+    start_date: Any = None, end_date: Any = None, **kwargs: Any
+) -> None:
     """Record task B with thread info."""
     with call_log_lock:
         call_log_threaded.append(
-            (
-                "b",
-                kwargs.get("start_date"),
-                kwargs.get("end_date"),
-                threading.current_thread().name,
-            )
+            ("b", start_date, end_date, threading.current_thread().name)
         )
 
 
-def record_c_threaded(**kwargs: Any) -> None:
+def record_c_threaded(
+    start_date: Any = None, end_date: Any = None, **kwargs: Any
+) -> None:
     """Record task C with thread info."""
     with call_log_lock:
         call_log_threaded.append(
-            (
-                "c",
-                kwargs.get("start_date"),
-                kwargs.get("end_date"),
-                threading.current_thread().name,
-            )
+            ("c", start_date, end_date, threading.current_thread().name)
         )
 
 
@@ -174,7 +173,9 @@ def reset_fail_counter() -> None:
     fail_step_counter.clear()
 
 
-def record_a_fail_second(**kwargs: Any) -> None:
+def record_a_fail_second(
+    start_date: Any = None, end_date: Any = None, **kwargs: Any
+) -> None:
     """Record task A; fail on the 2nd call."""
     with fail_step_counter_lock:
         fail_step_counter.setdefault("a", 0)
@@ -183,7 +184,7 @@ def record_a_fail_second(**kwargs: Any) -> None:
     if count == 2:
         raise RuntimeError("task_a failed on call 2")
     with call_log_lock:
-        call_log_dated.append(("a", kwargs.get("start_date"), kwargs.get("end_date")))
+        call_log_dated.append(("a", start_date, end_date))
 
 
 # ---------------------------------------------------------------------------
@@ -199,25 +200,34 @@ def reset_celery_batch_log() -> None:
     celery_batch_log.clear()
 
 
-def record_a_celery(clean: bool | None = None, **kwargs: Any) -> None:
+def record_a_celery(
+    start_date: Any = None,
+    end_date: Any = None,
+    clean: bool | None = None,
+    **kwargs: Any,
+) -> None:
     with celery_batch_log_lock:
-        celery_batch_log.append(
-            ("a", kwargs.get("start_date"), kwargs.get("end_date"), clean)
-        )
+        celery_batch_log.append(("a", start_date, end_date, clean))
 
 
-def record_b_celery(clean: bool | None = None, **kwargs: Any) -> None:
+def record_b_celery(
+    start_date: Any = None,
+    end_date: Any = None,
+    clean: bool | None = None,
+    **kwargs: Any,
+) -> None:
     with celery_batch_log_lock:
-        celery_batch_log.append(
-            ("b", kwargs.get("start_date"), kwargs.get("end_date"), clean)
-        )
+        celery_batch_log.append(("b", start_date, end_date, clean))
 
 
-def record_c_celery(clean: bool | None = None, **kwargs: Any) -> None:
+def record_c_celery(
+    start_date: Any = None,
+    end_date: Any = None,
+    clean: bool | None = None,
+    **kwargs: Any,
+) -> None:
     with celery_batch_log_lock:
-        celery_batch_log.append(
-            ("c", kwargs.get("start_date"), kwargs.get("end_date"), clean)
-        )
+        celery_batch_log.append(("c", start_date, end_date, clean))
 
 
 def fail_a_celery(**kwargs: Any) -> None:
