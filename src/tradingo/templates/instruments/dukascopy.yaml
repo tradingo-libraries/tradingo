@@ -52,7 +52,7 @@
   publish_args:
     astype: float
   symbols_out:
-    #{% for field in ["ask", "mid", "bid"] %}
+    #{% for field in ["bid", "ask", "mid"] %}
     #{% for occurence in ["open", "high", "low", "close"] %}
     - "prices_{{ interval }}/{{ universe_name }}.{{ field }}.{{ occurence }}"
   #{% endfor %}
