@@ -115,7 +115,7 @@ module = [
   "arcticdb_ext",
   "arcticdb_ext.*",
   "dateutil",
-  "dateutil.*", 
+  "dateutil.*",
   "sklearn.*",
   "yfinance",
   "riskfolio",
@@ -126,14 +126,20 @@ module = [
   "trading_ig.*",
   "dukascopy_python",
   "dukascopy_python.*",
-  "ib_insync",
-  "ib_insync.*",
   "Cython.*",
   "dash",
   "requests.exceptions",
   "uvicorn",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+  "ib_insync",
+  "ib_insync.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
 strict = true
 
 [tool.coverage.run]
