@@ -1,0 +1,19 @@
+# vars:
+# 1. feed_name:  safe symbol name for this feed (e.g. ft_home_uk)
+# 2. source:     RSS feed URL (e.g. https://www.ft.com/rss/home/uk)
+#
+# Optional:
+# 3. news_lib:   ArcticDB library name (default: news)
+#
+# PIT recall: lib.read("{{ feed_name }}", as_of=<timestamp>) returns the
+# snapshot as it existed when last written before that timestamp.
+
+"rss.{{ feed_name }}":
+  function: tradingo.sampling.rss.collect_rss_snapshot
+  depends_on: []
+  symbols_out:
+    - "{{ news_lib | default('news') }}/{{ feed_name }}"
+  params:
+    source: "{{ source }}"
+    start_date: "{{ data_interval_start }}"
+    end_date: "{{ data_interval_end }}"

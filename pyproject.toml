@@ -29,6 +29,7 @@ dependencies = [
   "tabula>=1.0.5",
   "tabula-py>=2.10.0",
   "dukascopy-python",
+  "feedparser",
 ]
 
 [dependency-groups]
@@ -128,6 +129,7 @@ module = [
   "dukascopy_python.*",
   "Cython.*",
   "dash",
+  "feedparser",
   "requests.exceptions",
   "uvicorn",
 ]
