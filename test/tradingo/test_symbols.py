@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -520,6 +520,50 @@ def test_symbol_publisher_skips_empty_dataframe(arctic: Arctic) -> None:
     publisher(arctic=arctic, dry_run=False)
     lib = arctic.get_library("my-lib", create_if_missing=True)
     assert "empty-symbol" not in lib.list_symbols()
+
+
+def test_symbol_publisher_dynamic_metadata(arctic: Arctic) -> None:
+    @symbol_publisher("my-lib/meta-symbol")  # type: ignore[type-var]
+    def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
+        df = pd.DataFrame(
+            {"A": [1.0]},
+            index=pd.date_range("2026-01-01", periods=1),
+        )
+        return df, {"reasoning": "bullish", "tokens_in": 100}
+
+    publisher(arctic=arctic, dry_run=False)
+    item = arctic.get_library("my-lib").read("meta-symbol")
+    assert item.metadata == {"reasoning": "bullish", "tokens_in": 100}
+
+
+def test_symbol_publisher_dynamic_metadata_merges_static(arctic: Arctic) -> None:
+    @symbol_publisher("my-lib/merge-meta", metadata={"static_key": "static_val"})  # type: ignore[type-var]
+    def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
+        df = pd.DataFrame(
+            {"A": [1.0]},
+            index=pd.date_range("2026-01-01", periods=1),
+        )
+        return df, {"dynamic_key": "dynamic_val"}
+
+    publisher(arctic=arctic, dry_run=False)
+    item = arctic.get_library("my-lib").read("merge-meta")
+    assert item.metadata == {"static_key": "static_val", "dynamic_key": "dynamic_val"}
+
+
+def test_symbol_publisher_dynamic_metadata_dry_run_excludes_dict(
+    arctic: Arctic,
+) -> None:
+    @symbol_publisher("my-lib/dry-meta")  # type: ignore[type-var]
+    def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
+        df = pd.DataFrame(
+            {"A": [1.0]},
+            index=pd.date_range("2026-01-01", periods=1),
+        )
+        return df, {"reasoning": "test"}
+
+    result = publisher(arctic=arctic, dry_run=True)
+    assert isinstance(result, pd.DataFrame)
+    assert ("my-lib/dry-meta", "A") in result.columns
 
 
 def test_symbol_publisher_rejects_positional_args(arctic: Arctic) -> None:
