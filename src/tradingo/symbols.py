@@ -424,8 +424,20 @@ def symbol_publisher(
             assert arctic is not None, "arctic must be provided when publishing symbols"
             # Publishing implies the function produced data.
             assert out is not None
+
+            # Extract dynamic metadata from trailing dict in return tuple.
+            dynamic_metadata: dict[str, Any] = {}
+            if isinstance(out, (tuple, list)) and out and isinstance(out[-1], dict):
+                *_frames, dynamic_metadata = out
+                out = tuple(_frames)
+
             if not isinstance(out, (tuple, list)):
                 out = (out,)
+
+            write_metadata: dict[str, Any] | None = {
+                **(metadata or {}),
+                **dynamic_metadata,
+            } or None
 
             logger.info("Publishing %s to %s", symbols or template, arctic)
 
@@ -475,14 +487,14 @@ def symbol_publisher(
                             data,
                             upsert=True,
                             date_range=(data.index[0], data.index[-1]),
-                            metadata=metadata,
+                            metadata=write_metadata,
                             **params,
                         )
                     elif write_pickle:
                         result = lib.write_pickle(
                             sym,
                             data,
-                            metadata=metadata,
+                            metadata=write_metadata,
                             **params,
                         )
 
@@ -490,7 +502,7 @@ def symbol_publisher(
                         result = lib.write(
                             sym,
                             data,
-                            metadata=metadata,
+                            metadata=write_metadata,
                             **params,
                         )
 
