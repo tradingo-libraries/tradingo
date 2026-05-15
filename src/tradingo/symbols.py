@@ -118,6 +118,8 @@ class Symbol(NamedTuple):
                     continue
             if key == "columns":
                 kwargs[key] = list(kwargs[key].split(","))
+            if key == "metadata":
+                kwargs[key] = str(value).lower() in ("true", "1")
 
         return cls(lib, symbol_prefix + sym + symbol_postfix, kwargs)
 
@@ -234,7 +236,7 @@ def symbol_provider(
             def get_symbol_data(
                 v: str | list[str] | dict[str, str],
                 with_no_date: bool = False,
-            ) -> pd.DataFrame | dict[str, pd.DataFrame] | None:
+            ) -> pd.DataFrame | dict[str, Any] | None:
                 if isinstance(v, dict):
                     return {
                         key: get_symbol_data(item, with_no_date=with_no_date)
@@ -262,26 +264,27 @@ def symbol_provider(
                     symbol_prefix=symbol_prefix,
                     symbol_postfix=symbol_postfix,
                 )
+                read_kwargs = dict(symbol.kwargs)
+                return_metadata = bool(read_kwargs.pop("metadata", False))
                 try:
-                    data = (
-                        arctic.get_library(
-                            symbol.library,
-                            create_if_missing=True,
-                        )
-                        .read(
-                            symbol.symbol,
-                            date_range=(
-                                None
-                                if with_no_date
-                                else (
-                                    pd.Timestamp(start_date) if start_date else None,
-                                    pd.Timestamp(end_date) if end_date else None,
-                                )
-                            ),
-                            **symbol.kwargs,
-                        )
-                        .data
+                    item = arctic.get_library(
+                        symbol.library,
+                        create_if_missing=True,
+                    ).read(
+                        symbol.symbol,
+                        date_range=(
+                            None
+                            if (with_no_date or return_metadata)
+                            else (
+                                pd.Timestamp(start_date) if start_date else None,
+                                pd.Timestamp(end_date) if end_date else None,
+                            )
+                        ),
+                        **read_kwargs,
                     )
+                    if return_metadata:
+                        return item.metadata  # type: ignore[no-any-return]
+                    data = item.data
                     assert isinstance(data, pd.DataFrame)
                     if (
                         not with_no_date

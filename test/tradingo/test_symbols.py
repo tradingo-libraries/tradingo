@@ -152,6 +152,21 @@ def test_symbol_parse_with_as_of() -> None:
     assert symbol.kwargs == {"as_of": 123}
 
 
+def test_symbol_parse_with_metadata_true() -> None:
+    symbol = Symbol.parse("my-lib/symbol?metadata=true", {})
+    assert symbol.kwargs == {"metadata": True}
+
+
+def test_symbol_parse_with_metadata_false() -> None:
+    symbol = Symbol.parse("my-lib/symbol?metadata=false", {})
+    assert symbol.kwargs == {"metadata": False}
+
+
+def test_symbol_parse_with_negative_as_of() -> None:
+    symbol = Symbol.parse("my-lib/symbol?as_of=-1", {})
+    assert symbol.kwargs == {"as_of": -1}
+
+
 def test_symbol_parse_missing_param_raises() -> None:
     with pytest.raises(SymbolParseError, match="Missing parameter"):
         Symbol.parse("my-lib/{missing}", {})
@@ -305,6 +320,39 @@ def test_symbol_provider_passes_dates_to_function(arctic: Arctic) -> None:
     result = provider(arctic=arctic, start_date=start, end_date=end)  # type: ignore
     assert result[1] == start
     assert result[2] == end
+
+
+def test_symbol_provider_metadata_query_param(arctic: Arctic) -> None:
+    lib = arctic.get_library(name="my-lib", create_if_missing=True)
+    data = pd.DataFrame(
+        {"A": [1.0]},
+        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+    )
+    lib.write("meta-sym", data, metadata={"run": 1, "reasoning": "bullish"})
+
+    @symbol_provider(prev_meta="my-lib/meta-sym?metadata=true")  # type: ignore[type-var]
+    def provider(prev_meta: dict[str, Any]) -> dict[str, Any]:
+        return prev_meta
+
+    result = provider(arctic=arctic)  # type: ignore[call-arg]
+    assert result == {"run": 1, "reasoning": "bullish"}
+
+
+def test_symbol_provider_metadata_with_as_of(arctic: Arctic) -> None:
+    lib = arctic.get_library(name="my-lib", create_if_missing=True)
+    data = pd.DataFrame(
+        {"A": [1.0]},
+        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+    )
+    lib.write("versioned-meta", data, metadata={"run": 1})
+    lib.write("versioned-meta", data, metadata={"run": 2})
+
+    @symbol_provider(prev_meta="my-lib/versioned-meta?as_of=0&metadata=true")  # type: ignore[type-var]
+    def provider(prev_meta: dict[str, Any]) -> dict[str, Any]:
+        return prev_meta
+
+    result = provider(arctic=arctic)  # type: ignore[call-arg]
+    assert result == {"run": 1}
 
 
 def test_symbol_provider_with_columns_query_param(arctic: Arctic) -> None:
