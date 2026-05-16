@@ -167,6 +167,16 @@ def test_symbol_parse_with_negative_as_of() -> None:
     assert symbol.kwargs == {"as_of": -1}
 
 
+def test_symbol_parse_with_optional_true() -> None:
+    symbol = Symbol.parse("my-lib/symbol?optional=true", {})
+    assert symbol.kwargs == {"optional": True}
+
+
+def test_symbol_parse_with_optional_false() -> None:
+    symbol = Symbol.parse("my-lib/symbol?optional=false", {})
+    assert symbol.kwargs == {"optional": False}
+
+
 def test_symbol_parse_missing_param_raises() -> None:
     with pytest.raises(SymbolParseError, match="Missing parameter"):
         Symbol.parse("my-lib/{missing}", {})
@@ -369,6 +379,45 @@ def test_symbol_provider_with_columns_query_param(arctic: Arctic) -> None:
 
     result = provider(arctic=arctic)  # type: ignore
     assert list(result.columns) == ["A", "B"]
+
+
+def test_symbol_provider_optional_returns_none_when_missing(arctic: Arctic) -> None:
+    @symbol_provider(prev_positions="my-lib/nonexistent?optional=true")  # type: ignore[type-var]
+    def provider(prev_positions: pd.DataFrame | None = None) -> pd.DataFrame | None:
+        return prev_positions
+
+    result = provider(arctic=arctic)
+    assert result is None
+
+
+def test_symbol_provider_optional_returns_data_when_present(arctic: Arctic) -> None:
+    lib = arctic.get_library("my-lib", create_if_missing=True)
+    data = pd.DataFrame(
+        {"A": [1.0]},
+        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+    )
+    lib.write("optional-sym", data)
+
+    @symbol_provider(input_1="my-lib/optional-sym?optional=true")  # type: ignore[type-var]
+    def provider(input_1: pd.DataFrame | None = None) -> pd.DataFrame | None:
+        return input_1
+
+    result = provider(arctic=arctic)
+    assert result is not None
+    pd.testing.assert_frame_equal(result, data, check_freq=False)
+
+
+def test_symbol_provider_optional_with_metadata_returns_none_when_missing(
+    arctic: Arctic,
+) -> None:
+    """Mirrors the agent.yaml first-run case: ?as_of=-1&metadata=true&optional=true."""
+
+    @symbol_provider(prev_meta="my-lib/nonexistent?as_of=-1&metadata=true&optional=true")  # type: ignore[type-var]
+    def provider(prev_meta: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        return prev_meta
+
+    result = provider(arctic=arctic)
+    assert result is None
 
 
 # =============================================================================
