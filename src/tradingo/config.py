@@ -15,7 +15,7 @@ class ConfigLoadError(Exception):
 
 def read_config_template(
     filepath: pathlib.Path,
-    variables: MutableMapping[str, str],
+    variables: MutableMapping[str, str | bool] | MutableMapping[str, str],
     path_so_far: list[str] | None = None,
 ) -> dict[str, Any]:
     """read a config template and populate it with values"""
@@ -57,7 +57,7 @@ def read_config_template(
 
 def process_includes(
     config: dict[str, Any],
-    variables: Mapping[str, str],
+    variables: Mapping[str, str | bool],
     path_so_far: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """bake nested configs via 'include' pattern."""

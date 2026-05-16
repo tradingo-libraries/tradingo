@@ -5,6 +5,7 @@ import json
 import os
 import pathlib
 import typing
+import warnings
 from importlib import import_module
 from typing import Any, MutableMapping, Optional, Self
 
@@ -123,6 +124,7 @@ class EnvProvider:
         cls,
         env: MutableMapping[str, str],
         app_prefix: str,
+        raise_unused: bool = False,
     ) -> Any:
         out = {}
         for k, v in env.items():
@@ -133,9 +135,15 @@ class EnvProvider:
             try:
                 field = cls.__dataclass_fields__[k__]
             except KeyError:
-                raise EnvProviderError(
-                    f"Unused config field '{k__}' with value '{v}' for prefix {app_prefix}"
-                )
+                if raise_unused:
+                    raise EnvProviderError(
+                        f"Unused config field '{k__}' with value '{v}' for prefix {app_prefix}"
+                    )
+                else:
+                    warnings.warn(
+                        f"Unused config field '{k__}' with value '{v}' for prefix {app_prefix}"
+                    )
+                continue
             v_ = type_shed(
                 field,
                 v,
@@ -175,6 +183,7 @@ class EnvProvider:
         app_prefix: str | None = None,
         env: MutableMapping[str, Any] | None = None,
         override_default_env: bool = True,
+        raise_unused: bool = False,
     ) -> Self:
 
         try:
@@ -190,7 +199,7 @@ class EnvProvider:
 
         env = env or dict(os.environ)
 
-        resolved_args = cls._resolve_args(env, app_prefix)
+        resolved_args = cls._resolve_args(env, app_prefix, raise_unused=raise_unused)
 
         default_env = cls._resolve_args(os.environ, app_prefix)
 
@@ -259,6 +268,11 @@ class TradingoConfig(EnvProvider):
     arctic_uri: str
     templates: pathlib.Path = pathlib.Path(templates.__file__).parent
     include_instruments: bool = False
+
+    celery_result_backend: str = "redis://:@localhost:6379/1"
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_queue: str = "tradingo"
+    execution_plan_redis_url: str = ""
     app_prefix = "TP"
 
 

@@ -80,13 +80,14 @@ def test_env_provider(tmp_path: pathlib.Path) -> None:
         match="Unused config field 'unknown' with value 'value' for prefix app_",
     ):
         s3 = Settings3.from_env(
+            raise_unused=True,
             env={
                 "app_param1": 1,
                 "app_param2": 1.5,
                 "app_param3": False,
                 "app_param4": "value",
                 "app_unknown": "value",
-            }
+            },
         )
 
     @dataclasses.dataclass

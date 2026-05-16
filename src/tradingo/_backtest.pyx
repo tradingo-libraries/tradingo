@@ -97,7 +97,7 @@ cpdef compute_backtest(
 
         if trade_quantity != 0 and not isnan(trade_quantity):
 
-            trade_price = ask[idx] if trade_price > 0 else bid[idx]
+            trade_price = ask[idx] if trade_quantity > 0 else bid[idx]
 
             # net investment
             m_net_investment = max(
