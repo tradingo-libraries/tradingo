@@ -118,7 +118,7 @@ class Symbol(NamedTuple):
                     continue
             if key == "columns":
                 kwargs[key] = list(kwargs[key].split(","))
-            if key == "metadata":
+            if key in ("metadata", "optional"):
                 kwargs[key] = str(value).lower() in ("true", "1")
 
         return cls(lib, symbol_prefix + sym + symbol_postfix, kwargs)
@@ -266,6 +266,7 @@ def symbol_provider(
                 )
                 read_kwargs = dict(symbol.kwargs)
                 return_metadata = bool(read_kwargs.pop("metadata", False))
+                is_optional = bool(read_kwargs.pop("optional", False))
                 try:
                     item = arctic.get_library(
                         symbol.library,
@@ -302,7 +303,7 @@ def symbol_provider(
                         return get_symbol_data(v, with_no_date=True)
                     raise ex
                 except NoSuchVersionException as ex:
-                    if not raise_if_missing:
+                    if not raise_if_missing or is_optional:
                         return None
                     raise ex
 
