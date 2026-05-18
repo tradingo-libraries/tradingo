@@ -310,7 +310,6 @@ def main(
 
     envconfig = TradingoConfig.from_env().to_env()
     IGTradingConfig.from_env().to_env()
-    envconfig.to_env()
 
     arctic = _arctic or Tradingo(envconfig.arctic_uri)
     if args.entity == "task":
