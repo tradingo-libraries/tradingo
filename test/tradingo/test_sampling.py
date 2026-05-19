@@ -198,11 +198,19 @@ class TestAlignSeries:
         assert s2.name == "test"
 
     def test_align_series_with_series(self) -> None:
-        s1 = pd.Series([1, 2, 3], index=[0, 1, 2])
-        s2 = pd.Series([4, 5, 6], index=[1, 2, 3])
+        s1 = pd.Series([1, 2, 3], index=pd.date_range("2026-05-19", periods=3))
+        s2 = pd.Series([4, 5, 6], index=pd.date_range("2026-05-20", periods=3))
         result1, result2 = _align_series(s1, s2)
-        assert list(result1.index) == [1, 2]
-        assert list(result2.index) == [1, 2]
+        pd.testing.assert_index_equal(
+            result1.index,
+            pd.date_range("2026-05-20", periods=3),
+            check_names=False,
+        )
+        pd.testing.assert_index_equal(
+            result2.index,
+            pd.date_range("2026-05-20", periods=3),
+            check_names=False,
+        )
 
     def test_align_series_invalid_type_raises(self) -> None:
         s = pd.Series([1, 2, 3])

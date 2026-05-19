@@ -186,20 +186,12 @@ def test_align_with_scalar() -> None:
     assert (other == 0.5).all()
 
 
-def test_align_series_intersects_index() -> None:
+def test_align_series_respects_original_index() -> None:
     s1 = pd.Series([1.0, 2.0, 3.0], index=IDX[:3])
     s2 = pd.Series([10.0, 20.0], index=IDX[1:3])
     a, b = _align_series(s1, s2)
     assert len(a) == 2
     assert len(b) == 2
-
-
-def test_align_series_drops_nan() -> None:
-    s1 = pd.Series([1.0, np.nan, 3.0], index=IDX[:3])
-    s2 = pd.Series([10.0, 20.0, 30.0], index=IDX[:3])
-    a, b = _align_series(s1, s2)
-    assert len(a) == 2
-    assert not a.isna().any()
 
 
 def test_align_with_invalid_type_raises() -> None:
