@@ -6,7 +6,7 @@ from typing import cast
 
 import numpy as np
 import pandas as pd
-from ib_insync import IB, MarketOrder, Stock
+from ib_async import IB, MarketOrder, Stock
 
 from tradingo.sampling.ib import get_ib_service
 

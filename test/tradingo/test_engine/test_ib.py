@@ -1,6 +1,6 @@
 """Tests for tradingo.engine.ib - IB position management.
 
-ib_insync is an optional dependency, so we stub it in sys.modules before
+ib_async is an optional dependency, so we stub it in sys.modules before
 importing the module under test. All IB interaction is mocked.
 """
 
@@ -11,10 +11,10 @@ import pandas as pd
 import pytest
 
 # ---------------------------------------------------------------------------
-# Stub ib_insync so the module can be imported without the package installed
+# Stub ib_async so the module can be imported without the package installed
 # ---------------------------------------------------------------------------
-if "ib_insync" not in sys.modules:
-    sys.modules["ib_insync"] = MagicMock()
+if "ib_async" not in sys.modules:
+    sys.modules["ib_async"] = MagicMock()
 
 from tradingo.engine.ib import (  # noqa: E402
     adjust_position_sizes,
@@ -31,12 +31,12 @@ from tradingo.engine.ib import (  # noqa: E402
 
 def _market_order_args() -> tuple[str, float]:
     """Return (action, quantity) from the most recent MarketOrder() call."""
-    call = sys.modules["ib_insync"].MarketOrder.call_args
+    call = sys.modules["ib_async"].MarketOrder.call_args
     return str(call.args[0]), float(call.args[1])
 
 
 def _make_position(symbol: str, currency: str, size: float) -> MagicMock:
-    """Build a mock ib_insync Position object."""
+    """Build a mock ib_async Position object."""
     pos = MagicMock()
     pos.contract.symbol = symbol
     pos.contract.currency = currency
@@ -51,10 +51,10 @@ def _make_position(symbol: str, currency: str, size: float) -> MagicMock:
 
 
 @pytest.fixture(autouse=True)
-def reset_ib_insync_mocks() -> None:
-    """Reset ib_insync class mocks between tests so call_args is fresh."""
-    sys.modules["ib_insync"].MarketOrder.reset_mock()
-    sys.modules["ib_insync"].Stock.reset_mock()
+def reset_ib_async_mocks() -> None:
+    """Reset ib_async class mocks between tests so call_args is fresh."""
+    sys.modules["ib_async"].MarketOrder.reset_mock()
+    sys.modules["ib_async"].Stock.reset_mock()
 
 
 @pytest.fixture

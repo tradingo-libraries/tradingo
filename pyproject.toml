@@ -11,17 +11,19 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-  "numpy",
-  "numba",
-  "pandas",
+  "numpy>=2.3.2",
+  "numba>=0.65",
+  # pandas 2.3.3 is the only 2.x with cp314 wheels; pandas 3.x has none yet, so
+  # cap <3 (a pandas-3 migration is a separate, later effort).
+  "pandas>=2.3.3,<3",
   "pandera",
-  "arcticdb",
+  "arcticdb>=6.8.0",
   "PyYAML",
   "yfinance",
-  "lxml",
+  "lxml>=6.0.3",
   "pandas_market_calendars",
-  "trading_ig",
-  "riskfolio-lib",
+  "trading_ig>=0.0.24",
+  "riskfolio-lib>=7.3.0",
   "tenacity",
   "lightgbm>=4.6.0",
   "pycountry",
@@ -52,9 +54,21 @@ monitor = [
   "dash-bootstrap-components>=1.5.0",
 ]
 ib = [
-  "ib_insync",
+  "ib_async>=2.1.0",
 ]
 
+
+[tool.uv]
+# Several transitive deps gained cp314 wheels only in recent releases; older
+# versions that still satisfy our (loose) pins have no cp314 wheel and fail to
+# build from source. Steer these transitive deps up on 3.14 only — this
+# constrains existing transitive deps, not new runtime deps.
+#   scs       : cp314 wheels from 3.2.8 (riskfolio-lib allows 3.2.7.post2)
+#   scipy     : cp314 wheels from 1.16.2
+constraint-dependencies = [
+  "scs>=3.2.8; python_version >= '3.14'",
+  "scipy>=1.16.2; python_version >= '3.14'",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -64,7 +78,7 @@ where = ["src"]
 
 [build-system]
 requires = [
-  "cython",
+  "cython>=3.1.3",
   "numpy",
   "setuptools>=64",
   "setuptools_scm>=8",
@@ -86,7 +100,8 @@ profile = "black"
 
 [tool.mypy]
 exclude = [
-  "src/monitor"
+  "src/monitor",
+  "build",
 ]
 
 [[tool.mypy.overrides]]
@@ -106,8 +121,8 @@ module = [
   "numba",
   "pandas_market_calendars",
   "trading_ig.*",
-  "ib_insync",
-  "ib_insync.*",
+  "ib_async",
+  "ib_async.*",
   "Cython.*",
   "dash",
 ]

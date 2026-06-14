@@ -6,7 +6,7 @@ from typing import cast
 
 import pandas as pd
 from arcticdb.version_store.library import Library
-from ib_insync import IB, Contract, util
+from ib_async import IB, Contract, util
 
 from tradingo import symbols
 from tradingo.settings import IBTradingConfig

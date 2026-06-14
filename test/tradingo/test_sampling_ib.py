@@ -1,6 +1,6 @@
 """Tests for tradingo.sampling.ib
 
-ib_insync is optional, so it is stubbed in sys.modules before import.
+ib_async is optional, so it is stubbed in sys.modules before import.
 """
 
 import sys
@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-if "ib_insync" not in sys.modules:
-    sys.modules["ib_insync"] = MagicMock()
+if "ib_async" not in sys.modules:
+    sys.modules["ib_async"] = MagicMock()
 
 from tradingo.sampling.ib import (  # noqa: E402
     _duration_str,

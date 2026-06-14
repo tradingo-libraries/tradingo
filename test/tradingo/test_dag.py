@@ -1,6 +1,6 @@
 import pytest
 
-from tradingo.dag import DAG
+from tradingo.dag import DAG, Task
 
 
 def test_dag_configuration() -> None:
@@ -103,6 +103,22 @@ def test_dag_configuration() -> None:
         "prices/{universe}.ask.close",
         "signals/{universe}.trend",
     ]
+
+
+def test_task_function_name_returns_underlying_function() -> None:
+    """function_name exposes the private _function path read-only."""
+    task = Task(
+        name="signal.trend",
+        function="tradingo.signals.trend",
+        task_args=(),
+        task_kwargs={},
+        symbols_out=[],
+        symbols_in={},
+        load_args={},
+        publish_args={},
+    )
+    assert task.function_name == "tradingo.signals.trend"
+    assert task.function_name == task._function
 
 
 if __name__ == "__main__":
