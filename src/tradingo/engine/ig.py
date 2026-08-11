@@ -146,7 +146,14 @@ def cli_app() -> argparse.ArgumentParser:
 
 
 def get_currency(instrument: pd.Series) -> str:
-    name = str(instrument.name)
+    currencies = instrument.get("instrument.currencies")
+    if isinstance(currencies, list) and currencies:
+        default = next((c for c in currencies if c.get("isDefault")), currencies[0])
+        code = default.get("code")
+        if code:
+            return str(code)
+
+    name = str(instrument.get("instrument.name", ""))
     if "$" in name:
         return "USD"
     elif "£" in name:

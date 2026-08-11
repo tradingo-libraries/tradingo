@@ -204,6 +204,10 @@ def point_in_time_position(positions: pd.DataFrame) -> pd.DataFrame:
     return positions.iloc[-1:,]
 
 
+def rename_columns(positions: pd.DataFrame, mapping: dict[str, str]) -> pd.DataFrame:
+    return positions.rename(columns=mapping)
+
+
 def apply_dealing_rules(
     positions: pd.DataFrame,
     instruments: pd.DataFrame,
