@@ -36,6 +36,7 @@ def get_ig_service(
     password: str | None = None,
     api_key: str | None = None,
     acc_type: str | None = None,
+    acc_number: str | None = None,
 ) -> IGService:
     config = IGTradingConfig.from_env()
 
@@ -49,6 +50,7 @@ def get_ig_service(
         password=password or config.password,
         api_key=api_key or config.api_key,
         acc_type=acc_type or config.acc_type,
+        acc_number=acc_number or config.acc_number,
         use_rate_limiter=True,
         retryer=retryer,
     )
