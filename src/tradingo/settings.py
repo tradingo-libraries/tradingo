@@ -4,6 +4,7 @@ import dataclasses
 import json
 import os
 import pathlib
+import types
 import typing
 import warnings
 from importlib import import_module
@@ -39,6 +40,17 @@ def get_cls(
     if isinstance(cls, str):
         module, name = cls.rsplit(".", maxsplit=1)
         cls = getattr(import_module(module), name)
+
+    origin = typing.get_origin(cls)
+    if origin is typing.Union or origin is types.UnionType:
+        args = typing.get_args(cls)
+        non_none = [a for a in args if a is not type(None)]
+        if len(args) != 2 or len(non_none) != 1:
+            raise EnvProviderError(
+                f"Unhandled union type '{cls}': only Optional[...] unions are supported"
+            )
+        return get_cls(non_none[0])
+
     if cls is int:
         return int
     if cls is float:
@@ -185,7 +197,6 @@ class EnvProvider:
         override_default_env: bool = True,
         raise_unused: bool = False,
     ) -> Self:
-
         try:
             app_prefix = app_prefix or getattr(cls, "app_prefix")
         except AttributeError as ex:
@@ -245,6 +256,7 @@ class IGTradingConfig(EnvProvider):
     username: str
     api_key: str
     acc_type: str
+    acc_number: str | None = None
     app_prefix = "IG_SERVICE"
 
 
