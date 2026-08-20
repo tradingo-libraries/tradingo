@@ -25,19 +25,25 @@ def close_position(
     position: pd.Series,
     svc: IGService,
     size: int | float | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     direction = "BUY" if position.direction == "SELL" else "SELL"
 
-    result = svc.close_open_position(
-        deal_id=deal_id,
-        direction=direction,
-        epic=None,
-        expiry=None,
-        level=None,
-        order_type="MARKET",
-        size=size or abs(position["size"]),
-        quote_id=None,
-    )
+    try:
+        result = svc.close_open_position(
+            deal_id=deal_id,
+            direction=direction,
+            epic=None,
+            expiry=None,
+            level=None,
+            order_type="MARKET",
+            size=size or abs(position["size"]),
+            quote_id=None,
+        )
+    except Exception as ex:
+        if ex.args[0] == "error.confirms.deal-not-found":
+            logger.warning(f"Deal {deal_id=} not found to cancel.")
+            return None
+        raise ex
 
     logger.info(result)
     return dict(result)
@@ -51,7 +57,8 @@ def close_all_open_position(
 
     for deal_id, position in epic_positions.iterrows():
         result = close_position(deal_id=deal_id, position=position, svc=svc)
-        actions.append(result)
+        if result is not None:
+            actions.append(result)
 
     return actions
 
@@ -115,9 +122,9 @@ def reduce_open_positions(
             svc=service,
             size=to_cancel,
         )
-        actions.append(result)
-
-        quantity_cxd += to_cancel
+        if result is not None:
+            actions.append(result)
+            quantity_cxd += to_cancel
 
         if quantity_cxd >= quantity:
             break
@@ -139,7 +146,14 @@ def cli_app() -> argparse.ArgumentParser:
 
 
 def get_currency(instrument: pd.Series) -> str:
-    name = str(instrument.name)
+    currencies = instrument.get("instrument.currencies")
+    if isinstance(currencies, list) and currencies:
+        default = next((c for c in currencies if c.get("isDefault")), currencies[0])
+        code = default.get("code")
+        if code:
+            return str(code)
+
+    name = str(instrument.get("instrument.name", ""))
     if "$" in name:
         return "USD"
     elif "£" in name:

@@ -1,14 +1,12 @@
-# 1. universe_name: descriptive name of the universe
-# 2. epics: list of symbols (epics in IG parlance)
-# 3. interval the minute interval
 # 4. samplingFunction: the fully qualified name of the sampling function
-# 5. data_interval_end: end date for sampling
-# 6. data_interval_start: start date for sampling interval
+# 5. data_interval_start: start date for sampling
+# 6. data_interval_end: end date for sampling
+# 7. raw_prices_lib: ArcticDB library for raw prices
 "download.{{ universe_name }}":
   depends_on: []
-  function: tradingo.sampling.instruments.download_instruments
+  function: tradingo.sampling.dukascopy.get_instruments
   symbols_out:
-     - "instruments/{{ universe_name }}"
+    - "instruments/{{ universe_name }}"
   publish_args:
     write_pickle: true
   params:
@@ -19,14 +17,14 @@
 "sample.{{ epic }}":
   depends_on: []
   symbols_out:
-   - "{{ raw_prices_lib }}/{{ epic }}.bid"
-   - "{{ raw_prices_lib }}/{{ epic }}.ask"
+    - "{{ raw_prices_lib }}/{{ epic }}.bid"
+    - "{{ raw_prices_lib }}/{{ epic }}.ask"
   function: "{{ samplingFunction }}"
   params:
     epic: "{{ epic }}"
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
-    interval: "{{ interval }}"
+    interval: "{{ interval.upper() }}"
   publish_args:
     astype: float
 #{% endfor %}
@@ -37,8 +35,9 @@
     pricelib: "{{ raw_prices_lib }}"
     start_date: "{{ data_interval_start }}"
     end_date: "{{ data_interval_end }}"
+    permit_missing: "{{ permit_missing }}"
   depends_on:
-  #{%for epic in epics %}
+    #{%for epic in epics %}
     - "sample.{{ epic }}"
   #{% endfor %}
   symbols_in:
@@ -48,8 +47,8 @@
   publish_args:
     astype: float
   symbols_out:
-  #{% for field in ["bid", "ask", "mid"] %}
-  #{% for occurence in ["open", "high", "low", "close"] %}
-  - prices/{{ universe_name }}.{{ field }}.{{ occurence }}
+    #{% for field in ["bid", "ask", "mid"] %}
+    #{% for occurence in ["open", "high", "low", "close"] %}
+    - "prices_{{ interval }}/{{ universe_name }}.{{ field }}.{{ occurence }}"
   #{% endfor %}
   #{% endfor %}

@@ -98,7 +98,7 @@ class Symbol(NamedTuple):
             symbol = base.format(**string_kwargs)
             parsed_symbol = urlparse(symbol)
             try:
-                lib, sym = parsed_symbol.path.split("/")
+                lib, sym = parsed_symbol.path.split("/", maxsplit=1)
             except ValueError as ex:
                 raise SymbolParseError(f"symbol {symbol} is invalid.") from ex
             kwargs = dict(parse_qsl(parsed_symbol.query))
@@ -118,6 +118,8 @@ class Symbol(NamedTuple):
                     continue
             if key == "columns":
                 kwargs[key] = list(kwargs[key].split(","))
+            if key in ("metadata", "optional"):
+                kwargs[key] = str(value).lower() in ("true", "1")
 
         return cls(lib, symbol_prefix + sym + symbol_postfix, kwargs)
 
@@ -234,7 +236,7 @@ def symbol_provider(
             def get_symbol_data(
                 v: str | list[str] | dict[str, str],
                 with_no_date: bool = False,
-            ) -> pd.DataFrame | dict[str, pd.DataFrame] | None:
+            ) -> pd.DataFrame | dict[str, Any] | None:
                 if isinstance(v, dict):
                     return {
                         key: get_symbol_data(item, with_no_date=with_no_date)
@@ -262,26 +264,28 @@ def symbol_provider(
                     symbol_prefix=symbol_prefix,
                     symbol_postfix=symbol_postfix,
                 )
+                read_kwargs = dict(symbol.kwargs)
+                return_metadata = bool(read_kwargs.pop("metadata", False))
+                is_optional = bool(read_kwargs.pop("optional", False))
                 try:
-                    data = (
-                        arctic.get_library(
-                            symbol.library,
-                            create_if_missing=True,
-                        )
-                        .read(
-                            symbol.symbol,
-                            date_range=(
-                                None
-                                if with_no_date
-                                else (
-                                    pd.Timestamp(start_date) if start_date else None,
-                                    pd.Timestamp(end_date) if end_date else None,
-                                )
-                            ),
-                            **symbol.kwargs,
-                        )
-                        .data
+                    item = arctic.get_library(
+                        symbol.library,
+                        create_if_missing=True,
+                    ).read(
+                        symbol.symbol,
+                        date_range=(
+                            None
+                            if (with_no_date or return_metadata)
+                            else (
+                                pd.Timestamp(start_date) if start_date else None,
+                                pd.Timestamp(end_date) if end_date else None,
+                            )
+                        ),
+                        **read_kwargs,
                     )
+                    if return_metadata:
+                        return item.metadata  # type: ignore[no-any-return]
+                    data = item.data
                     assert isinstance(data, pd.DataFrame)
                     if (
                         not with_no_date
@@ -293,12 +297,13 @@ def symbol_provider(
                 except InternalException as ex:
                     if (
                         "The data for this symbol is pickled" in ex.args[0]
+                        or "Cannot apply date range filter to symbol" in ex.args[0]
                         or "on pickled data" in ex.args[0]
                     ):
                         return get_symbol_data(v, with_no_date=True)
                     raise ex
                 except NoSuchVersionException as ex:
-                    if not raise_if_missing:
+                    if not raise_if_missing or is_optional:
                         return None
                     raise ex
 
@@ -336,7 +341,7 @@ def symbol_provider(
 
 def _envoke_symbology_function(
     function: Callable[..., ROpt],
-    arctic: adb.Arctic,
+    arctic: adb.Arctic | None,
     *args: object,
     **kwargs: object,
 ) -> ROpt:
@@ -350,6 +355,12 @@ def _envoke_symbology_function(
         kwargs.setdefault("end_date", kwargs.get("end_date", None))
     else:
         kwargs.pop("end_date", None)
+
+    # Envelope behaviour params: only forward if explicitly declared
+    for param in ("clean", "dry_run", "snapshot"):
+        if param not in sig.parameters:
+            kwargs.pop(param, None)
+
     if "arctic" in sig.parameters:
         kwargs.setdefault("arctic", arctic)
     else:
@@ -362,10 +373,10 @@ class PublishedFunction(Protocol[P, Ret]):
 
     def __call__(
         self,
-        arctic: adb.Arctic,
+        arctic: adb.Arctic | None = None,
         dry_run: bool = True,
         snapshot: str | None = None,
-        clean: bool = False,
+        clean: bool | None = None,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> pd.DataFrame | None: ...
@@ -379,15 +390,16 @@ def symbol_publisher(
     template: str | None = None,
     library_options: adb.LibraryOptions | None = None,
     write_pickle: bool = False,
+    metadata: dict[str, Any] | None = None,
 ) -> Callable[[Callable[P, R]], PublishedFunction[P, R]]:
     def decorator(
         func: Callable[P, R],
     ) -> PublishedFunction[P, R]:
         def wrapper(
-            arctic: adb.Arctic,
+            arctic: adb.Arctic | None = None,
             dry_run: bool = True,
             snapshot: str | None = None,
-            clean: bool = False,
+            clean: bool | None = None,
             *args: P.args,
             **kwargs: P.kwargs,
         ) -> pd.DataFrame | None:
@@ -399,6 +411,9 @@ def symbol_publisher(
                     arctic,
                     start_date=kwargs.pop("start_date", None),
                     end_date=kwargs.pop("end_date", None),
+                    clean=clean,
+                    dry_run=dry_run,
+                    snapshot=snapshot,
                     **kwargs,
                 )
             )
@@ -410,10 +425,23 @@ def symbol_publisher(
             if not symbols and not template:
                 return out  # type: ignore[return-value]
 
+            assert arctic is not None, "arctic must be provided when publishing symbols"
             # Publishing implies the function produced data.
             assert out is not None
+
+            # Extract dynamic metadata from trailing dict in return tuple.
+            dynamic_metadata: dict[str, Any] = {}
+            if isinstance(out, (tuple, list)) and out and isinstance(out[-1], dict):
+                *_frames, dynamic_metadata = out
+                out = tuple(_frames)
+
             if not isinstance(out, (tuple, list)):
                 out = (out,)
+
+            write_metadata: dict[str, Any] | None = {
+                **(metadata or {}),
+                **dynamic_metadata,
+            } or None
 
             logger.info("Publishing %s to %s", symbols or template, arctic)
 
@@ -463,13 +491,24 @@ def symbol_publisher(
                             data,
                             upsert=True,
                             date_range=(data.index[0], data.index[-1]),
+                            metadata=write_metadata,
                             **params,
                         )
                     elif write_pickle:
-                        result = lib.write_pickle(sym, data, **params)
+                        result = lib.write_pickle(
+                            sym,
+                            data,
+                            metadata=write_metadata,
+                            **params,
+                        )
 
                     else:
-                        result = lib.write(sym, data, **params)
+                        result = lib.write(
+                            sym,
+                            data,
+                            metadata=write_metadata,
+                            **params,
+                        )
 
                     libraries[lib.name][result.symbol] = result.version
 

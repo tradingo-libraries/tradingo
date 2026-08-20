@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from typing import Any
 
@@ -23,6 +24,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 from dash import Dash, Input, Output, callback, dash_table, dcc, html
+
+logger = logging.getLogger(__name__)
 
 # -- Backtest schema (mirrors tradingo.backtest.BACKTEST_FIELDS) --
 
@@ -352,7 +355,16 @@ app.layout = dbc.Container(
                     [
                         dbc.Col(dcc.Loading(dcc.Graph(id="positions-net")), lg=6),
                         dbc.Col(dcc.Loading(dcc.Graph(id="positions-exposure")), lg=6),
-                    ]
+                    ],
+                    className="mb-3",
+                ),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            dcc.Loading(dcc.Graph(id="positions-unrealised-pnl")), lg=6
+                        ),
+                        dbc.Col(dcc.Loading(dcc.Graph(id="positions-total-pnl")), lg=6),
+                    ],
                 ),
             ],
         ),
@@ -474,6 +486,7 @@ def update_session(portfolio: str | None, tab: str, session_date: str | None) ->
     try:
         pf = read_portfolio(portfolio, date_range=(start, end))
     except Exception:
+        logger.exception("Failed to read portfolio %s", portfolio)
         return no_data
     if pf.empty:
         return no_data
@@ -540,6 +553,7 @@ def update_session(portfolio: str | None, tab: str, session_date: str | None) ->
             margin=dict(t=40, b=40, l=120),
         )
     except Exception:
+        logger.exception("Failed to read instrument data for %s", portfolio)
         fig_bar = empty_fig("No instrument data")
 
     # Exposure
@@ -558,6 +572,7 @@ def update_session(portfolio: str | None, tab: str, session_date: str | None) ->
         fig_pos = positions.ffill().plot(title="Positions")
         fig_pos.update_layout(height=350, margin=dict(t=40, b=40))
     except Exception:
+        logger.exception("Failed to read position data for %s", portfolio)
         fig_pos = empty_fig("No position data")
 
     return kpis, fig_pnl, fig_bar, fig_exp, fig_pos
@@ -601,6 +616,7 @@ def update_history(
     try:
         pf = read_portfolio(portfolio, date_range=(start, end))
     except Exception:
+        logger.exception("Failed to read portfolio %s", portfolio)
         return no_data
     if pf.empty:
         return no_data
@@ -689,7 +705,7 @@ def update_history(
                         )
                     )
         except Exception:
-            pass  # live data unavailable
+            logger.warning("Failed to fetch live positions", exc_info=True)
 
     # Performance stats
     stat = compute_daily_stats(pf)
@@ -711,6 +727,8 @@ def update_history(
     Output("positions-table-wrapper", "children"),
     Output("positions-net", "figure"),
     Output("positions-exposure", "figure"),
+    Output("positions-unrealised-pnl", "figure"),
+    Output("positions-total-pnl", "figure"),
     Input("portfolio-select", "value"),
     Input("tabs", "active_tab"),
     Input("live-toggle", "value"),
@@ -721,7 +739,13 @@ def update_positions(portfolio: str | None, tab: str, live: bool) -> tuple:
 
     end = pd.Timestamp.now("UTC")
     start = end - pd.offsets.BDay(5)
-    no_data: tuple = (html.P("No data"), empty_fig(), empty_fig())
+    no_data: tuple = (
+        html.P("No data"),
+        empty_fig(),
+        empty_fig(),
+        empty_fig(),
+        empty_fig(),
+    )
 
     try:
         positions = read_instrument(portfolio, "net_position", date_range=(start, end))
@@ -734,6 +758,7 @@ def update_positions(portfolio: str | None, tab: str, live: bool) -> tuple:
             portfolio, "avg_open_price", date_range=(start, end)
         )
     except Exception:
+        logger.exception("Failed to read instrument data for %s", portfolio)
         return no_data
 
     if positions.empty:
@@ -746,7 +771,7 @@ def update_positions(portfolio: str | None, tab: str, live: bool) -> tuple:
         try:
             live_net, live_raw = fetch_live_positions()
         except Exception:
-            pass  # live data unavailable - proceed without
+            logger.warning("Failed to fetch live positions", exc_info=True)
 
     # Current state table
     latest_pos = positions.ffill().iloc[-1]
@@ -860,10 +885,61 @@ def update_positions(portfolio: str | None, tab: str, live: bool) -> tuple:
     fig_exp = exposure.ffill().plot(title="Net Exposure (5d)")
     fig_exp.update_layout(height=350, margin=dict(t=40, b=40))
 
+    # Per-instrument unrealised PnL (live PnL)
+    active_cols = [c for c in positions.columns if c in bt_active | live_active]
+    unrealised_active = unrealised.ffill()[
+        [c for c in active_cols if c in unrealised.columns]
+    ]
+    if not unrealised_active.empty:
+        fig_unrealised = go.Figure()
+        for col in unrealised_active.columns:
+            fig_unrealised.add_trace(
+                go.Scatter(
+                    x=unrealised_active.index,
+                    y=unrealised_active[col],
+                    mode="lines",
+                    name=col,
+                )
+            )
+        fig_unrealised.update_layout(
+            title="Unrealised PnL per Position",
+            height=350,
+            margin=dict(t=40, b=40),
+            yaxis_title="PnL",
+        )
+    else:
+        fig_unrealised = empty_fig("No unrealised PnL data")
+
+    # Per-instrument total PnL (theoretical PnL)
+    total_pnl_active = total_pnl.ffill()[
+        [c for c in active_cols if c in total_pnl.columns]
+    ]
+    if not total_pnl_active.empty:
+        fig_total = go.Figure()
+        for col in total_pnl_active.columns:
+            fig_total.add_trace(
+                go.Scatter(
+                    x=total_pnl_active.index,
+                    y=total_pnl_active[col],
+                    mode="lines",
+                    name=col,
+                )
+            )
+        fig_total.update_layout(
+            title="Total PnL per Position",
+            height=350,
+            margin=dict(t=40, b=40),
+            yaxis_title="PnL",
+        )
+    else:
+        fig_total = empty_fig("No total PnL data")
+
     return (
         html.Div([html.H5("Open Positions"), table_content]),
         fig_pos,
         fig_exp,
+        fig_unrealised,
+        fig_total,
     )
 
 
@@ -918,6 +994,7 @@ def update_compare(
         pf_a = read_portfolio(portfolio_a, date_range=(start, end))
         pf_b = read_portfolio(portfolio_b, date_range=(start, end))
     except Exception:
+        logger.exception("Failed to read portfolios %s / %s", portfolio_a, portfolio_b)
         return no_data
     if pf_a.empty or pf_b.empty:
         return no_data
@@ -1009,7 +1086,18 @@ def main() -> int:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8050)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+    )
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=args.log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
 
     ARCTIC_URI = args.arctic_uri or os.environ.get("TP_ARCTIC_URI", "")
     if not ARCTIC_URI:
