@@ -136,7 +136,9 @@ class Task:
     ) -> None:
         """run this task. optinally run also dependency tasks"""
         if run_dependencies:
-            if isinstance(run_dependencies, int):
+            if isinstance(run_dependencies, int) and not isinstance(
+                run_dependencies, bool
+            ):
                 run_dependencies -= 1
             for dependency in self.dependencies:
                 if skip_deps and skip_deps.match(dependency.name):
