@@ -68,6 +68,9 @@ worker = [
 ib = [
   "ib_insync",
 ]
+databento = [
+  "databento",
+]
 
 
 [tool.setuptools.packages.find]
@@ -126,6 +129,10 @@ module = [
   "trading_ig.*",
   "dukascopy_python",
   "dukascopy_python.*",
+  "ib_insync",
+  "ib_insync.*",
+  "databento",
+  "databento.*",
   "Cython.*",
   "dash",
   "requests.exceptions",
