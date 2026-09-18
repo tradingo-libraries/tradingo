@@ -251,7 +251,7 @@ def apply_dealing_rules(
     return pd.DataFrame(result, index=positions.index, columns=positions.columns)
 
 
-@numba.jit(nopython=True)  # type: ignore
+@numba.jit(nopython=True)
 def _apply_min_deal_filter(
     rounded: npt.NDArray[np.float64],
     min_deals: npt.NDArray[np.float64],
