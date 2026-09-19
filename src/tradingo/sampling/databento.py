@@ -274,3 +274,21 @@ def create_universe(
         cast(pd.DataFrame, result["Close"]),
         cast(pd.DataFrame, result["Volume"]),
     )
+
+
+def igtrading_from_bars(
+    raw: pd.DataFrame,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Adapt Databento OHLCV bars into the bid/ask shape used by
+    prices_igtrading, to backfill epics that have no IG history yet.
+
+    Bid and ask are both set to the trade OHLC — Databento's ohlcv-* schemas
+    are trade prices, there is no quoted spread in this data.
+    """
+    bars = raw.loc[
+        pd.Timestamp(start_date) : pd.Timestamp(end_date),
+        ["Open", "High", "Low", "Close"],
+    ]
+    return bars, bars.copy()
