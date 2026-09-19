@@ -1,8 +1,9 @@
 """IG data accessors"""
 
 import logging
-from typing import Hashable, cast
+from typing import Generator, Hashable, TypeVar, cast
 
+import arcticdb as adb
 import dateutil.tz
 import numpy as np
 import pandas as pd
@@ -16,11 +17,26 @@ from tradingo.settings import IGTradingConfig
 logger = logging.getLogger(__name__)
 
 
+COLUMNS = pd.MultiIndex.from_tuples(
+    (
+        ("bid", "Open"),
+        ("bid", "High"),
+        ("bid", "Low"),
+        ("bid", "Close"),
+        ("ask", "Open"),
+        ("ask", "High"),
+        ("ask", "Low"),
+        ("ask", "Close"),
+    ),
+)
+
+
 def get_ig_service(
     username: str | None = None,
     password: str | None = None,
     api_key: str | None = None,
     acc_type: str | None = None,
+    acc_number: str | None = None,
 ) -> IGService:
     config = IGTradingConfig.from_env()
 
@@ -34,6 +50,7 @@ def get_ig_service(
         password=password or config.password,
         api_key=api_key or config.api_key,
         acc_type=acc_type or config.acc_type,
+        acc_number=acc_number or config.acc_number,
         use_rate_limiter=True,
         retryer=retryer,
     )
@@ -69,7 +86,6 @@ def sample_instrument(
             .tz_localize(dateutil.tz.tzlocal())
             .tz_convert("utc")
         )
-
     except Exception as ex:
         if ex.args and (
             ex.args[0] == "Historical price data not found"
@@ -78,18 +94,7 @@ def sample_instrument(
             logger.warning("Historical price data not found %s", epic)
             result = pd.DataFrame(
                 np.nan,
-                columns=pd.MultiIndex.from_tuples(
-                    (
-                        ("bid", "Open"),
-                        ("bid", "High"),
-                        ("bid", "Low"),
-                        ("bid", "Close"),
-                        ("ask", "Open"),
-                        ("ask", "High"),
-                        ("ask", "Low"),
-                        ("ask", "Close"),
-                    ),
-                ),
+                columns=COLUMNS,
                 index=pd.DatetimeIndex([], name="DateTime", tz="utc"),
             )
             # raise SkipException after return
@@ -105,12 +110,22 @@ def sample_instrument(
     )
 
 
+T = TypeVar("T")
+
+
+def batch(iterable: list[T], n: int = 1) -> Generator[list[T], None, None]:
+    length = len(iterable)
+    for ndx in range(0, length, n):
+        yield iterable[ndx : min(ndx + n, length)]
+
+
 @symbols.lib_provider(pricelib="{raw_price_lib}")  # pyright: ignore
 def create_universe(
     pricelib: Library,
     instruments: pd.DataFrame,
     end_date: pd.Timestamp,
     start_date: pd.Timestamp,
+    permit_missing: bool = False,
 ) -> tuple[
     pd.DataFrame,
     pd.DataFrame,
@@ -136,28 +151,45 @@ def create_universe(
     start_date = pd.Timestamp(start_date)
     end_date = pd.Timestamp(end_date)
 
-    def get_data(symbol: str) -> pd.DataFrame:
+    symbols_to_read = [(f"{s}.ask", f"{s}.bid") for s in instruments.index.to_list()]
+
+    data = pricelib.read_batch(
+        [
+            adb.ReadRequest(s, date_range=(start_date, end_date))
+            for li in symbols_to_read
+            for s in li
+        ]
+    )
+    assert isinstance(data, list)
+
+    data_ = batch(data, n=2)
+
+    def get_data(
+        data_pair: list[adb.VersionedItem | adb.DataError],
+    ) -> pd.DataFrame:
+        bid, ask = data_pair
+        if isinstance(bid, adb.DataError) or isinstance(ask, adb.DataError):
+            if not permit_missing:
+                raise ValueError(f"Missing data {bid=}, {ask=}")
+            return pd.DataFrame(
+                data=[],
+                index=pd.DatetimeIndex([], name="timestamp", tz="utc"),
+                columns=COLUMNS,
+            )
         return pd.concat(
             (
-                cast(
-                    pd.DataFrame,
-                    pricelib.read(
-                        f"{symbol}.bid", date_range=(start_date, end_date)
-                    ).data,
-                ),
-                cast(
-                    pd.DataFrame,
-                    pricelib.read(
-                        f"{symbol}.ask", date_range=(start_date, end_date)
-                    ).data,
-                ),
+                cast(pd.DataFrame, bid.data),
+                cast(pd.DataFrame, ask.data),
             ),
             axis=1,
-            keys=("bid", "ask"),
+            keys=(
+                bid.symbol.rsplit(".", maxsplit=1)[-1],
+                ask.symbol.rsplit(".", maxsplit=1)[-1],
+            ),
         )
 
     result = pd.concat(
-        ((get_data(symbol) for symbol in instruments.index.to_list())),
+        ((get_data(symbol) for symbol in data_)),
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)

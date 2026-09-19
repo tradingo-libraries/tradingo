@@ -87,6 +87,10 @@ def backtest(
         inst_dividends = (
             dividends[inst_trades.name].reindex(mid_close.index).fillna(0.0)
         )
+        if inst_mids.empty:
+            return pd.DataFrame(
+                index=inst_mids.index, columns=BACKTEST_FIELDS, data=0
+            ).astype("float32")
 
         return pd.DataFrame(
             data=_backtest.compute_backtest(

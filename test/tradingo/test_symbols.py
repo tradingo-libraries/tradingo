@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -150,6 +150,31 @@ def test_symbol_parse_with_query_params() -> None:
 def test_symbol_parse_with_as_of() -> None:
     symbol = Symbol.parse("my-lib/symbol?as_of=123", {})
     assert symbol.kwargs == {"as_of": 123}
+
+
+def test_symbol_parse_with_metadata_true() -> None:
+    symbol = Symbol.parse("my-lib/symbol?metadata=true", {})
+    assert symbol.kwargs == {"metadata": True}
+
+
+def test_symbol_parse_with_metadata_false() -> None:
+    symbol = Symbol.parse("my-lib/symbol?metadata=false", {})
+    assert symbol.kwargs == {"metadata": False}
+
+
+def test_symbol_parse_with_negative_as_of() -> None:
+    symbol = Symbol.parse("my-lib/symbol?as_of=-1", {})
+    assert symbol.kwargs == {"as_of": -1}
+
+
+def test_symbol_parse_with_optional_true() -> None:
+    symbol = Symbol.parse("my-lib/symbol?optional=true", {})
+    assert symbol.kwargs == {"optional": True}
+
+
+def test_symbol_parse_with_optional_false() -> None:
+    symbol = Symbol.parse("my-lib/symbol?optional=false", {})
+    assert symbol.kwargs == {"optional": False}
 
 
 def test_symbol_parse_missing_param_raises() -> None:
@@ -307,6 +332,39 @@ def test_symbol_provider_passes_dates_to_function(arctic: Arctic) -> None:
     assert result[2] == end
 
 
+def test_symbol_provider_metadata_query_param(arctic: Arctic) -> None:
+    lib = arctic.get_library(name="my-lib", create_if_missing=True)
+    data = pd.DataFrame(
+        {"A": [1.0]},
+        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+    )
+    lib.write("meta-sym", data, metadata={"run": 1, "reasoning": "bullish"})
+
+    @symbol_provider(prev_meta="my-lib/meta-sym?metadata=true")  # type: ignore[type-var]
+    def provider(prev_meta: dict[str, Any]) -> dict[str, Any]:
+        return prev_meta
+
+    result = provider(arctic=arctic)  # type: ignore[call-arg]
+    assert result == {"run": 1, "reasoning": "bullish"}
+
+
+def test_symbol_provider_metadata_with_as_of(arctic: Arctic) -> None:
+    lib = arctic.get_library(name="my-lib", create_if_missing=True)
+    data = pd.DataFrame(
+        {"A": [1.0]},
+        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+    )
+    lib.write("versioned-meta", data, metadata={"run": 1})
+    lib.write("versioned-meta", data, metadata={"run": 2})
+
+    @symbol_provider(prev_meta="my-lib/versioned-meta?as_of=0&metadata=true")  # type: ignore[type-var]
+    def provider(prev_meta: dict[str, Any]) -> dict[str, Any]:
+        return prev_meta
+
+    result = provider(arctic=arctic)  # type: ignore[call-arg]
+    assert result == {"run": 1}
+
+
 def test_symbol_provider_with_columns_query_param(arctic: Arctic) -> None:
     lib = arctic.get_library(name="my-lib", create_if_missing=True)
     data = pd.DataFrame(
@@ -321,6 +379,45 @@ def test_symbol_provider_with_columns_query_param(arctic: Arctic) -> None:
 
     result = provider(arctic=arctic)  # type: ignore
     assert list(result.columns) == ["A", "B"]
+
+
+def test_symbol_provider_optional_returns_none_when_missing(arctic: Arctic) -> None:
+    @symbol_provider(prev_positions="my-lib/nonexistent?optional=true")  # type: ignore[type-var]
+    def provider(prev_positions: pd.DataFrame | None = None) -> pd.DataFrame | None:
+        return prev_positions
+
+    result = provider(arctic=arctic)
+    assert result is None
+
+
+def test_symbol_provider_optional_returns_data_when_present(arctic: Arctic) -> None:
+    lib = arctic.get_library("my-lib", create_if_missing=True)
+    data = pd.DataFrame(
+        {"A": [1.0]},
+        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+    )
+    lib.write("optional-sym", data)
+
+    @symbol_provider(input_1="my-lib/optional-sym?optional=true")  # type: ignore[type-var]
+    def provider(input_1: pd.DataFrame | None = None) -> pd.DataFrame | None:
+        return input_1
+
+    result = provider(arctic=arctic)
+    assert result is not None
+    pd.testing.assert_frame_equal(result, data, check_freq=False)
+
+
+def test_symbol_provider_optional_with_metadata_returns_none_when_missing(
+    arctic: Arctic,
+) -> None:
+    """Mirrors the agent.yaml first-run case: ?as_of=-1&metadata=true&optional=true."""
+
+    @symbol_provider(prev_meta="my-lib/nonexistent?as_of=-1&metadata=true&optional=true")  # type: ignore[type-var]
+    def provider(prev_meta: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        return prev_meta
+
+    result = provider(arctic=arctic)
+    assert result is None
 
 
 # =============================================================================
@@ -520,6 +617,50 @@ def test_symbol_publisher_skips_empty_dataframe(arctic: Arctic) -> None:
     publisher(arctic=arctic, dry_run=False)
     lib = arctic.get_library("my-lib", create_if_missing=True)
     assert "empty-symbol" not in lib.list_symbols()
+
+
+def test_symbol_publisher_dynamic_metadata(arctic: Arctic) -> None:
+    @symbol_publisher("my-lib/meta-symbol")  # type: ignore[type-var]
+    def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
+        df = pd.DataFrame(
+            {"A": [1.0]},
+            index=pd.date_range("2026-01-01", periods=1),
+        )
+        return df, {"reasoning": "bullish", "tokens_in": 100}
+
+    publisher(arctic=arctic, dry_run=False)
+    item = arctic.get_library("my-lib").read("meta-symbol")
+    assert item.metadata == {"reasoning": "bullish", "tokens_in": 100}
+
+
+def test_symbol_publisher_dynamic_metadata_merges_static(arctic: Arctic) -> None:
+    @symbol_publisher("my-lib/merge-meta", metadata={"static_key": "static_val"})  # type: ignore[type-var]
+    def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
+        df = pd.DataFrame(
+            {"A": [1.0]},
+            index=pd.date_range("2026-01-01", periods=1),
+        )
+        return df, {"dynamic_key": "dynamic_val"}
+
+    publisher(arctic=arctic, dry_run=False)
+    item = arctic.get_library("my-lib").read("merge-meta")
+    assert item.metadata == {"static_key": "static_val", "dynamic_key": "dynamic_val"}
+
+
+def test_symbol_publisher_dynamic_metadata_dry_run_excludes_dict(
+    arctic: Arctic,
+) -> None:
+    @symbol_publisher("my-lib/dry-meta")  # type: ignore[type-var]
+    def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
+        df = pd.DataFrame(
+            {"A": [1.0]},
+            index=pd.date_range("2026-01-01", periods=1),
+        )
+        return df, {"reasoning": "test"}
+
+    result = publisher(arctic=arctic, dry_run=True)
+    assert isinstance(result, pd.DataFrame)
+    assert ("my-lib/dry-meta", "A") in result.columns
 
 
 def test_symbol_publisher_rejects_positional_args(arctic: Arctic) -> None:

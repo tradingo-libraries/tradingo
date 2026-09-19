@@ -207,24 +207,43 @@ class TestReduceOpenPositions:
 class TestGetCurrency:
     """Tests for get_currency function."""
 
+    def test_currencies_field_default(self) -> None:
+        """Test structured instrument.currencies field takes priority, using the isDefault entry."""
+        instrument = pd.Series(
+            {
+                "instrument.currencies": [
+                    {"code": "GBP", "isDefault": False},
+                    {"code": "USD", "isDefault": True},
+                ]
+            }
+        )
+        assert get_currency(instrument) == "USD"
+
+    def test_currencies_field_single(self) -> None:
+        """Test structured instrument.currencies field with a single entry."""
+        instrument = pd.Series(
+            {"instrument.currencies": [{"code": "USD", "isDefault": False}]}
+        )
+        assert get_currency(instrument) == "USD"
+
     def test_usd_currency(self) -> None:
-        """Test USD currency detection."""
-        instrument = pd.Series(name="Test $ Asset")
+        """Test USD currency detection falls back to instrument.name symbol."""
+        instrument = pd.Series({"instrument.name": "Test $ Asset"})
         assert get_currency(instrument) == "USD"
 
     def test_gbp_currency(self) -> None:
-        """Test GBP currency detection."""
-        instrument = pd.Series(name="Test £ Asset")
+        """Test GBP currency detection falls back to instrument.name symbol."""
+        instrument = pd.Series({"instrument.name": "Test £ Asset"})
         assert get_currency(instrument) == "GBP"
 
     def test_eur_currency(self) -> None:
-        """Test EUR currency detection."""
-        instrument = pd.Series(name="Test € Asset")
+        """Test EUR currency detection falls back to instrument.name symbol."""
+        instrument = pd.Series({"instrument.name": "Test € Asset"})
         assert get_currency(instrument) == "EUR"
 
     def test_default_gbp(self) -> None:
-        """Test default to GBP when no currency symbol found."""
-        instrument = pd.Series(name="Test Asset")
+        """Test default to GBP when no currency symbol or currencies field found."""
+        instrument = pd.Series({"instrument.name": "Test Asset"})
         assert get_currency(instrument) == "GBP"
 
 
