@@ -10,15 +10,6 @@ from tradingo.sampling.ig import get_ig_service
 
 logger = logging.getLogger(__name__)
 
-# IG rejects sizes with more decimal places than it supports
-# (validation.number.too-many-decimal-places.request.size), and float
-# arithmetic on sizes produces values like 14.120000000000001.
-SIZE_DECIMALS = 2
-
-
-def _round_size(size: float) -> float:
-    return round(float(size), SIZE_DECIMALS)
-
 
 def _get_latest_or_none(value: pd.Series | None) -> float | None:
     if value is None:
@@ -45,7 +36,7 @@ def close_position(
             expiry=None,
             level=None,
             order_type="MARKET",
-            size=_round_size(size or abs(position["size"])),
+            size=size or abs(position["size"]),
             quote_id=None,
         )
     except Exception as ex:
@@ -112,7 +103,7 @@ def update_open_positions(
 def reduce_open_positions(
     service: IGService,
     epic: str,
-    quantity: float,
+    quantity: int,
     current_position: pd.DataFrame,
 ) -> list[dict[str, Any]]:
     positions = current_position.loc[epic]
@@ -123,7 +114,7 @@ def reduce_open_positions(
     for deal_id, position in (
         cast(pd.DataFrame, positions).sort_values("size").iterrows()
     ):
-        to_cancel = _round_size(min(position["size"], quantity - quantity_cxd))
+        to_cancel = min(position["size"], quantity - quantity_cxd)
 
         result = close_position(
             deal_id=deal_id,
@@ -175,7 +166,7 @@ def get_currency(instrument: pd.Series) -> str:
 def adjust_position_sizes(
     instruments: pd.DataFrame,
     target_positions: pd.DataFrame,
-    stop_levels: pd.DataFrame | None = None,
+    stop_levels: pd.DataFrame | None,
     service: IGService | None = None,
     current_positions: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
@@ -218,7 +209,7 @@ def adjust_position_sizes(
 
         # increasing position
         if abs(current_position) < abs(latest_target):
-            target = _round_size(abs(latest_target) - abs(current_position))
+            target = abs(latest_target) - abs(current_position)
             side = "BUY" if latest_target > 0 else "SELL"
 
             logger.info(
@@ -256,7 +247,7 @@ def adjust_position_sizes(
             actions.append(dict(result))
 
         elif abs(current_position) > abs(latest_target):
-            reduce_by = _round_size(abs(current_position - latest_target))
+            reduce_by = abs(current_position - latest_target)
 
             logger.info(
                 "Reducing open positions by %s from %s to %s for %s",
