@@ -1083,6 +1083,24 @@ class TestApplyDealingRules:
         )
         pd.testing.assert_frame_equal(result, expected)
 
+    def test_apply_dealing_rules_strips_float_noise(self) -> None:
+        """Lot multiples are exact to the lot size's decimal places."""
+
+        dates = pd.date_range("2024-01-01", periods=2)
+        positions = pd.DataFrame({"SOXX": [0.0, 14.1234]}, index=dates)
+        instruments = pd.DataFrame(
+            {
+                "instrument.lotSize": [0.01],
+                "dealingRules.minDealSize.value": [0.01],
+            },
+            index=pd.Index(["SOXX"], name="Symbol"),
+        )
+
+        result = apply_dealing_rules(positions, instruments)
+
+        # 1412 * 0.01 == 14.120000000000001 without rounding
+        assert repr(float(result["SOXX"].iloc[-1])) == "14.12"
+
     def test_apply_dealing_rules_missing_instruments(self) -> None:
         """Missing instruments default to lot_size=1, min_deal=0."""
 

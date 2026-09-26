@@ -13,6 +13,7 @@ from tradingo.sampling.yf import (
     _get_ticker,
     adjust_fx_series,
     convert_prices_to_ccy,
+    create_universe,
     currency_to_symbol,
     sample_equity,
     symbol_to_currency,
@@ -305,3 +306,42 @@ def test_missing_fx_ccy_raises() -> None:
     fx = {"close": pd.DataFrame({"USDGBP": 0.8}, index=IDX)}
     with pytest.raises(ValueError, match="miss currencies"):
         convert_prices_to_ccy(instruments, prices, fx, currency="GBP")
+
+
+# ---------------------------------------------------------------------------
+# create_universe
+# ---------------------------------------------------------------------------
+
+
+class _FakeLib:
+    def __init__(self, frames: dict[str, pd.DataFrame]) -> None:
+        self._frames = frames
+
+    def list_symbols(self) -> list[str]:
+        return list(self._frames)
+
+    def read(self, symbol: str, date_range: object = None) -> object:
+        class _Item:
+            data = self._frames[symbol]
+
+        return _Item()
+
+
+def _ohlcv(value: float) -> pd.DataFrame:
+    return pd.DataFrame(
+        {c: value for c in ("Open", "High", "Low", "Close", "Volume")}, index=IDX
+    )
+
+
+def test_create_universe_labels_survive_missing_symbol() -> None:
+    """A symbol absent from the library must not shift later labels."""
+    lib = _FakeLib({"AAA": _ohlcv(1.0), "CCC": _ohlcv(3.0)})
+    instruments = pd.DataFrame(index=pd.Index(["AAA", "BBB", "CCC"]))
+
+    _, _, _, close, _ = create_universe.__wrapped__(  # type: ignore[attr-defined]
+        lib, instruments, end_date=None, start_date=None
+    )
+
+    assert list(close.columns) == ["AAA", "CCC"]
+    assert (close["AAA"] == 1.0).all()
+    assert (close["CCC"] == 3.0).all()

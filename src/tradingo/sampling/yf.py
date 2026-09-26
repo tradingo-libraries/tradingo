@@ -99,6 +99,13 @@ def sample_equity(
     if not prices.index.tz:
         prices = prices.tz_localize("utc")
 
+    if "Volume" in prices.columns:
+        # yfinance returns Volume as int64 when the window has no missing
+        # values and float64 when it does (e.g. prepost gaps), which trips
+        # ArcticDB's strict dtype match on update() against already-stored
+        # data. Pin it to float64 so every fetch is schema-compatible.
+        prices["Volume"] = prices["Volume"].astype("float64")
+
     return cast(pd.DataFrame, prices.tz_convert("utc"))
 
 
@@ -143,16 +150,15 @@ def create_universe(
             missing_symbol,
         )
 
+    # keys must be built from the same filtered list as the frames, otherwise
+    # a missing symbol shifts every later label onto the wrong series.
+    present_symbols = [
+        symbol for symbol in instruments.index.to_list() if symbol in available_symbols
+    ]
     result = pd.concat(
-        (
-            (
-                get_data(symbol)
-                for symbol in instruments.index.to_list()
-                if symbol in available_symbols
-            )
-        ),
+        [get_data(symbol) for symbol in present_symbols],
         axis=1,
-        keys=instruments.index.to_list(),
+        keys=present_symbols,
     ).reorder_levels([1, 0], axis=1)
     return (
         cast(pd.DataFrame, result["Open"]),

@@ -1,5 +1,6 @@
 import logging
 import re
+from decimal import Decimal
 from typing import cast
 
 import numba
@@ -248,7 +249,20 @@ def apply_dealing_rules(
     # Apply min deal filter using numpy (vectorized across columns)
     result = _apply_min_deal_filter(rounded, min_deals)
 
+    # Strip float noise from lot multiplication (e.g. 1412 * 0.01 ->
+    # 14.120000000000001) which brokers reject as too many decimal places.
+    for i, decimals in enumerate(_lot_size_decimals(lot_sizes)):
+        result[:, i] = np.round(result[:, i], decimals)
+
     return pd.DataFrame(result, index=positions.index, columns=positions.columns)
+
+
+def _lot_size_decimals(lot_sizes: npt.NDArray[np.float64]) -> list[int]:
+    """Number of decimal places needed to represent each lot size exactly."""
+    return [
+        max(0, -int(Decimal(repr(float(lot))).normalize().as_tuple().exponent))
+        for lot in lot_sizes
+    ]
 
 
 @numba.jit(nopython=True)
