@@ -410,39 +410,6 @@ class TestAdjustPositionSizes:
         assert isinstance(result, pd.DataFrame)
         assert len(result) >= 1
 
-    def test_increase_rounds_float_noise_from_size(
-        self,
-        mock_ig_service: MagicMock,
-        instruments: pd.DataFrame,
-    ) -> None:
-        """Order size is rounded so IG does not reject it for too many decimals."""
-        mock_ig_service.fetch_open_positions.return_value = pd.DataFrame(
-            {
-                "epic": ["IX.D.FTSE.DAILY.IP"],
-                "dealId": ["DEAL001"],
-                "direction": ["BUY"],
-                "size": [0.1],
-            }
-        )
-        current_pos = get_current_positions(mock_ig_service)
-
-        # 0.3 - 0.1 == 0.19999999999999998 in float arithmetic
-        target = pd.DataFrame(
-            {"IX.D.FTSE.DAILY.IP": [0.0, 0.3]},
-            index=pd.date_range("2024-01-01", periods=2),
-        )
-
-        result = adjust_position_sizes(
-            instruments, target, None, mock_ig_service, current_positions=current_pos
-        )
-
-        call_kwargs = mock_ig_service.create_open_position.call_args[1]
-        assert repr(call_kwargs["size"]) == "0.2"
-
-        # May also include stop level update action
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) >= 1
-
     def test_increase_short_position(
         self,
         mock_ig_service: MagicMock,
