@@ -184,6 +184,25 @@ class TestSampleIgPositions:
         assert len(deals) == 1  # deduplicated across halves
 
 
+def test_live_run_extends_to_now() -> None:
+    svc = MagicMock()
+    svc.fetch_open_positions.return_value = pd.DataFrame()
+    svc.fetch_account_activity.return_value = {"activities": []}
+    instruments = pd.DataFrame(index=pd.Index([NG], name="Symbol"))
+    end = pd.Timestamp.now("UTC") - pd.Timedelta("10min")
+    _, position, _ = sample_ig_positions(
+        instruments, end - pd.Timedelta("15min"), end, service=svc
+    )
+    assert position.index[-1] > end
+    _, backfill, _ = sample_ig_positions(
+        instruments,
+        end - pd.Timedelta("3D"),
+        end - pd.Timedelta("2D"),
+        service=svc,
+    )
+    assert backfill.index[-1] == end - pd.Timedelta("2D")
+
+
 def test_query_time_is_london_local() -> None:
     # BST: UTC 17:07 -> 18:07 London
     assert _ig_query_time(pd.Timestamp("2026-10-22T17:07:00Z")) == pd.Timestamp(

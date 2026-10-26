@@ -487,6 +487,7 @@ def sample_ig_positions(
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
     service: IGService | None = None,
+    live_extension: str = "1h",
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """DAG node: sample IG deals and aggregate them into live position symbols.
 
@@ -494,6 +495,12 @@ def sample_ig_positions(
     backtest/portfolio symbols for the same universe and keep a static schema.
     Note the IG account is shared: an epic traded by two strategies shows the
     account-level net position in both universes.
+
+    For live runs (``end_date`` within ``live_extension`` of now) the window is
+    extended to now, so deals placed by this run's trade task show up
+    immediately; the next run's window overwrites that tail. Backfills
+    (older ``end_date``) are never extended, so they cannot clobber history
+    written after them.
 
     :returns: ``(deals, position, avg_open_price)``
 
@@ -514,6 +521,9 @@ def sample_ig_positions(
     finally:
         if own_service:
             svc.session.close()
+
+    if live_extension and end < now <= end + pd.Timedelta(live_extension):
+        end = now
 
     deals = all_deals[all_deals["epic"].isin(epics)]
     position = deals_to_positions(deals, final_position, start, end)
