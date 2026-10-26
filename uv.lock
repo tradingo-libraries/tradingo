@@ -4740,10 +4740,6 @@ dev = [
 ib = [
     { name = "ib-insync" },
 ]
-monitor = [
-    { name = "dash" },
-    { name = "dash-bootstrap-components" },
-]
 research = [
     { name = "dtale" },
     { name = "jupyter" },
@@ -4799,10 +4795,6 @@ dev = [
     { name = "types-requests", specifier = ">=2.32.4.20260107" },
 ]
 ib = [{ name = "ib-insync" }]
-monitor = [
-    { name = "dash", specifier = ">=2.18.2" },
-    { name = "dash-bootstrap-components", specifier = ">=1.5.0" },
-]
 research = [
     { name = "dtale" },
     { name = "jupyter" },

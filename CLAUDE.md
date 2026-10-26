@@ -40,9 +40,6 @@ uv run tradingo-cli --config "<path/to/config.yaml>" task list
 # CLI — stop a running Celery execution plan
 uv run tradingo-cli --config "<path/to/config.yaml>" task stop <plan_key>
 
-# Monitor dashboard
-uv run tradingo-monitor
-
 # Trading execution (IB Gateway)
 uv run tradingo-engine-ib
 ```
@@ -75,6 +72,8 @@ uv run tradingo-engine-ib
 
 **`backtest.py`** — Cython-accelerated backtesting loop.
 
+**IG live trading** — `engine/ig.py:adjust_position_sizes` trades towards the latest target row. It skips NaN targets and non-`TRADEABLE` markets (logged as `SKIPPED` rows), deals `SHARES` instruments in whole units, refuses stale targets when `max_target_age` is set, and returns a UTC-indexed trade log so results append. `sampling/ig.py:sample_ig_positions` is the DAG node that samples IG deal activity and rebuilds `live/ig.position.<universe>` by anchoring to the current open-positions snapshot. IG activity query bounds are London local time; returned dates are UTC.
+
 ### Module Structure
 
 ```
@@ -92,7 +91,7 @@ src/tradingo/
 ├── plotting.py         # Visualisation utilities
 ├── utils.py            # Shared utilities
 ├── sampling/           # Data providers
-│   ├── ig.py           # IG Markets OHLCV sampling
+│   ├── ig.py           # IG Markets OHLCV sampling + deal/position sampling
 │   ├── yf.py           # Yahoo Finance sampling
 │   ├── dukascopy.py    # Dukascopy tick data sampling
 │   ├── ib.py           # Interactive Brokers sampling
@@ -112,9 +111,7 @@ src/tradingo/
     └── portfolio_construction.yaml
 ```
 
-```
-src/monitor/            # Plotly Dash portfolio dashboard (tradingo-monitor)
-```
+The monitor dashboard lives in the separate `tradingo-monitor` component.
 
 ### CLI Flags Reference
 
@@ -173,7 +170,6 @@ my.stage.name:                          # Stage: run tasks a, b, c in one proces
 uv sync                          # Core only
 uv sync --group dev              # + pytest, mypy, pre-commit
 uv sync --group worker           # + celery, redis
-uv sync --group monitor          # + dash, gunicorn
 uv sync --group serve            # + fastapi, croniter
 uv sync --group ib               # + ib_insync
 uv sync --group research         # + dtale, jupyter
@@ -181,4 +177,4 @@ uv sync --group research         # + dtale, jupyter
 
 ## Type Checking
 
-Project uses strict mypy. The `src/monitor/` directory is excluded. External libraries are allowlisted in `pyproject.toml`. Ignore Pyright diagnostics from the IDE — mypy is the authoritative checker.
+Project uses strict mypy. External libraries are allowlisted in `pyproject.toml`. Ignore Pyright diagnostics from the IDE — mypy is the authoritative checker.

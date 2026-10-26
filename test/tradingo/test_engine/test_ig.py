@@ -609,5 +609,167 @@ class TestAdjustPositionSizes:
         assert isinstance(result, pd.DataFrame)
 
 
+def _no_positions() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "epic": pd.Series([], dtype=str),
+            "dealId": pd.Series([], dtype=str),
+            "direction": pd.Series([], dtype=str),
+            "size": pd.Series([], dtype=float),
+        }
+    )
+
+
+def _market(epic: str, status: str) -> dict[str, Any]:
+    return {"instrument": {"epic": epic}, "snapshot": {"marketStatus": status}}
+
+
+class TestSafetyRails:
+    """Behaviour added after live rejections (market closed, fractional shares)."""
+
+    def test_empty_open_positions_frame(self, mock_ig_service: MagicMock) -> None:
+        mock_ig_service.fetch_open_positions.return_value = pd.DataFrame()
+        result = get_current_positions(mock_ig_service)
+        assert result.empty
+        assert list(result.index.names) == ["epic", "dealId"]
+
+    def test_nan_target_leaves_position_alone(
+        self, mock_ig_service: MagicMock, instruments: pd.DataFrame
+    ) -> None:
+        mock_ig_service.fetch_open_positions.return_value = pd.DataFrame(
+            {
+                "epic": ["IX.D.FTSE.DAILY.IP"],
+                "dealId": ["DEAL001"],
+                "direction": ["BUY"],
+                "size": [2.0],
+            }
+        )
+        target = pd.DataFrame(
+            {"IX.D.FTSE.DAILY.IP": [1.0, float("nan")]},
+            index=pd.date_range("2024-01-01", periods=2, tz="UTC"),
+        )
+        result = adjust_position_sizes(instruments, target, None, mock_ig_service)
+        mock_ig_service.close_open_position.assert_not_called()
+        mock_ig_service.create_open_position.assert_not_called()
+        assert result.empty
+
+    def test_skips_closed_market(
+        self, mock_ig_service: MagicMock, instruments: pd.DataFrame
+    ) -> None:
+        mock_ig_service.fetch_open_positions.return_value = _no_positions()
+        mock_ig_service.fetch_markets_by_epics.return_value = [
+            _market("IX.D.FTSE.DAILY.IP", "EDITS_ONLY"),
+            _market("IX.D.DOW.DAILY.IP", "TRADEABLE"),
+        ]
+        target = pd.DataFrame(
+            {"IX.D.FTSE.DAILY.IP": [0.0, 3.0], "IX.D.DOW.DAILY.IP": [0.0, 1.0]},
+            index=pd.date_range("2024-01-01", periods=2, tz="UTC"),
+        )
+        result = adjust_position_sizes(instruments, target, None, mock_ig_service)
+
+        mock_ig_service.create_open_position.assert_called_once()
+        assert (
+            mock_ig_service.create_open_position.call_args[1]["epic"]
+            == "IX.D.DOW.DAILY.IP"
+        )
+        skipped = result[result.dealStatus == "SKIPPED"]
+        assert skipped.epic.tolist() == ["IX.D.FTSE.DAILY.IP"]
+        assert skipped.reason.tolist() == ["MARKET_EDITS_ONLY"]
+
+    def test_shares_are_dealt_in_whole_units(self, mock_ig_service: MagicMock) -> None:
+        mock_ig_service.fetch_open_positions.return_value = _no_positions()
+        instruments = pd.DataFrame(
+            {
+                "instrument.expiry": ["-"],
+                "instrument.type": ["SHARES"],
+                "instrument.currencies": [[{"code": "USD", "isDefault": False}]],
+            },
+            index=pd.Index(["UC.D.QQQ.CASH.IP"], name="Symbol"),
+        )
+        target = pd.DataFrame(
+            {"UC.D.QQQ.CASH.IP": [0.0, 13.6]},
+            index=pd.date_range("2024-01-01", periods=2, tz="UTC"),
+        )
+        adjust_position_sizes(instruments, target, None, mock_ig_service)
+        kwargs = mock_ig_service.create_open_position.call_args[1]
+        assert kwargs["size"] == 14.0
+        assert kwargs["currency_code"] == "USD"
+
+    def test_stale_targets_do_not_trade(
+        self, mock_ig_service: MagicMock, instruments: pd.DataFrame
+    ) -> None:
+        target = pd.DataFrame(
+            {"IX.D.FTSE.DAILY.IP": [0.0, 3.0]},
+            index=pd.date_range("2024-01-01", periods=2, tz="UTC"),
+        )
+        result = adjust_position_sizes(
+            instruments, target, None, mock_ig_service, max_target_age="30min"
+        )
+        mock_ig_service.fetch_open_positions.assert_not_called()
+        mock_ig_service.create_open_position.assert_not_called()
+        assert result.empty
+
+    def test_reduce_short_uses_positive_close_size(
+        self, mock_ig_service: MagicMock, instruments: pd.DataFrame
+    ) -> None:
+        mock_ig_service.fetch_open_positions.return_value = pd.DataFrame(
+            {
+                "epic": ["IX.D.FTSE.DAILY.IP", "IX.D.FTSE.DAILY.IP"],
+                "dealId": ["DEAL001", "DEAL002"],
+                "direction": ["SELL", "SELL"],
+                "size": [2.0, 3.0],
+            }
+        )
+        target = pd.DataFrame(
+            {"IX.D.FTSE.DAILY.IP": [0.0, -1.0]},
+            index=pd.date_range("2024-01-01", periods=2, tz="UTC"),
+        )
+        adjust_position_sizes(instruments, target, None, mock_ig_service)
+        sizes = [
+            c[1]["size"] for c in mock_ig_service.close_open_position.call_args_list
+        ]
+        directions = [
+            c[1]["direction"]
+            for c in mock_ig_service.close_open_position.call_args_list
+        ]
+        assert sizes == [2.0, 2.0]
+        assert directions == ["BUY", "BUY"]
+
+    def test_stop_update_targets_existing_deals(
+        self, mock_ig_service: MagicMock, instruments: pd.DataFrame
+    ) -> None:
+        mock_ig_service.fetch_open_positions.return_value = pd.DataFrame(
+            {
+                "epic": ["IX.D.FTSE.DAILY.IP"],
+                "dealId": ["DEAL001"],
+                "direction": ["BUY"],
+                "size": [3.0],
+                "stopLevel": [90.0],
+            }
+        )
+        target = pd.DataFrame(
+            {"IX.D.FTSE.DAILY.IP": [0.0, 3.0]},
+            index=pd.date_range("2024-01-01", periods=2, tz="UTC"),
+        )
+        stops = pd.DataFrame({"IX.D.FTSE.DAILY.IP": [0.0, 95.0]}, index=target.index)
+        adjust_position_sizes(instruments, target, stops, mock_ig_service)
+        mock_ig_service.update_open_position.assert_called_once_with(
+            limit_level=None, stop_level=95.0, deal_id="DEAL001"
+        )
+
+    def test_trade_log_has_utc_datetime_index(
+        self, mock_ig_service: MagicMock, instruments: pd.DataFrame
+    ) -> None:
+        mock_ig_service.fetch_open_positions.return_value = _no_positions()
+        target = pd.DataFrame(
+            {"IX.D.FTSE.DAILY.IP": [0.0, 3.0]},
+            index=pd.date_range("2024-01-01", periods=2, tz="UTC"),
+        )
+        result = adjust_position_sizes(instruments, target, None, mock_ig_service)
+        assert isinstance(result.index, pd.DatetimeIndex)
+        assert str(result.index.tz) == "UTC"
+        assert "date" not in result.columns
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
