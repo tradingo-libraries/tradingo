@@ -2,6 +2,7 @@ import logging
 from typing import Optional, cast
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 from . import _backtest  # type: ignore
@@ -19,6 +20,9 @@ BACKTEST_FIELDS = (
     "avg_open_price",
     "stop_trade",
 )
+
+SUMMARY_PNL_FIELDS = ("net_investment", "realised_pnl", "total_pnl", "unrealised_pnl")
+SUMMARY_FIELDS = (*SUMMARY_PNL_FIELDS, "net_exposure", "gross_exposure")
 
 
 def backtest(
@@ -53,93 +57,89 @@ def backtest(
         .fillna(0.0)
     )
 
-    # portfolio = portfolio.reindex(mid_close.index, method="ffill").fillna(0.0)
     trades = portfolio.diff()
     trades.iloc[0] = portfolio.iloc[0]
+    del portfolio
 
-    if dividends is None:
-        dividends = pd.DataFrame(
-            0,
-            index=mid_close.index,
-            columns=mid_close.columns,
+    index = mid_close.index
+    columns = trades.columns
+    n_rows, n_cols = len(index), len(columns)
+
+    # each instrument is tracked from its first price onwards
+    valid = mid_close.notna().to_numpy()
+    starts = np.where(valid.any(axis=0), valid.argmax(axis=0), n_rows)
+    del valid
+    out_start = int(starts.min()) if n_cols else n_rows
+    out_index = index[out_start:]
+    n_out = len(out_index)
+
+    # Per-field outputs are filled one instrument at a time so no wide
+    # (instrument x field) frame is ever materialised.
+    # Fortran order => each instrument's column write is contiguous.
+    fields = {
+        f: np.full((n_out, n_cols), np.nan, dtype="float32", order="F")
+        for f in BACKTEST_FIELDS
+    }
+    totals = {k: np.zeros(n_out, dtype="float64") for k in SUMMARY_FIELDS}
+
+    def accumulate(
+        total: npt.NDArray[np.float64], offset: int, values: npt.NDArray[np.float64]
+    ) -> None:
+        filled = pd.Series(values).ffill().to_numpy()
+        total[offset:] += np.where(np.isnan(filled), 0.0, filled)
+
+    def optional(
+        frame: Optional[pd.DataFrame], name: object, idx: pd.Index, fill: float
+    ) -> npt.NDArray[np.float32]:
+        if frame is None:
+            return np.full(len(idx), fill, dtype="float32")
+        return frame[name].reindex(idx).fillna(fill).to_numpy(dtype="float32")
+
+    for j, name in enumerate(columns):
+        start = int(starts[j])
+        if start >= n_rows:
+            continue
+        logger.info("Computing backtest for ticker=%s", name)
+        inst_index = index[start:]
+        offset = start - out_start
+
+        result = _backtest.compute_backtest(
+            trades.iloc[start:, j].fillna(0.0).to_numpy(dtype="float32"),
+            bid_close.iloc[start:, j].to_numpy(dtype="float32"),
+            ask_close.iloc[start:, j].to_numpy(dtype="float32"),
+            optional(stop_limit, name, inst_index, np.nan),
+            optional(stop_loss, name, inst_index, np.nan),
+            optional(dividends, name, inst_index, 0.0),
         )
-    if stop_limit is None:
-        stop_limit = pd.DataFrame(
-            np.nan,
-            index=mid_close.index,
-            columns=mid_close.columns,
+
+        for k, f in enumerate(BACKTEST_FIELDS):
+            fields[f][offset:, j] = result[:, k]
+
+        position = result[:, BACKTEST_FIELDS.index("net_position")]
+        mids = mid_close.iloc[start:, j].to_numpy()
+        for f in SUMMARY_PNL_FIELDS:
+            accumulate(totals[f], offset, result[:, BACKTEST_FIELDS.index(f)])
+        accumulate(totals["net_exposure"], offset, position * mids)
+        accumulate(totals["gross_exposure"], offset, np.abs(position) * mids)
+
+        # unrealised pnl is only meaningful while a position is open
+        fields["unrealised_pnl"][offset:, j] = np.where(
+            position == 0.0, np.nan, result[:, BACKTEST_FIELDS.index("unrealised_pnl")]
         )
-    if stop_loss is None:
-        stop_loss = pd.DataFrame(
-            np.nan,
-            index=mid_close.index,
-            columns=mid_close.columns,
-        )
+        del result
 
-    def compute_backtest(inst_trades: pd.Series) -> pd.DataFrame:
-        logger.info("Computing backtest for ticker=%s", inst_trades.name)
-        inst_mids = mid_close[inst_trades.name].ffill().dropna()
-        inst_asks = ask_close[inst_trades.name].reindex(inst_mids.index, method="ffill")
-        inst_bids = bid_close[inst_trades.name].reindex(inst_mids.index, method="ffill")
-        inst_limit = stop_limit[inst_trades.name].reindex(inst_mids.index)
-        inst_loss = stop_loss[inst_trades.name].reindex(inst_mids.index)
-
-        inst_dividends = (
-            dividends[inst_trades.name].reindex(mid_close.index).fillna(0.0)
-        )
-        if inst_mids.empty:
-            return pd.DataFrame(
-                index=inst_mids.index, columns=BACKTEST_FIELDS, data=0
-            ).astype("float32")
-
-        return pd.DataFrame(
-            data=_backtest.compute_backtest(
-                inst_trades.reindex(inst_mids.index)
-                .fillna(0.0)
-                .to_numpy()
-                .astype("float32"),
-                inst_bids.to_numpy().astype("float32"),
-                inst_asks.to_numpy().astype("float32"),
-                inst_limit.to_numpy().astype("float32"),
-                inst_loss.to_numpy().astype("float32"),
-                inst_dividends.to_numpy().astype("float32"),
-            ),
-            index=inst_mids.index,
-            columns=BACKTEST_FIELDS,
-        )
-
-    backtest = pd.concat(
-        (compute_backtest(data) for _, data in trades.items()),
-        keys=trades.columns,
-        axis=1,
-    ).reorder_levels([1, 0], axis=1)
-
-    net_exposure = (backtest["net_position"] * mid_close).ffill().sum(axis=1)
-    gross_exposure = (backtest["net_position"].abs() * mid_close).ffill().sum(axis=1)
-
-    summary = (
-        backtest[
-            [
-                "net_investment",
-                "unrealised_pnl",
-                "realised_pnl",
-                "total_pnl",
-            ]
-        ]
-        .ffill()
-        .transpose()
-        .groupby(level=0)
-        .sum()
-        .transpose()
-    )
-    summary["net_exposure"] = net_exposure
-    summary["gross_exposure"] = gross_exposure
-
-    backtest["unrealised_pnl"] = backtest["unrealised_pnl"].where(
-        backtest.net_position.ne(0.0), np.nan
-    )
-    backtest_fields: tuple[pd.DataFrame, ...] = tuple(
-        pd.DataFrame(backtest.loc[:, f]) for f in BACKTEST_FIELDS if f != "date"
+    summary = pd.DataFrame(
+        {
+            k: v.astype("float32") if k in SUMMARY_PNL_FIELDS else v
+            for k, v in totals.items()
+        },
+        index=out_index,
     )
 
-    return (pd.DataFrame(summary), *backtest_fields)
+    return (
+        summary,
+        *(
+            pd.DataFrame(fields[f], index=out_index, columns=columns, copy=False)
+            for f in BACKTEST_FIELDS
+        ),
+    )
