@@ -773,3 +773,29 @@ class TestSafetyRails:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestActionsFrameSchema:
+    def test_empty_and_skipped_and_deal_frames_share_columns(self) -> None:
+        from tradingo.engine.ig import ACTION_COLUMNS, _actions_frame, _skipped
+
+        deal: dict[str, Any] = {
+            "date": "2026-10-30T14:33:47.55",
+            "dealStatus": "REJECTED",
+            "epic": "X",
+            "direction": "SELL",
+            "size": None,
+            "limitDistance": None,
+            "affectedDeals": [],
+            "unexpected": 1,
+        }
+        frames = [
+            _actions_frame([]),
+            _actions_frame([_skipped("X", "MARKET_CLOSED", 0.0, 1.0)]),
+            _actions_frame([deal]),
+        ]
+        for frame in frames:
+            assert list(frame.columns) == list(ACTION_COLUMNS)
+            assert frame["limitDistance"].dtype == float
+            assert frame["size"].dtype == float
+            assert frame.index.name == "DateTime"

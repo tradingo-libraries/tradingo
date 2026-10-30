@@ -315,16 +315,57 @@ def _skipped(epic: str, reason: str, current: float, target: float) -> dict[str,
     }
 
 
+# Fixed schema of the trade log. Deal confirms carry all of these but skipped /
+# no-op actions only a handful, and ArcticDB ``update`` rejects any frame whose
+# columns differ from the stored version, so every frame is padded to this.
+ACTION_FLOAT_COLUMNS = (
+    "level",
+    "size",
+    "stopLevel",
+    "limitLevel",
+    "stopDistance",
+    "limitDistance",
+    "profit",
+)
+ACTION_COLUMNS = (
+    "status",
+    "reason",
+    "dealStatus",
+    "epic",
+    "expiry",
+    "dealReference",
+    "dealId",
+    "affectedDeals",
+    "level",
+    "size",
+    "direction",
+    "stopLevel",
+    "limitLevel",
+    "stopDistance",
+    "limitDistance",
+    "guaranteedStop",
+    "trailingStop",
+    "profit",
+    "profitCurrency",
+)
+
+
 def _actions_frame(actions: list[dict[str, Any]]) -> pd.DataFrame:
+    index = pd.DatetimeIndex([], name="DateTime", tz="UTC")
     if not actions:
-        return pd.DataFrame(index=pd.DatetimeIndex([], name="DateTime", tz="UTC"))
-    frame = pd.DataFrame(actions)
-    # IG confirm dates are UTC; a DatetimeIndex makes the publisher append.
-    frame.index = pd.DatetimeIndex(
-        pd.to_datetime(frame.pop("date"), utc=True, format="ISO8601"),
-        name="DateTime",
-    )
-    return frame.sort_index()
+        frame = pd.DataFrame(index=index)
+    else:
+        frame = pd.DataFrame(actions)
+        # IG confirm dates are UTC; a DatetimeIndex makes the publisher append.
+        frame.index = pd.DatetimeIndex(
+            pd.to_datetime(frame.pop("date"), utc=True, format="ISO8601"),
+            name="DateTime",
+        )
+        frame = frame.sort_index()
+    frame = frame.reindex(columns=list(ACTION_COLUMNS))
+    for column in ACTION_FLOAT_COLUMNS:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype(float)
+    return frame
 
 
 def adjust_position_sizes(
