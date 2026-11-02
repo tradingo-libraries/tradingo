@@ -816,3 +816,25 @@ def test_coerce_to_schema_columns_and_index(
     out = _coerce_index(df.tz_localize("US/Eastern"), None, True, "sym")
     assert isinstance(out.index, pd.DatetimeIndex)
     assert str(out.index.tz) == "UTC"
+
+
+def test_coerce_types(caplog: pytest.LogCaptureFixture) -> None:
+    from tradingo.symbols import _coerce_types
+
+    df = pd.DataFrame(
+        {
+            "f": [1, 2],
+            "s": pd.Series([1, None], dtype=object),
+            "b": [1, 0],
+            "keep": [1, 2],
+        },
+    )
+    with caplog.at_level("WARNING"):
+        out = _coerce_types(
+            df, {"f": "FLOAT64", "s": "UTF_DYNAMIC64", "b": "BOOL8"}, "sym"
+        )
+    assert out["f"].dtype == np.float64
+    assert out["b"].dtype == bool
+    assert out["s"].tolist()[0] == "1" and pd.isna(out["s"].tolist()[1])
+    assert out["keep"].dtype == df["keep"].dtype
+    assert "casting column 'f'" in caplog.text

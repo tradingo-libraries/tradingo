@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
+import re
 from collections import defaultdict
 from collections.abc import Callable
 from typing import (
@@ -88,6 +89,65 @@ def _coerce_columns(
     return data.reindex(columns=expected)
 
 
+_ARCTIC_TO_NUMPY = {
+    "FLOAT64": "float64",
+    "FLOAT32": "float32",
+    "INT64": "int64",
+    "INT32": "int32",
+    "INT16": "int16",
+    "INT8": "int8",
+    "UINT64": "uint64",
+    "UINT32": "uint32",
+    "UINT16": "uint16",
+    "UINT8": "uint8",
+    "BOOL8": "bool",
+    "NANOSECONDS_UTC64": "datetime64[ns]",
+}
+
+
+def _coerce_types(
+    data: pd.DataFrame,
+    expected: dict[str, str],
+    symbol: str,
+) -> pd.DataFrame:
+    """Cast columns to the dtypes of the stored symbol.
+
+    ``expected`` maps column name to the ArcticDB type name (e.g. ``FLOAT64``).
+    Columns not in ``expected`` are left alone; string types are cast to ``str``.
+    """
+    data = data.copy(deep=False)
+    for column, type_name in expected.items():
+        if column not in data.columns:
+            continue
+        series = data[column]
+        if type_name.startswith(("UTF", "ASCII")):
+            if (
+                series.dtype == object
+                and series.map(lambda v: pd.isna(v) or isinstance(v, str)).all()
+            ):
+                continue
+            logger.warning("%s: casting column %r to str", symbol, column)
+            data[column] = series.map(lambda v: v if pd.isna(v) else str(v)).astype(
+                object
+            )
+            continue
+        target = _ARCTIC_TO_NUMPY.get(type_name)
+        if target is None:
+            continue
+        if target == "datetime64[ns]" and isinstance(series.dtype, pd.DatetimeTZDtype):
+            continue
+        if series.dtype != np.dtype(target):
+            logger.warning(
+                "%s: casting column %r from %s to %s",
+                symbol,
+                column,
+                series.dtype,
+                target,
+            )
+            data[column] = series.astype(np.dtype(target))
+    return data
+
+
 def _coerce_index(
     data: pd.DataFrame,
     expected_name: str | None,
@@ -127,6 +187,7 @@ def _coerce_to_schema(
     data: pd.DataFrame,
     coerce_columns: bool,
     coerce_index: bool,
+    coerce_types: bool = False,
 ) -> pd.DataFrame:
     """Coerce ``data`` to the schema of the existing symbol, where one exists."""
     description = None
@@ -150,6 +211,15 @@ def _coerce_to_schema(
         )
     if coerce_columns and description is not None:
         data = _coerce_columns(data, [c.name for c in description.columns], sym)
+    if coerce_types and description is not None:
+        data = _coerce_types(
+            data,
+            {
+                c.name: re.search(r"type=(\w+)", str(c.dtype)).group(1)  # type: ignore[union-attr]
+                for c in description.columns
+            },
+            sym,
+        )
     return data
 
 
@@ -470,6 +540,7 @@ def symbol_publisher(
     metadata: dict[str, Any] | None = None,
     coerce_columns: bool = False,
     coerce_index: bool = False,
+    coerce_types: bool = False,
 ) -> Callable[[Callable[P, R]], PublishedFunction[P, R]]:
     def decorator(
         func: Callable[P, R],
@@ -562,9 +633,9 @@ def symbol_publisher(
                         create_if_missing=True,
                         library_options=library_options,
                     )
-                    if coerce_columns or coerce_index:
+                    if coerce_columns or coerce_index or coerce_types:
                         data = _coerce_to_schema(
-                            lib, sym, data, coerce_columns, coerce_index
+                            lib, sym, data, coerce_columns, coerce_index, coerce_types
                         )
                     if isinstance(data.index, pd.DatetimeIndex):
                         if clean:
