@@ -789,3 +789,30 @@ def test_provider_and_publisher_passes_arctic_to_function(arctic: Arctic) -> Non
 
     func(arctic=arctic, dry_run=False)  # type: ignore
     assert "output-sym" in lib.list_symbols()
+
+
+def test_coerce_to_schema_columns_and_index(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from tradingo.symbols import _coerce_columns, _coerce_index
+
+    idx = pd.date_range("2024-01-01", periods=3, freq="D")
+    df = pd.DataFrame({"b": 1.0, "z": 2.0}, index=idx)
+
+    with caplog.at_level("WARNING"):
+        out = _coerce_columns(df, ["a", "b"], "sym")
+    assert list(out.columns) == ["a", "b"]
+    assert out["a"].isna().all()
+    assert "adding missing" in caplog.text and "dropping" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        out = _coerce_index(df, "DateTime", True, "sym")
+    assert isinstance(out.index, pd.DatetimeIndex)
+    assert str(out.index.tz) == "UTC"
+    assert out.index.name == "DateTime"
+    assert "tz-naive" in caplog.text
+
+    out = _coerce_index(df.tz_localize("US/Eastern"), None, True, "sym")
+    assert isinstance(out.index, pd.DatetimeIndex)
+    assert str(out.index.tz) == "UTC"

@@ -53,7 +53,6 @@ Ret = TypeVar(
 
 
 def _add_params(function: Callable[P, ROpt], *args: str) -> None:
-
     origsig = inspect.signature(function)
     orig_params = list(origsig.parameters.values())
     for arg in args:
@@ -69,6 +68,89 @@ def _add_params(function: Callable[P, ROpt], *args: str) -> None:
             )
 
     function.__signature__ = origsig.replace(parameters=orig_params)  # type: ignore
+
+
+def _coerce_columns(
+    data: pd.DataFrame,
+    expected: list[str],
+    symbol: str,
+) -> pd.DataFrame:
+    """Add missing / drop unexpected columns and reorder to match ``expected``."""
+    present = set(data.columns)
+    missing = [c for c in expected if c not in present]
+    extra = [c for c in data.columns if c not in set(expected)]
+    if missing:
+        logger.warning("%s: adding missing columns %s (filled NaN)", symbol, missing)
+    if extra:
+        logger.warning("%s: dropping columns not in stored schema %s", symbol, extra)
+    if list(data.columns) != expected and not (missing or extra):
+        logger.warning("%s: reordering columns to match stored schema", symbol)
+    return data.reindex(columns=expected)
+
+
+def _coerce_index(
+    data: pd.DataFrame,
+    expected_name: str | None,
+    expect_datetime: bool,
+    symbol: str,
+) -> pd.DataFrame:
+    """Coerce the index to a UTC DatetimeIndex with the expected name."""
+    index = data.index
+    if expect_datetime and not isinstance(index, pd.DatetimeIndex):
+        logger.warning("%s: index is %s, casting to DatetimeIndex", symbol, type(index))
+        index = pd.DatetimeIndex(index)
+    if isinstance(index, pd.DatetimeIndex):
+        if index.tz is None:
+            logger.warning("%s: index is tz-naive, localizing to UTC", symbol)
+            index = index.tz_localize("UTC")
+        elif str(index.tz) != "UTC":
+            logger.warning("%s: index tz is %s, converting to UTC", symbol, index.tz)
+            index = index.tz_convert("UTC")
+    if expected_name is not None and index.name != expected_name:
+        logger.warning(
+            "%s: index name %r != stored %r, renaming",
+            symbol,
+            index.name,
+            expected_name,
+        )
+        index = index.rename(expected_name)
+    if index is data.index:
+        return data
+    data = data.copy(deep=False)
+    data.index = index
+    return data
+
+
+def _coerce_to_schema(
+    lib: adb.library.Library,
+    sym: str,
+    data: pd.DataFrame,
+    coerce_columns: bool,
+    coerce_index: bool,
+) -> pd.DataFrame:
+    """Coerce ``data`` to the schema of the existing symbol, where one exists."""
+    description = None
+    try:
+        description = lib.get_description(sym)
+    except NoSuchVersionException:
+        pass
+
+    if coerce_index:
+        stored_index = (
+            description.index[0] if description and description.index else None
+        )
+        data = _coerce_index(
+            data,
+            expected_name=stored_index.name if stored_index else None,
+            expect_datetime=(
+                stored_index is not None and "UTC64" in str(stored_index.dtype)
+            )
+            or isinstance(data.index, pd.DatetimeIndex),
+            symbol=sym,
+        )
+    if coerce_columns and description is not None:
+        data = _coerce_columns(data, [c.name for c in description.columns], sym)
+    return data
 
 
 class SymbolParseError(Exception):
@@ -125,7 +207,6 @@ class Symbol(NamedTuple):
 
 
 class LibProvided(Protocol[P, Ret]):
-
     def __call__(
         self,
         arctic: adb.Arctic,
@@ -140,7 +221,6 @@ def lib_provider(
     [Callable[Concatenate[adb.Arctic, P], ROpt]],
     LibProvided[P, ROpt],
 ]:
-
     def decorator(
         func: Callable[Concatenate[adb.Arctic, P], ROpt],
     ) -> LibProvided[P, ROpt]:
@@ -177,7 +257,6 @@ def lib_provider(
 
 
 class SymbolProvided(Protocol[P, ROptCov]):
-
     def __call__(
         self,
         arctic: adb.Arctic,
@@ -195,7 +274,6 @@ def symbol_provider(
     no_date: bool = False,
     **symbols: str | list[str],
 ) -> Callable[[Callable[P, ROpt]], SymbolProvided[P, ROpt]]:
-
     def decorator(
         func: Callable[P, ROpt],
     ) -> SymbolProvided[P, ROpt]:
@@ -370,7 +448,6 @@ def _envoke_symbology_function(
 
 
 class PublishedFunction(Protocol[P, Ret]):
-
     def __call__(
         self,
         arctic: adb.Arctic | None = None,
@@ -391,6 +468,8 @@ def symbol_publisher(
     library_options: adb.LibraryOptions | None = None,
     write_pickle: bool = False,
     metadata: dict[str, Any] | None = None,
+    coerce_columns: bool = False,
+    coerce_index: bool = False,
 ) -> Callable[[Callable[P, R]], PublishedFunction[P, R]]:
     def decorator(
         func: Callable[P, R],
@@ -483,6 +562,10 @@ def symbol_publisher(
                         create_if_missing=True,
                         library_options=library_options,
                     )
+                    if coerce_columns or coerce_index:
+                        data = _coerce_to_schema(
+                            lib, sym, data, coerce_columns, coerce_index
+                        )
                     if isinstance(data.index, pd.DatetimeIndex):
                         if clean:
                             lib.delete(sym)
