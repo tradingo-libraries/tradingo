@@ -838,3 +838,31 @@ def test_coerce_types(caplog: pytest.LogCaptureFixture) -> None:
     assert out["s"].tolist()[0] == "1" and pd.isna(out["s"].tolist()[1])
     assert out["keep"].dtype == df["keep"].dtype
     assert "casting column 'f'" in caplog.text
+
+
+def test_coerce_types_float_to_int(caplog: pytest.LogCaptureFixture) -> None:
+    from tradingo.symbols import _coerce_types
+
+    df = pd.DataFrame(
+        {
+            "i64": [1.0, 2.0, -3.0],
+            "i32": [4.0, 5.0, 6.0],
+            "keep": [1.5, 2.5, 3.5],
+        },
+    )
+    with caplog.at_level("WARNING"):
+        out = _coerce_types(df, {"i64": "INT64", "i32": "INT32"}, "sym")
+    assert out["i64"].dtype == np.int64
+    assert out["i32"].dtype == np.int32
+    assert out["i64"].tolist() == [1, 2, -3]
+    assert out["keep"].dtype == np.float64
+    assert "casting column 'i64' from float64 to int64" in caplog.text
+    assert df["i64"].dtype == np.float64  # input not mutated
+
+
+def test_coerce_types_float_with_nan_to_int_raises() -> None:
+    from tradingo.symbols import _coerce_types
+
+    df = pd.DataFrame({"i": [1.0, np.nan]})
+    with pytest.raises(ValueError):
+        _coerce_types(df, {"i": "INT64"}, "sym")
