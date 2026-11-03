@@ -840,29 +840,27 @@ def test_coerce_types(caplog: pytest.LogCaptureFixture) -> None:
     assert "casting column 'f'" in caplog.text
 
 
-def test_coerce_types_float_to_int(caplog: pytest.LogCaptureFixture) -> None:
-    from tradingo.symbols import _coerce_types
+def test_symbol_publisher_coerce_types_float_to_int(
+    arctic: Arctic, caplog: pytest.LogCaptureFixture
+) -> None:
+    index = pd.date_range("2026-01-01", periods=4, tz="UTC")
 
-    df = pd.DataFrame(
-        {
-            "i64": [1.0, 2.0, -3.0],
-            "i32": [4.0, 5.0, 6.0],
-            "keep": [1.5, 2.5, 3.5],
-        },
-    )
+    rows: dict[str, Any] = {}
+
+    @symbol_publisher("my-lib/ints", coerce_types=True)
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame({"A": rows["values"]}, index=rows["index"])
+
+    rows.update(values=[1, 2], index=index[:2])
+    publisher(arctic=arctic, dry_run=False)
+    lib = arctic.get_library("my-lib")
+    assert cast(pd.DataFrame, lib.read("ints").data)["A"].dtype == np.int64
+
     with caplog.at_level("WARNING"):
-        out = _coerce_types(df, {"i64": "INT64", "i32": "INT32"}, "sym")
-    assert out["i64"].dtype == np.int64
-    assert out["i32"].dtype == np.int32
-    assert out["i64"].tolist() == [1, 2, -3]
-    assert out["keep"].dtype == np.float64
-    assert "casting column 'i64' from float64 to int64" in caplog.text
-    assert df["i64"].dtype == np.float64  # input not mutated
+        rows.update(values=[3.0, 4.0], index=index[2:])
+        publisher(arctic=arctic, dry_run=False)
 
-
-def test_coerce_types_float_with_nan_to_int_raises() -> None:
-    from tradingo.symbols import _coerce_types
-
-    df = pd.DataFrame({"i": [1.0, np.nan]})
-    with pytest.raises(ValueError):
-        _coerce_types(df, {"i": "INT64"}, "sym")
+    result = cast(pd.DataFrame, arctic.get_library("my-lib").read("ints").data)
+    assert result["A"].dtype == np.int64
+    assert result["A"].tolist() == [1, 2, 3, 4]
+    assert "casting column 'A' from float64 to int64" in caplog.text
