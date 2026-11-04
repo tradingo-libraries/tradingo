@@ -868,28 +868,6 @@ class TestIgCreateUniverse:
 class TestMeasureIgPriceScales:
     """Measure IG price / source price for dukascopy and yfinance mappings."""
 
-    @pytest.mark.parametrize(
-        "ratio,expected",
-        [
-            (99.988, 100.0),  # USD/JPY 15840.5 / 158.4235
-            (10000.68, 10000.0),  # USD/CAD
-            (0.9998, 1.0),  # indices
-            (97.29, 100.0),  # futures basis on coffee
-            (107.44, 107.4),  # IVV -> CSPX proxy
-            (2.4775, 2.478),  # SPY -> SPYL proxy
-        ],
-    )
-    def test_snap_price_scale(self, ratio: float, expected: float) -> None:
-        from tradingo.sampling.instruments import snap_price_scale
-
-        assert snap_price_scale(ratio) == pytest.approx(expected)
-
-    def test_snap_price_scale_rejects_bad_ratio(self) -> None:
-        from tradingo.sampling.instruments import snap_price_scale
-
-        with pytest.raises(ValueError):
-            snap_price_scale(float("nan"))
-
     def test_measure_ig_price_scales(self) -> None:
         from tradingo.sampling.instruments import measure_ig_price_scales
 
@@ -920,8 +898,9 @@ class TestMeasureIgPriceScales:
         )
 
         service.switch_account.assert_called_once_with("SB1", False)
-        assert result.loc["USD/JPY", "price_scale"] == 100
-        assert result.loc["USD/CAD", "price_scale"] == 10000
+        # raw ratio, not rounded
+        assert result.loc["USD/JPY", "price_scale"] == pytest.approx(15840.5 / 158.42)
+        assert result.loc["USD/CAD", "price_scale"] == pytest.approx(13972.5 / 1.39716)
         assert pd.isna(result.loc["VOL", "price_scale"])  # closed market
         assert "XXX" not in result.index
 
