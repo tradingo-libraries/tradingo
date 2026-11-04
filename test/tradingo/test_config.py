@@ -19,6 +19,13 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]
     os.environ.update(old_env)
 
 
+@pytest.fixture(autouse=True)
+def clear_tp_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove any TP_* variables inherited from the shell so tests start clean."""
+    for key in [k for k in os.environ if k.startswith("TP_")]:
+        monkeypatch.delenv(key)
+
+
 @pytest.fixture
 def config_home(tmp_path: Path) -> Path:
     (tmp_path / "configs").mkdir(exist_ok=True)
