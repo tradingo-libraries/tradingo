@@ -865,5 +865,66 @@ class TestIgCreateUniverse:
         assert mock_lib.read_batch.call_count == 1  # bid and ask
 
 
+class TestMeasureIgPriceScales:
+    """Measure IG price / source price for dukascopy and yfinance mappings."""
+
+    @pytest.mark.parametrize(
+        "ratio,expected",
+        [
+            (99.988, 100.0),  # USD/JPY 15840.5 / 158.4235
+            (10000.68, 10000.0),  # USD/CAD
+            (0.9998, 1.0),  # indices
+            (97.29, 100.0),  # futures basis on coffee
+            (107.44, 107.4),  # IVV -> CSPX proxy
+            (2.4775, 2.478),  # SPY -> SPYL proxy
+        ],
+    )
+    def test_snap_price_scale(self, ratio: float, expected: float) -> None:
+        from tradingo.sampling.instruments import snap_price_scale
+
+        assert snap_price_scale(ratio) == pytest.approx(expected)
+
+    def test_snap_price_scale_rejects_bad_ratio(self) -> None:
+        from tradingo.sampling.instruments import snap_price_scale
+
+        with pytest.raises(ValueError):
+            snap_price_scale(float("nan"))
+
+    def test_measure_ig_price_scales(self) -> None:
+        from tradingo.sampling.instruments import measure_ig_price_scales
+
+        def market(epic: str, bid: float | None, offer: float | None) -> Any:
+            return {
+                "instrument": {"epic": epic, "name": epic},
+                "snapshot": {"bid": bid, "offer": offer, "marketStatus": "TRADEABLE"},
+            }
+
+        service = MagicMock()
+        service.fetch_markets_by_epics.return_value = [
+            market("CS.D.USDJPY.TODAY.IP", 15840.0, 15841.0),
+            market("CS.D.USDCAD.TODAY.IP", 13972.0, 13973.0),
+            market("CC.D.VIX.USS.IP", None, None),
+        ]
+        prices = pd.Series({"USD/JPY": 158.42, "USD/CAD": 1.39716, "VOL": 17.6})
+
+        result = measure_ig_price_scales(
+            prices,
+            {
+                "USD/JPY": "CS.D.USDJPY.TODAY.IP",
+                "USD/CAD": "CS.D.USDCAD.TODAY.IP",
+                "VOL": "CC.D.VIX.USS.IP",
+                "XXX": "NOT.A.MARKET",
+            },
+            account_id="SB1",
+            service=service,
+        )
+
+        service.switch_account.assert_called_once_with("SB1", False)
+        assert result.loc["USD/JPY", "price_scale"] == 100
+        assert result.loc["USD/CAD", "price_scale"] == 10000
+        assert pd.isna(result.loc["VOL", "price_scale"])  # closed market
+        assert "XXX" not in result.index
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
