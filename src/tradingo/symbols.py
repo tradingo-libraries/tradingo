@@ -144,7 +144,7 @@ def _coerce_types(
                 series.dtype,
                 target,
             )
-            data[column] = series.astype(np.dtype(target))
+            data[column] = series.astype(np.dtype(target), errors="ignore")
     return data
 
 
