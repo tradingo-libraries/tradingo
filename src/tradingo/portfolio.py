@@ -1,7 +1,7 @@
 import logging
 import re
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 
 import numba
 import numpy as np
@@ -207,6 +207,81 @@ def point_in_time_position(positions: pd.DataFrame) -> pd.DataFrame:
 
 def rename_columns(positions: pd.DataFrame, mapping: dict[str, str]) -> pd.DataFrame:
     return positions.rename(columns=mapping)
+
+
+# Quote currencies quoted as a fraction of a major currency.
+_SUB_UNITS: dict[str, tuple[str, float]] = {
+    "USX": ("USD", 0.01),  # US cents
+    "GBX": ("GBP", 0.01),  # pence
+    "GBp": ("GBP", 0.01),
+}
+
+
+def _ccy_rate(fx_rates: pd.DataFrame, ccy: str, to: str) -> pd.Series:
+    """Value of one unit of ``ccy`` in ``to``, from ``BASE/QUOTE`` columns.
+
+    Uses the direct pair, its inverse, or a cross through USD.
+    """
+    if ccy in _SUB_UNITS:
+        major, mult = _SUB_UNITS[ccy]
+        return _ccy_rate(fx_rates, major, to) * mult
+    if ccy == to:
+        return pd.Series(1.0, index=fx_rates.index)
+    if f"{ccy}/{to}" in fx_rates.columns:
+        return fx_rates[f"{ccy}/{to}"]
+    if f"{to}/{ccy}" in fx_rates.columns:
+        return 1 / fx_rates[f"{to}/{ccy}"]
+    if "USD" not in (ccy, to):
+        return _ccy_rate(fx_rates, ccy, "USD") * _ccy_rate(fx_rates, "USD", to)
+    raise KeyError(f"No fx rate to convert {ccy} to {to}")
+
+
+def map_positions(
+    positions: pd.DataFrame,
+    mapping: dict[str, dict[str, Any]],
+    fx_rates: pd.DataFrame | None = None,
+    account_ccy: str = "GBP",
+) -> pd.DataFrame:
+    """Map source-keyed positions (e.g. yfinance/dukascopy symbols) to IG epics.
+
+    IG quotes prices in points that are a multiple of the source price
+    (USD/JPY 158.438 -> 15843.8, CSPX 828 -> 82800), so a position of N
+    units in the source must be sized at ``N / price_scale`` on IG to keep
+    the same exposure.
+
+    Spread bets also pay in the account currency per point. When ``fx_rates``
+    is given and a mapping entry has ``quote_ccy``, the size is multiplied by
+    the value of one unit of the quote currency in ``account_ccy``, so P&L
+    matches the source position after conversion.
+
+    :param positions: wide frame, columns are source symbols.
+    :param mapping: ``{source: {"epic": str, "price_scale": float,
+        "quote_ccy": str (optional)}}``. ``price_scale`` is IG price divided
+        by source price.
+    :param fx_rates: wide frame of ``BASE/QUOTE`` mid rates (dukascopy naming).
+    :param account_ccy: currency the spread bet pays in.
+    :return: wide frame, columns are IG epics. Unmapped sources are dropped;
+        sources mapped to the same epic are summed.
+    """
+    unmapped = sorted(set(positions.columns) - set(mapping))
+    if unmapped:
+        logger.warning("Dropping positions with no IG mapping: %s", unmapped)
+
+    sources = [c for c in positions.columns if c in mapping]
+    scale = pd.Series({s: float(mapping[s]["price_scale"]) for s in sources})
+    sized = positions[sources].div(scale, axis=1)
+
+    if fx_rates is not None:
+        rates = fx_rates.reindex(fx_rates.index.union(sized.index)).ffill()
+        for src in sources:
+            ccy = mapping[src].get("quote_ccy")
+            if not ccy:
+                continue
+            conv = _ccy_rate(rates, ccy, account_ccy).reindex(sized.index)
+            sized[src] = sized[src] * conv
+
+    epics = {s: mapping[s]["epic"] for s in sources}
+    return sized.rename(columns=epics).T.groupby(level=0, sort=False).sum(min_count=1).T
 
 
 def apply_dealing_rules(

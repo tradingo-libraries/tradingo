@@ -405,3 +405,44 @@ def test_downstream_tasks_ib_function_ref(
         sys.modules["ib_insync"] = MagicMock()
     fn = _resolve_function(fn_ref)
     assert callable(fn)
+
+
+def test_csv_include_column_and_index_col(tmp_path: Path) -> None:
+    csv = tmp_path / "map.csv"
+    csv.write_text(
+        textwrap.dedent(
+            """\
+            # measured 2026-11-04
+            source,epic,price_scale,quote_ccy
+            USD/JPY,CS.D.USDJPY.TODAY.IP,100,JPY
+            E_DAAX,IX.D.DAX.DAILY.IP,1,
+            """
+        )
+    )
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        textwrap.dedent(
+            f"""\
+            task:
+              function: tradingo.portfolio.map_positions
+              params:
+                epics:
+                  include: "file://{csv}"
+                  column: epic
+                mapping:
+                  include: "file://{csv}"
+                  index_col: source
+            """
+        )
+    )
+    params = config.read_config_template(cfg, {})["task"]["params"]
+
+    assert params["epics"] == ["CS.D.USDJPY.TODAY.IP", "IX.D.DAX.DAILY.IP"]
+    assert params["mapping"] == {
+        "USD/JPY": {
+            "epic": "CS.D.USDJPY.TODAY.IP",
+            "price_scale": 100,
+            "quote_ccy": "JPY",
+        },
+        "E_DAAX": {"epic": "IX.D.DAX.DAILY.IP", "price_scale": 1},
+    }

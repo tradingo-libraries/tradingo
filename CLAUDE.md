@@ -74,6 +74,8 @@ uv run tradingo-engine-ib
 
 **IG live trading** — `engine/ig.py:adjust_position_sizes` trades towards the latest target row. It skips NaN targets and non-`TRADEABLE` markets (logged as `SKIPPED` rows), deals `SHARES` instruments in whole units, refuses stale targets when `max_target_age` is set, and returns a UTC-indexed trade log so results append. `sampling/ig.py:sample_ig_positions` is the DAG node that samples IG deal activity and rebuilds `live/ig.position.<universe>` by anchoring to the current open-positions snapshot. IG activity query bounds are London local time; returned dates are UTC.
 
+**Source → IG sizing** — strategies priced off yfinance/dukascopy hold positions in source units, but IG quotes in points (USD/JPY 158.438 → 15843.8, CSPX 828 → 82800) and spread bets pay account-currency per point. `portfolio.map_positions(positions, mapping, fx_rates=None)` renames source symbols to epics, divides by each entry's `price_scale` (IG price / source price) and, when `fx_rates` (dukascopy `BASE/QUOTE` mids) is given, converts the entry's `quote_ccy` (incl. `USX` cents) into GBP; unmapped symbols are dropped. Static maps are CSVs loaded with `include: file://….csv` + `index_col: source` (dict of rows) or `column: epic` (list). `sampling.instruments.measure_ig_price_scales` regenerates `price_scale` against live IG prices — pass the spread-bet `account_id`, since the API session defaults to the CFD account, where spread-bet epics show no prices.
+
 ### Module Structure
 
 ```

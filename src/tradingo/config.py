@@ -95,11 +95,17 @@ def process_includes(
             elif protocol == "file" and (
                 path.endswith(".csv") or path.endswith(".parquet")
             ):
-                df = pd.read_csv(path)
+                df = pd.read_csv(path, comment="#")
                 if query := value.get("query"):
                     df = df.query(query)
-                incvalue = df[value["column"]].to_list()
-                value = incvalue
+                if index_col := value.get("index_col"):
+                    # {key: {column: value}} with blank cells left out
+                    value = {
+                        key: {k: v for k, v in row.items() if pd.notna(v)}
+                        for key, row in df.set_index(index_col).to_dict("index").items()
+                    }
+                else:
+                    value = df[value["column"]].to_list()
 
             elif protocol.startswith("http"):
                 df = pd.read_html(value["include"])[0]

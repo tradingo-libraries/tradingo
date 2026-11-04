@@ -1,6 +1,7 @@
 """static instruments data accessors."""
 
 import logging
+import math
 from typing import Any
 
 import pandas as pd
@@ -67,3 +68,63 @@ def download_instruments(
         )
 
     raise ValueError(file)
+
+
+def measure_ig_price_scales(
+    source_prices: pd.Series,
+    epics: dict[str, str],
+    account_id: str | None = None,
+    service: Any = None,
+) -> pd.DataFrame:
+    """Measure ``price_scale`` (IG price / source price) for each mapping.
+
+    Compares IG's current mid to the latest source price, so run it while
+    both markets are open. Prices are only quoted for the account type the
+    session is on: pass the spread-bet ``account_id`` when the preferred
+    account is CFD.
+
+    Example (in-cluster, e.g. via the MCP ``run_python`` tool)::
+
+        mid = api.prices_5min.dukascopy.mid.close().ffill().iloc[-1]
+        measure_ig_price_scales(mid, {"USD/JPY": "CS.D.USDJPY.TODAY.IP"},
+                                account_id="<spread-bet account>")
+
+    :param source_prices: latest source price, indexed by source symbol.
+    :param epics: source symbol -> IG epic.
+    :return: frame indexed by source symbol with epic, IG mid, source price,
+        ``price_scale`` (the raw ratio) and market status.
+    """
+    service = service or get_ig_service()
+    if account_id:
+        service.switch_account(account_id, False)
+
+    markets: dict[str, dict[str, Any]] = {}
+    unique = list(dict.fromkeys(epics.values()))
+    for i in range(0, len(unique), 50):
+        for market in service.fetch_markets_by_epics(
+            ",".join(unique[i : i + 50]), detailed=True
+        ):
+            markets[market["instrument"]["epic"]] = market
+
+    rows = []
+    for source, epic in epics.items():
+        market = markets.get(epic)
+        if market is None:
+            logger.warning("No IG market for %s (%s)", source, epic)
+            continue
+        snapshot = market["snapshot"]
+        bid, offer = snapshot.get("bid"), snapshot.get("offer")
+        ig_mid = (bid + offer) / 2 if bid and offer else math.nan
+        src = float(source_prices.get(source, math.nan))
+        rows.append(
+            {
+                "source": source,
+                "epic": epic,
+                "name": market["instrument"].get("name"),
+                "status": snapshot.get("marketStatus"),
+                "ig_mid": ig_mid,
+                "source_price": src,
+                "price_scale": ig_mid / src if src else math.nan,
+            }
+        )
+    return pd.DataFrame(rows).set_index("source")

@@ -20,6 +20,7 @@ from arcticdb import Arctic
 from tradingo.portfolio import (
     aggregate_portfolio,
     apply_dealing_rules,
+    map_positions,
     portfolio_construction,
     volatility_target,
 )
@@ -1842,6 +1843,156 @@ class TestVolatilityTarget:
 
         # Zero * anything = zero
         assert (result["A"] == 0).all()
+
+
+class TestMapPositions:
+    """Map source-keyed positions to IG epics with price/currency scaling."""
+
+    @pytest.fixture
+    def index(self) -> pd.DatetimeIndex:
+        return pd.date_range("2026-11-02", periods=3, freq="D", tz="UTC")
+
+    @pytest.fixture
+    def mapping(self) -> dict[str, dict[str, object]]:
+        return {
+            "USD/JPY": {
+                "epic": "CS.D.USDJPY.TODAY.IP",
+                "price_scale": 100,
+                "quote_ccy": "JPY",
+            },
+            "USD/CAD": {
+                "epic": "CS.D.USDCAD.TODAY.IP",
+                "price_scale": 10000,
+                "quote_ccy": "CAD",
+            },
+            "IVV": {"epic": "KA.D.CSPXLN.CASH.IP", "price_scale": 100},
+        }
+
+    def test_scales_down_by_price_factor(
+        self, index: pd.DatetimeIndex, mapping: dict[str, dict[str, object]]
+    ) -> None:
+        positions = pd.DataFrame(
+            {"USD/JPY": [1000.0] * 3, "USD/CAD": [5000.0] * 3, "IVV": [50.0] * 3},
+            index=index,
+        )
+        result = map_positions(positions, mapping)
+
+        assert list(result.columns) == [
+            "CS.D.USDJPY.TODAY.IP",
+            "CS.D.USDCAD.TODAY.IP",
+            "KA.D.CSPXLN.CASH.IP",
+        ]
+        assert result["CS.D.USDJPY.TODAY.IP"].iloc[0] == pytest.approx(10.0)
+        assert result["CS.D.USDCAD.TODAY.IP"].iloc[0] == pytest.approx(0.5)
+        assert result["KA.D.CSPXLN.CASH.IP"].iloc[0] == pytest.approx(0.5)
+
+    @pytest.mark.parametrize(
+        "source,src_px,ig_px",
+        [("USD/JPY", 158.438, 15843.8), ("USD/CAD", 1.39709, 13970.9)],
+    )
+    def test_exposure_is_preserved(
+        self,
+        index: pd.DatetimeIndex,
+        mapping: dict[str, dict[str, object]],
+        source: str,
+        src_px: float,
+        ig_px: float,
+    ) -> None:
+        """size * ig_price == units * source_price."""
+        units = 1000.0
+        positions = pd.DataFrame({source: [units] * 3}, index=index)
+        size = map_positions(positions, mapping).to_numpy()[0, 0]
+        assert size * ig_px == pytest.approx(units * src_px)
+
+    def test_converts_quote_ccy_to_account_ccy(
+        self, index: pd.DatetimeIndex, mapping: dict[str, dict[str, object]]
+    ) -> None:
+        positions = pd.DataFrame(
+            {"USD/JPY": [1000.0] * 3, "USD/CAD": [1000.0] * 3}, index=index
+        )
+        fx = pd.DataFrame(
+            {
+                "GBP/USD": [1.25, 1.25, 1.30],
+                "USD/JPY": [150.0, 150.0, 160.0],
+                "USD/CAD": [1.40, 1.40, 1.40],
+            },
+            index=index,
+        )
+        result = map_positions(positions, mapping, fx_rates=fx)
+
+        # 1 JPY in GBP = 1 / (USDJPY * GBPUSD)
+        assert result["CS.D.USDJPY.TODAY.IP"].iloc[0] == pytest.approx(
+            10 / (150.0 * 1.25)
+        )
+        assert result["CS.D.USDJPY.TODAY.IP"].iloc[2] == pytest.approx(
+            10 / (160.0 * 1.30)
+        )
+        assert result["CS.D.USDCAD.TODAY.IP"].iloc[0] == pytest.approx(
+            0.1 / (1.40 * 1.25)
+        )
+
+    def test_fx_rates_forward_filled_onto_positions(
+        self, index: pd.DatetimeIndex, mapping: dict[str, dict[str, object]]
+    ) -> None:
+        positions = pd.DataFrame({"USD/JPY": [1000.0] * 3}, index=index)
+        fx = pd.DataFrame(
+            {"GBP/USD": [1.25], "USD/JPY": [150.0]},
+            index=index[:1] - pd.Timedelta(hours=1),
+        )
+        result = map_positions(positions, mapping, fx_rates=fx)
+        assert result.notna().all().all()
+
+    def test_missing_fx_rate_gives_nan(
+        self, index: pd.DatetimeIndex, mapping: dict[str, dict[str, object]]
+    ) -> None:
+        positions = pd.DataFrame({"USD/JPY": [1000.0] * 3}, index=index)
+        fx = pd.DataFrame(
+            {"GBP/USD": [1.25] * 3, "USD/JPY": [np.nan, 150.0, 150.0]}, index=index
+        )
+        result = map_positions(positions, mapping, fx_rates=fx)
+        assert np.isnan(result.to_numpy()[0, 0])
+        assert result.iloc[1, 0] == pytest.approx(10 / (150.0 * 1.25))
+
+    def test_sub_unit_quote_ccy(self, index: pd.DatetimeIndex) -> None:
+        mapping = {
+            "COFFEE.CMD/USX": {
+                "epic": "CC.D.KC.USS.IP",
+                "price_scale": 100,
+                "quote_ccy": "USX",
+            }
+        }
+        positions = pd.DataFrame({"COFFEE.CMD/USX": [100.0] * 3}, index=index)
+        fx = pd.DataFrame({"GBP/USD": [1.25] * 3}, index=index)
+        result = map_positions(positions, mapping, fx_rates=fx)
+        assert result.iloc[0, 0] == pytest.approx(1.0 * 0.01 / 1.25)
+
+    def test_unknown_currency_raises(self, index: pd.DatetimeIndex) -> None:
+        mapping = {"X": {"epic": "E", "price_scale": 1, "quote_ccy": "XXX"}}
+        positions = pd.DataFrame({"X": [1.0] * 3}, index=index)
+        fx = pd.DataFrame({"GBP/USD": [1.25] * 3}, index=index)
+        with pytest.raises(KeyError, match="XXX"):
+            map_positions(positions, mapping, fx_rates=fx)
+
+    def test_unmapped_dropped_and_shared_epics_summed(
+        self, index: pd.DatetimeIndex
+    ) -> None:
+        mapping = {
+            "RUSSELL.IDX/USD": {"epic": "IX.D.RUSSELL.DAILY.IP", "price_scale": 1},
+            "USSC2000.IDX/USD": {"epic": "IX.D.RUSSELL.DAILY.IP", "price_scale": 1},
+        }
+        positions = pd.DataFrame(
+            {
+                "RUSSELL.IDX/USD": [1.0, 2.0, np.nan],
+                "USSC2000.IDX/USD": [3.0, np.nan, np.nan],
+                "BUND.TR/EUR": [9.0, 9.0, 9.0],
+            },
+            index=index,
+        )
+        result = map_positions(positions, mapping)
+        assert list(result.columns) == ["IX.D.RUSSELL.DAILY.IP"]
+        assert result.iloc[:2, 0].tolist() == [4.0, 2.0]
+        assert np.isnan(result.to_numpy()[2, 0])
+        assert result.index.equals(index)
 
 
 if __name__ == "__main__":

@@ -865,5 +865,45 @@ class TestIgCreateUniverse:
         assert mock_lib.read_batch.call_count == 1  # bid and ask
 
 
+class TestMeasureIgPriceScales:
+    """Measure IG price / source price for dukascopy and yfinance mappings."""
+
+    def test_measure_ig_price_scales(self) -> None:
+        from tradingo.sampling.instruments import measure_ig_price_scales
+
+        def market(epic: str, bid: float | None, offer: float | None) -> Any:
+            return {
+                "instrument": {"epic": epic, "name": epic},
+                "snapshot": {"bid": bid, "offer": offer, "marketStatus": "TRADEABLE"},
+            }
+
+        service = MagicMock()
+        service.fetch_markets_by_epics.return_value = [
+            market("CS.D.USDJPY.TODAY.IP", 15840.0, 15841.0),
+            market("CS.D.USDCAD.TODAY.IP", 13972.0, 13973.0),
+            market("CC.D.VIX.USS.IP", None, None),
+        ]
+        prices = pd.Series({"USD/JPY": 158.42, "USD/CAD": 1.39716, "VOL": 17.6})
+
+        result = measure_ig_price_scales(
+            prices,
+            {
+                "USD/JPY": "CS.D.USDJPY.TODAY.IP",
+                "USD/CAD": "CS.D.USDCAD.TODAY.IP",
+                "VOL": "CC.D.VIX.USS.IP",
+                "XXX": "NOT.A.MARKET",
+            },
+            account_id="SB1",
+            service=service,
+        )
+
+        service.switch_account.assert_called_once_with("SB1", False)
+        # raw ratio, not rounded
+        assert result.loc["USD/JPY", "price_scale"] == pytest.approx(15840.5 / 158.42)
+        assert result.loc["USD/CAD", "price_scale"] == pytest.approx(13972.5 / 1.39716)
+        assert pd.isna(result.loc["VOL", "price_scale"])  # closed market
+        assert "XXX" not in result.index
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
