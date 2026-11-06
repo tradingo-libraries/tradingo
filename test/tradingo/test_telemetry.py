@@ -113,3 +113,41 @@ def test_arcticdb_read_and_write_spans(spans: InMemorySpanExporter) -> None:
     assert write.attributes["arcticdb.rows"] == 5
     assert read.attributes["db.system"] == "arcticdb"
     assert "arcticdb.version" in read.attributes
+
+
+def test_sampler_keeps_only_airflow_task_traces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from opentelemetry.trace import SpanKind
+
+    from tradingo.sampler import task_root_sampler
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider(sampler=task_root_sampler())
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+    monkeypatch.setattr(telemetry, "_tracer", tracer)
+    monkeypatch.setattr(trace, "get_tracer", lambda *_a, **_k: tracer)
+
+    # background work with no task: root and descendants are all dropped
+    with tracer.start_as_current_span("PUBLISH", kind=SpanKind.PRODUCER):
+        with telemetry.span("arcticdb.read"):
+            pass
+
+    # inside a task root span everything is kept
+    ti = _ti()
+    airflow_plugin.start_task_span(ti)
+    with telemetry.span("arcticdb.write"):
+        pass
+    airflow_plugin.end_task_span(ti)
+
+    names = sorted(s.name for s in exporter.get_finished_spans())
+    assert names == ["airflow.task d.t", "arcticdb.write"]
+    provider.shutdown()
+
+
+def test_sampler_entry_point_is_registered() -> None:
+    from importlib.metadata import entry_points
+
+    eps = entry_points(group="opentelemetry_traces_sampler", name="tradingo_task")
+    assert [e.value for e in eps] == ["tradingo.sampler:task_root_sampler"]
