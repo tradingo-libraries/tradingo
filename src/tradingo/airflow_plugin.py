@@ -91,6 +91,14 @@ def end_task_span(ti: Any, error: BaseException | str | None = None) -> None:
     except Exception:  # detached from a different context: harmless, span still ends
         logger.debug("could not detach task span context", exc_info=True)
     span.end()
+    # The task process may leave via os._exit(), skipping the SDK's atexit flush, which would
+    # drop the batch holding this task's spans. One flush per task is cheap.
+    flush = getattr(trace.get_tracer_provider(), "force_flush", None)
+    if flush is not None:
+        try:
+            flush(5000)
+        except Exception:
+            logger.debug("span flush failed", exc_info=True)
 
 
 def build_plugin() -> Any:
