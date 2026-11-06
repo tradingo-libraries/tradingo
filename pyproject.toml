@@ -48,6 +48,7 @@ dev = [
   "types-croniter>=6.0.0.20250809",
   "fakeredis>=2.35.1",
   "pytest-xdist[psutil]>=3.8.0",
+  "opentelemetry-sdk>=1.27",
 ]
 research = [
   "dtale",
@@ -86,6 +87,12 @@ requires = [
 [tool.black]
 line-length = 88
 target-version = ['py311']
+
+[project.entry-points."airflow.plugins"]
+tradingo_otel = "tradingo.airflow_plugin:TradingoOtelPlugin"
+
+[project.entry-points.opentelemetry_traces_sampler]
+tradingo_task = "tradingo.sampler:task_root_sampler"
 
 [project.scripts]
 tradingo-cli = "tradingo.cli:main"

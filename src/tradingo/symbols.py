@@ -24,6 +24,8 @@ import pandas as pd
 from arcticdb.exceptions import NoSuchVersionException
 from arcticdb_ext.exceptions import InternalException
 
+from tradingo import telemetry
+
 logger = logging.getLogger(__name__)
 
 
@@ -416,21 +418,33 @@ def symbol_provider(
                 return_metadata = bool(read_kwargs.pop("metadata", False))
                 is_optional = bool(read_kwargs.pop("optional", False))
                 try:
-                    item = arctic.get_library(
-                        symbol.library,
-                        create_if_missing=True,
-                    ).read(
-                        symbol.symbol,
-                        date_range=(
-                            None
-                            if (with_no_date or return_metadata)
-                            else (
-                                pd.Timestamp(start_date) if start_date else None,
-                                pd.Timestamp(end_date) if end_date else None,
-                            )
-                        ),
-                        **read_kwargs,
-                    )
+                    with telemetry.span(
+                        "arcticdb.read",
+                        **{
+                            "db.system": "arcticdb",
+                            "db.operation": "read",
+                            "arcticdb.library": symbol.library,
+                            "arcticdb.symbol": symbol.symbol,
+                        },
+                    ) as read_span:
+                        item = arctic.get_library(
+                            symbol.library,
+                            create_if_missing=True,
+                        ).read(
+                            symbol.symbol,
+                            date_range=(
+                                None
+                                if (with_no_date or return_metadata)
+                                else (
+                                    pd.Timestamp(start_date) if start_date else None,
+                                    pd.Timestamp(end_date) if end_date else None,
+                                )
+                            ),
+                            **read_kwargs,
+                        )
+                        telemetry.annotate(
+                            read_span, **{"arcticdb.version": item.version}
+                        )
                     if return_metadata:
                         return item.metadata  # type: ignore[no-any-return]
                     data = item.data
@@ -637,32 +651,42 @@ def symbol_publisher(
                         data = _coerce_to_schema(
                             lib, sym, data, coerce_columns, coerce_index, coerce_types
                         )
-                    if isinstance(data.index, pd.DatetimeIndex):
-                        if clean:
-                            lib.delete(sym)
-                        result = lib.update(
-                            sym,
-                            data,
-                            upsert=True,
-                            date_range=(data.index[0], data.index[-1]),
-                            metadata=write_metadata,
-                            **params,
-                        )
-                    elif write_pickle:
-                        result = lib.write_pickle(
-                            sym,
-                            data,
-                            metadata=write_metadata,
-                            **params,
-                        )
+                    with telemetry.span(
+                        "arcticdb.write",
+                        **{
+                            "db.system": "arcticdb",
+                            "db.operation": "write",
+                            "arcticdb.library": lib_name,
+                            "arcticdb.symbol": sym,
+                            "arcticdb.rows": len(data.index),
+                        },
+                    ):
+                        if isinstance(data.index, pd.DatetimeIndex):
+                            if clean:
+                                lib.delete(sym)
+                            result = lib.update(
+                                sym,
+                                data,
+                                upsert=True,
+                                date_range=(data.index[0], data.index[-1]),
+                                metadata=write_metadata,
+                                **params,
+                            )
+                        elif write_pickle:
+                            result = lib.write_pickle(
+                                sym,
+                                data,
+                                metadata=write_metadata,
+                                **params,
+                            )
 
-                    else:
-                        result = lib.write(
-                            sym,
-                            data,
-                            metadata=write_metadata,
-                            **params,
-                        )
+                        else:
+                            result = lib.write(
+                                sym,
+                                data,
+                                metadata=write_metadata,
+                                **params,
+                            )
 
                     libraries[lib.name][result.symbol] = result.version
 
@@ -671,10 +695,19 @@ def symbol_publisher(
                     logging.info(
                         "Snapshotting %s for %s %s", lib_name, snapshot, versions
                     )
-                    lib = arctic.get_library(lib_name)
-                    if snapshot in lib.list_snapshots():
-                        lib.delete_snapshot(snapshot)
-                    lib.snapshot(snapshot_name=snapshot, versions=versions)
+                    with telemetry.span(
+                        "arcticdb.snapshot",
+                        **{
+                            "db.system": "arcticdb",
+                            "db.operation": "snapshot",
+                            "arcticdb.library": lib_name,
+                            "arcticdb.snapshot": snapshot,
+                        },
+                    ):
+                        lib = arctic.get_library(lib_name)
+                        if snapshot in lib.list_snapshots():
+                            lib.delete_snapshot(snapshot)
+                        lib.snapshot(snapshot_name=snapshot, versions=versions)
 
             if dry_run:
                 assert isinstance(out, tuple)
