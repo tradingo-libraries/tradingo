@@ -23,7 +23,7 @@
   function: tradingo.sampling.yf.sample_equity
   params:
     ticker: "{{ ticker }}"
-    start_date: "{{ data_interval_start }}"
+    start_date: "{{ start_date if start_date is defined else data_interval_start }}"
     end_date: "{{ data_interval_end }}"
     interval: "{{ interval }}"
 # {% endfor %}
@@ -32,7 +32,7 @@
   function: tradingo.sampling.yf.create_universe
   params:
     pricelib: "{{ raw_prices_lib }}"
-    start_date: "{{ data_interval_start }}"
+    start_date: "{{ start_date if start_date is defined else data_interval_start }}"
     end_date: "{{ data_interval_end }}"
   depends_on:
     # {%for ticker in tickers %}
@@ -53,7 +53,7 @@
 "sample.{{ universe_name }}.{{ currency }}":
   function: tradingo.sampling.yf.convert_prices_to_ccy
   params:
-    start_date: "{{ data_interval_start }}"
+    start_date: "{{ start_date if start_date is defined else data_interval_start }}"
     end_date: "{{ data_interval_end }}"
     currency: "{{ currency }}"
     ffill_limit: {{ price_ffill_limit | default(10) }}
