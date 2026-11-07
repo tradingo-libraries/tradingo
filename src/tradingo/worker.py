@@ -64,6 +64,7 @@ try:
         """
         from arcticdb import Arctic
 
+        from tradingo import telemetry
         from tradingo.dag import Task
 
         arctic_uri = os.environ["TP_ARCTIC_URI"]
@@ -85,7 +86,11 @@ try:
 
         task_kwargs = Task.prepare_kwargs(dict(task.task_kwargs), kwargs)
         logger.info("Worker executing task: %s", task.name)
-        task.function(*task.task_args, **task_kwargs)
+        with telemetry.span(
+            f"tradingo.task {task.name}",
+            **{"tradingo.task": task.name, "tradingo.function": task_spec["function"]},
+        ):
+            task.function(*task.task_args, **task_kwargs)
         return task.name
 
 except ImportError:

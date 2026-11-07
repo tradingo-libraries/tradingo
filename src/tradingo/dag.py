@@ -22,7 +22,7 @@ from typing import Any, Iterable, cast
 
 import pandas as pd
 
-from . import symbols
+from . import symbols, telemetry
 from .config import ConfigLoadError
 from .execution_plan import ExecutionPlan
 from .worker import serialize_task
@@ -157,7 +157,11 @@ class Task:
             if self.state == TaskState.PENDING or force_rerun:
                 state = TaskState.FAILED
                 print(f"Running {self}")
-                self.function(*self.task_args, *args, **task_kwargs)
+                with telemetry.span(
+                    f"tradingo.task {self.name}",
+                    **{"tradingo.task": self.name, "tradingo.function": self._function},
+                ):
+                    self.function(*self.task_args, *args, **task_kwargs)
                 self.state = state = TaskState.SUCCESS
         finally:
             self.state = state
