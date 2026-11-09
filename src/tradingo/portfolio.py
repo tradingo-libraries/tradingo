@@ -340,7 +340,9 @@ def _lot_size_decimals(lot_sizes: npt.NDArray[np.float64]) -> list[int]:
     ]
 
 
-@numba.jit(nopython=True)
+# cache=True: each Airflow task is a fresh process; without the on-disk cache this was
+# recompiled on every igtrading run (~17s of portfolio.intraday.pipeline on the NUCs).
+@numba.jit(nopython=True, cache=True)
 def _apply_min_deal_filter(
     rounded: npt.NDArray[np.float64],
     min_deals: npt.NDArray[np.float64],
