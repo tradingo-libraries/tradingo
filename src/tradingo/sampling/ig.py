@@ -37,7 +37,17 @@ def get_ig_service(
     api_key: str | None = None,
     acc_type: str | None = None,
     acc_number: str | None = None,
+    use_rate_limiter: bool = False,
 ) -> IGService:
+    """Logged-in IG session.
+
+    :param use_rate_limiter: trading_ig's in-process token bucket. Its setup sleeps
+        60/allowance (~2.1s) on login, then a further ~2.1s before every request after
+        the first. It is per process, so it never throttled parallel DAG tasks against
+        each other. Off by default: DAG tasks make a handful of requests each and the
+        retryer below backs off on ``ApiExceededException``. Turn it on for bulk loops
+        that make many requests from one process.
+    """
     config = IGTradingConfig.from_env()
 
     retryer = Retrying(
@@ -51,7 +61,7 @@ def get_ig_service(
         api_key=api_key or config.api_key,
         acc_type=acc_type or config.acc_type,
         acc_number=acc_number or config.acc_number,
-        use_rate_limiter=True,
+        use_rate_limiter=use_rate_limiter,
         retryer=retryer,
     )
 

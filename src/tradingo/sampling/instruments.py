@@ -57,7 +57,8 @@ def download_instruments(
         )
 
     if epics:
-        service = get_ig_service()
+        # One request per epic from this process: keep the rate limiter on.
+        service = get_ig_service(use_rate_limiter=True)
 
         return (
             pd.DataFrame(

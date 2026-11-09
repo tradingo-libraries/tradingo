@@ -347,6 +347,19 @@ class TestGetIgService:
 
         mock_service.create_session.assert_called_once()
         assert service == mock_service
+        # The limiter's login sleep costs ~2s per DAG task; off unless asked for.
+        assert mock_ig_service_cls.call_args[1]["use_rate_limiter"] is False
+
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_rate_limiter_opt_in(
+        self, mock_ig_service_cls: MagicMock, mock_config: MagicMock
+    ) -> None:
+        from tradingo.sampling.ig import get_ig_service
+
+        get_ig_service(use_rate_limiter=True)
+
+        assert mock_ig_service_cls.call_args[1]["use_rate_limiter"] is True
 
     @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
     @patch("tradingo.sampling.ig.IGService")

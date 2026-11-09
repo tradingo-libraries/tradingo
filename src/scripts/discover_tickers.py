@@ -126,7 +126,7 @@ def discover(
         ig_candidates has every IG market match found, for manual
         disambiguation.
     """
-    service = get_ig_service()
+    service = get_ig_service(use_rate_limiter=True)
     db_client = db.Historical()
 
     rows = []
