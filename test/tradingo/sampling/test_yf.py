@@ -162,6 +162,15 @@ def test_add_cent_adds_gbp_pence_column() -> None:
     assert result["GBp"].iloc[0] == pytest.approx(0.01)
 
 
+def test_gbp_pence_is_gbp_times_one_hundredth() -> None:
+    """GBp is one hundredth of the GBP rate (pence are 1/100 of a pound)."""
+    fx = pd.DataFrame({"GBPUSD": 1.25}, index=IDX)
+    result = adjust_fx_series(fx, ref_ccy="USD", add_cent=True)
+    # ref is the quote leg (USD), so the GBP rate is not inverted: it stays 1.25.
+    assert result["GBp"].iloc[0] == pytest.approx(result["GBP"].iloc[0] * 0.01)
+    assert result["GBp"].iloc[0] == pytest.approx(1.25 * 0.01)
+
+
 def test_unrelated_ccy_raises() -> None:
     fx = pd.DataFrame({"EURUSD": 1.1}, index=IDX)
     with pytest.raises(ValueError, match="reference currency"):
