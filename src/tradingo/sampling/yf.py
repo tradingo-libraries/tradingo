@@ -3,6 +3,7 @@
 import logging
 from typing import cast
 
+import numpy as np
 import pandas as pd
 import pycountry
 import yfinance as yf
@@ -98,6 +99,13 @@ def sample_equity(
     if not prices.index.tz:
         prices = prices.tz_localize("utc")
 
+    if "Volume" in prices.columns:
+        # yfinance returns Volume as int64 when the window has no missing
+        # values and float64 when it does (e.g. prepost gaps), which trips
+        # ArcticDB's strict dtype match on update() against already-stored
+        # data. Pin it to float64 so every fetch is schema-compatible.
+        prices["Volume"] = prices["Volume"].astype("float64")
+
     return cast(pd.DataFrame, prices.tz_convert("utc"))
 
 
@@ -142,16 +150,15 @@ def create_universe(
             missing_symbol,
         )
 
+    # keys must be built from the same filtered list as the frames, otherwise
+    # a missing symbol shifts every later label onto the wrong series.
+    present_symbols = [
+        symbol for symbol in instruments.index.to_list() if symbol in available_symbols
+    ]
     result = pd.concat(
-        (
-            (
-                get_data(symbol)
-                for symbol in instruments.index.to_list()
-                if symbol in available_symbols
-            )
-        ),
+        [get_data(symbol) for symbol in present_symbols],
         axis=1,
-        keys=instruments.index.to_list(),
+        keys=present_symbols,
     ).reorder_levels([1, 0], axis=1)
     return (
         cast(pd.DataFrame, result["Open"]),
@@ -203,9 +210,26 @@ def adjust_fx_series(
     return adjusted_fx.loc[:, ~adjusted_fx.columns.duplicated()]
 
 
+def _reindex_ffill(
+    series: pd.Series,
+    other: pd.DataFrame | pd.Series,
+    limit: pd.offsets.BaseOffset,
+) -> pd.Series:
+    merged = pd.merge_asof(
+        other.index.to_frame(name="datetime"),
+        series.to_frame("value").reset_index(names="date"),
+        left_on="datetime",
+        right_on="date",
+        direction="backward",
+    )
+    merged.loc[merged["datetime"] > merged["date"] + limit, "value"] = np.nan
+    return merged.set_index("datetime")["value"].rename(series.name)  # type: ignore
+
+
 def _align_series(
     series: pd.Series,
     other: pd.Series | float | int | None = None,
+    limit: pd.offsets.BaseOffset = pd.offsets.BDay(1),
 ) -> tuple[pd.Series, pd.Series]:
     """
     align a series to another ahead of returns calculation
@@ -219,9 +243,7 @@ def _align_series(
     elif isinstance(other, (float, int)):
         other = pd.Series(other, index=series.index, name=series.name)
     elif isinstance(other, pd.Series):
-        common_idx = series.index.intersection(other.index)
-        series = series.reindex(common_idx).dropna()
-        other = other.reindex(common_idx).dropna()
+        series = _reindex_ffill(series, other, limit)
     else:
         raise TypeError(type(other))
 

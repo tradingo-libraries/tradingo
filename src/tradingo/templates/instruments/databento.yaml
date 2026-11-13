@@ -1,0 +1,65 @@
+# 1. universe_name: descriptive name of the universe
+# 2. symbols: list of raw Databento symbols (e.g. the tickers requested in
+#    the batch download's metadata.json "query.symbols")
+# 3. databento_path: path to a Databento historical/batch download directory
+#    (or a single .dbn/.dbn.zst file)
+# 4. databento_schema: DBN schema to ingest (default "ohlcv-1m")
+# 5. raw_prices_lib: ArcticDB library name for raw price storage
+# 6. start_date / end_date: date range for create_universe — optional,
+#    defaults to data_interval_start / data_interval_end (the Airflow
+#    trigger window). Databento historical downloads are static files
+#    covering a fixed range decided at download time, not incremental daily
+#    pulls, so a one-off/backfill DAG run should normally pass explicit
+#    start_date/end_date covering the whole download rather than relying on
+#    a single trigger's narrow data_interval window.
+#
+# Unlike the yfinance/IG/IB providers, Databento historical downloads are
+# static files already sitting on disk rather than a live API — there is one
+# bulk ingest task (not one task per symbol) that decodes the download once
+# and publishes every symbol's OHLCV bars it finds via a template symbol
+# name, mirroring sampling.ig.get_activity_history.
+
+"download.{{ universe_name }}":
+  depends_on: []
+  function: tradingo.sampling.databento.download_instruments
+  symbols_out:
+    - "instruments/{{ universe_name }}"
+  publish_args:
+    write_pickle: true
+  params:
+    path: "{{ databento_path }}"
+  enabled: {{ TP_INCLUDE_INSTRUMENTS }}
+
+"sample.{{ universe_name }}.raw":
+  depends_on: []
+  function: tradingo.sampling.databento.ingest_bars
+  params:
+    path: "{{ databento_path }}"
+    schema: "{{ databento_schema | default('ohlcv-1m') }}"
+    symbols: {{ symbols }}
+  publish_args:
+    template: "{{ raw_prices_lib }}/{0}"
+    astype: float
+  symbols_out:
+  #{% for symbol in symbols %}
+    - "{{ raw_prices_lib }}/{{ symbol }}"
+  #{% endfor %}
+
+"sample.{{ universe_name }}":
+  function: tradingo.sampling.databento.create_universe
+  params:
+    pricelib: "{{ raw_prices_lib }}"
+    start_date: "{{ start_date if start_date is defined else data_interval_start }}"
+    end_date: "{{ end_date if end_date is defined else data_interval_end }}"
+  depends_on:
+    - "sample.{{ universe_name }}.raw"
+  symbols_in:
+    instruments: "instruments/{{ universe_name }}"
+  load_args:
+    no_date: true
+  publish_args:
+    astype: float
+  symbols_out:
+  #{% for occurence in ["open", "high", "low", "close", "volume"] %}
+  - prices/{{ universe_name }}.mid.{{ occurence }}
+  #{% endfor %}

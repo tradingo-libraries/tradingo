@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
+import re
 from collections import defaultdict
 from collections.abc import Callable
 from typing import (
@@ -22,6 +23,8 @@ import numpy as np
 import pandas as pd
 from arcticdb.exceptions import NoSuchVersionException
 from arcticdb_ext.exceptions import InternalException
+
+from tradingo import telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +56,6 @@ Ret = TypeVar(
 
 
 def _add_params(function: Callable[P, ROpt], *args: str) -> None:
-
     origsig = inspect.signature(function)
     orig_params = list(origsig.parameters.values())
     for arg in args:
@@ -69,6 +71,158 @@ def _add_params(function: Callable[P, ROpt], *args: str) -> None:
             )
 
     function.__signature__ = origsig.replace(parameters=orig_params)  # type: ignore
+
+
+def _coerce_columns(
+    data: pd.DataFrame,
+    expected: list[str],
+    symbol: str,
+) -> pd.DataFrame:
+    """Add missing / drop unexpected columns and reorder to match ``expected``."""
+    present = set(data.columns)
+    missing = [c for c in expected if c not in present]
+    extra = [c for c in data.columns if c not in set(expected)]
+    if missing:
+        logger.warning("%s: adding missing columns %s (filled NaN)", symbol, missing)
+    if extra:
+        logger.warning("%s: dropping columns not in stored schema %s", symbol, extra)
+    if list(data.columns) != expected and not (missing or extra):
+        logger.warning("%s: reordering columns to match stored schema", symbol)
+    return data.reindex(columns=expected)
+
+
+_ARCTIC_TO_NUMPY = {
+    "FLOAT64": "float64",
+    "FLOAT32": "float32",
+    "INT64": "int64",
+    "INT32": "int32",
+    "INT16": "int16",
+    "INT8": "int8",
+    "UINT64": "uint64",
+    "UINT32": "uint32",
+    "UINT16": "uint16",
+    "UINT8": "uint8",
+    "BOOL8": "bool",
+    "NANOSECONDS_UTC64": "datetime64[ns]",
+}
+
+
+def _coerce_types(
+    data: pd.DataFrame,
+    expected: dict[str, str],
+    symbol: str,
+) -> pd.DataFrame:
+    """Cast columns to the dtypes of the stored symbol.
+
+    ``expected`` maps column name to the ArcticDB type name (e.g. ``FLOAT64``).
+    Columns not in ``expected`` are left alone; string types are cast to ``str``.
+    """
+    data = data.copy(deep=False)
+    for column, type_name in expected.items():
+        if column not in data.columns:
+            continue
+        series = data[column]
+        if type_name.startswith(("UTF", "ASCII")):
+            if (
+                series.dtype == object
+                and series.map(lambda v: pd.isna(v) or isinstance(v, str)).all()
+            ):
+                continue
+            logger.warning("%s: casting column %r to str", symbol, column)
+            data[column] = series.map(lambda v: v if pd.isna(v) else str(v)).astype(
+                object
+            )
+            continue
+        target = _ARCTIC_TO_NUMPY.get(type_name)
+        if target is None:
+            continue
+        if target == "datetime64[ns]" and isinstance(series.dtype, pd.DatetimeTZDtype):
+            continue
+        if series.dtype != np.dtype(target):
+            logger.warning(
+                "%s: casting column %r from %s to %s",
+                symbol,
+                column,
+                series.dtype,
+                target,
+            )
+            data[column] = series.astype(np.dtype(target), errors="ignore")
+    return data
+
+
+def _coerce_index(
+    data: pd.DataFrame,
+    expected_name: str | None,
+    expect_datetime: bool,
+    symbol: str,
+) -> pd.DataFrame:
+    """Coerce the index to a UTC DatetimeIndex with the expected name."""
+    index = data.index
+    if expect_datetime and not isinstance(index, pd.DatetimeIndex):
+        logger.warning("%s: index is %s, casting to DatetimeIndex", symbol, type(index))
+        index = pd.DatetimeIndex(index)
+    if isinstance(index, pd.DatetimeIndex):
+        if index.tz is None:
+            logger.warning("%s: index is tz-naive, localizing to UTC", symbol)
+            index = index.tz_localize("UTC")
+        elif str(index.tz) != "UTC":
+            logger.warning("%s: index tz is %s, converting to UTC", symbol, index.tz)
+            index = index.tz_convert("UTC")
+    if expected_name is not None and index.name != expected_name:
+        logger.warning(
+            "%s: index name %r != stored %r, renaming",
+            symbol,
+            index.name,
+            expected_name,
+        )
+        index = index.rename(expected_name)
+    if index is data.index:
+        return data
+    data = data.copy(deep=False)
+    data.index = index
+    return data
+
+
+def _coerce_to_schema(
+    lib: adb.library.Library,
+    sym: str,
+    data: pd.DataFrame,
+    coerce_columns: bool,
+    coerce_index: bool,
+    coerce_types: bool = False,
+) -> pd.DataFrame:
+    """Coerce ``data`` to the schema of the existing symbol, where one exists."""
+    description = None
+    try:
+        description = lib.get_description(sym)
+    except NoSuchVersionException:
+        pass
+
+    if coerce_index:
+        stored_index = (
+            description.index[0] if description and description.index else None
+        )
+        data = _coerce_index(
+            data,
+            expected_name=stored_index.name if stored_index else None,
+            expect_datetime=(
+                stored_index is not None and "UTC64" in str(stored_index.dtype)
+            )
+            or isinstance(data.index, pd.DatetimeIndex),
+            symbol=sym,
+        )
+    if coerce_columns and description is not None:
+        data = _coerce_columns(data, [c.name for c in description.columns], sym)
+    if coerce_types and description is not None:
+        data = _coerce_types(
+            data,
+            {
+                c.name: re.search(r"type=(\w+)", str(c.dtype)).group(1)  # type: ignore[union-attr]
+                for c in description.columns
+            },
+            sym,
+        )
+    return data
 
 
 class SymbolParseError(Exception):
@@ -98,7 +252,7 @@ class Symbol(NamedTuple):
             symbol = base.format(**string_kwargs)
             parsed_symbol = urlparse(symbol)
             try:
-                lib, sym = parsed_symbol.path.split("/")
+                lib, sym = parsed_symbol.path.split("/", maxsplit=1)
             except ValueError as ex:
                 raise SymbolParseError(f"symbol {symbol} is invalid.") from ex
             kwargs = dict(parse_qsl(parsed_symbol.query))
@@ -118,12 +272,13 @@ class Symbol(NamedTuple):
                     continue
             if key == "columns":
                 kwargs[key] = list(kwargs[key].split(","))
+            if key in ("metadata", "optional"):
+                kwargs[key] = str(value).lower() in ("true", "1")
 
         return cls(lib, symbol_prefix + sym + symbol_postfix, kwargs)
 
 
 class LibProvided(Protocol[P, Ret]):
-
     def __call__(
         self,
         arctic: adb.Arctic,
@@ -138,7 +293,6 @@ def lib_provider(
     [Callable[Concatenate[adb.Arctic, P], ROpt]],
     LibProvided[P, ROpt],
 ]:
-
     def decorator(
         func: Callable[Concatenate[adb.Arctic, P], ROpt],
     ) -> LibProvided[P, ROpt]:
@@ -175,7 +329,6 @@ def lib_provider(
 
 
 class SymbolProvided(Protocol[P, ROptCov]):
-
     def __call__(
         self,
         arctic: adb.Arctic,
@@ -193,7 +346,6 @@ def symbol_provider(
     no_date: bool = False,
     **symbols: str | list[str],
 ) -> Callable[[Callable[P, ROpt]], SymbolProvided[P, ROpt]]:
-
     def decorator(
         func: Callable[P, ROpt],
     ) -> SymbolProvided[P, ROpt]:
@@ -234,7 +386,7 @@ def symbol_provider(
             def get_symbol_data(
                 v: str | list[str] | dict[str, str],
                 with_no_date: bool = False,
-            ) -> pd.DataFrame | dict[str, pd.DataFrame] | None:
+            ) -> pd.DataFrame | dict[str, Any] | None:
                 if isinstance(v, dict):
                     return {
                         key: get_symbol_data(item, with_no_date=with_no_date)
@@ -262,26 +414,40 @@ def symbol_provider(
                     symbol_prefix=symbol_prefix,
                     symbol_postfix=symbol_postfix,
                 )
+                read_kwargs = dict(symbol.kwargs)
+                return_metadata = bool(read_kwargs.pop("metadata", False))
+                is_optional = bool(read_kwargs.pop("optional", False))
                 try:
-                    data = (
-                        arctic.get_library(
+                    with telemetry.span(
+                        "arcticdb.read",
+                        **{
+                            "db.system": "arcticdb",
+                            "db.operation": "read",
+                            "arcticdb.library": symbol.library,
+                            "arcticdb.symbol": symbol.symbol,
+                        },
+                    ) as read_span:
+                        item = arctic.get_library(
                             symbol.library,
                             create_if_missing=True,
-                        )
-                        .read(
+                        ).read(
                             symbol.symbol,
                             date_range=(
                                 None
-                                if with_no_date
+                                if (with_no_date or return_metadata)
                                 else (
                                     pd.Timestamp(start_date) if start_date else None,
                                     pd.Timestamp(end_date) if end_date else None,
                                 )
                             ),
-                            **symbol.kwargs,
+                            **read_kwargs,
                         )
-                        .data
-                    )
+                        telemetry.annotate(
+                            read_span, **{"arcticdb.version": item.version}
+                        )
+                    if return_metadata:
+                        return item.metadata  # type: ignore[no-any-return]
+                    data = item.data
                     assert isinstance(data, pd.DataFrame)
                     if (
                         not with_no_date
@@ -293,12 +459,13 @@ def symbol_provider(
                 except InternalException as ex:
                     if (
                         "The data for this symbol is pickled" in ex.args[0]
+                        or "Cannot apply date range filter to symbol" in ex.args[0]
                         or "on pickled data" in ex.args[0]
                     ):
                         return get_symbol_data(v, with_no_date=True)
                     raise ex
                 except NoSuchVersionException as ex:
-                    if not raise_if_missing:
+                    if not raise_if_missing or is_optional:
                         return None
                     raise ex
 
@@ -336,7 +503,7 @@ def symbol_provider(
 
 def _envoke_symbology_function(
     function: Callable[..., ROpt],
-    arctic: adb.Arctic,
+    arctic: adb.Arctic | None,
     *args: object,
     **kwargs: object,
 ) -> ROpt:
@@ -350,6 +517,12 @@ def _envoke_symbology_function(
         kwargs.setdefault("end_date", kwargs.get("end_date", None))
     else:
         kwargs.pop("end_date", None)
+
+    # Envelope behaviour params: only forward if explicitly declared
+    for param in ("clean", "dry_run", "snapshot"):
+        if param not in sig.parameters:
+            kwargs.pop(param, None)
+
     if "arctic" in sig.parameters:
         kwargs.setdefault("arctic", arctic)
     else:
@@ -359,13 +532,12 @@ def _envoke_symbology_function(
 
 
 class PublishedFunction(Protocol[P, Ret]):
-
     def __call__(
         self,
-        arctic: adb.Arctic,
+        arctic: adb.Arctic | None = None,
         dry_run: bool = True,
         snapshot: str | None = None,
-        clean: bool = False,
+        clean: bool | None = None,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> pd.DataFrame | None: ...
@@ -379,15 +551,19 @@ def symbol_publisher(
     template: str | None = None,
     library_options: adb.LibraryOptions | None = None,
     write_pickle: bool = False,
+    metadata: dict[str, Any] | None = None,
+    coerce_columns: bool = False,
+    coerce_index: bool = False,
+    coerce_types: bool = False,
 ) -> Callable[[Callable[P, R]], PublishedFunction[P, R]]:
     def decorator(
         func: Callable[P, R],
     ) -> PublishedFunction[P, R]:
         def wrapper(
-            arctic: adb.Arctic,
+            arctic: adb.Arctic | None = None,
             dry_run: bool = True,
             snapshot: str | None = None,
-            clean: bool = False,
+            clean: bool | None = None,
             *args: P.args,
             **kwargs: P.kwargs,
         ) -> pd.DataFrame | None:
@@ -399,6 +575,9 @@ def symbol_publisher(
                     arctic,
                     start_date=kwargs.pop("start_date", None),
                     end_date=kwargs.pop("end_date", None),
+                    clean=clean,
+                    dry_run=dry_run,
+                    snapshot=snapshot,
                     **kwargs,
                 )
             )
@@ -410,10 +589,23 @@ def symbol_publisher(
             if not symbols and not template:
                 return out  # type: ignore[return-value]
 
+            assert arctic is not None, "arctic must be provided when publishing symbols"
             # Publishing implies the function produced data.
             assert out is not None
+
+            # Extract dynamic metadata from trailing dict in return tuple.
+            dynamic_metadata: dict[str, Any] = {}
+            if isinstance(out, (tuple, list)) and out and isinstance(out[-1], dict):
+                *_frames, dynamic_metadata = out
+                out = tuple(_frames)
+
             if not isinstance(out, (tuple, list)):
                 out = (out,)
+
+            write_metadata: dict[str, Any] | None = {
+                **(metadata or {}),
+                **dynamic_metadata,
+            } or None
 
             logger.info("Publishing %s to %s", symbols or template, arctic)
 
@@ -455,21 +647,46 @@ def symbol_publisher(
                         create_if_missing=True,
                         library_options=library_options,
                     )
-                    if isinstance(data.index, pd.DatetimeIndex):
-                        if clean:
-                            lib.delete(sym)
-                        result = lib.update(
-                            sym,
-                            data,
-                            upsert=True,
-                            date_range=(data.index[0], data.index[-1]),
-                            **params,
+                    if coerce_columns or coerce_index or coerce_types:
+                        data = _coerce_to_schema(
+                            lib, sym, data, coerce_columns, coerce_index, coerce_types
                         )
-                    elif write_pickle:
-                        result = lib.write_pickle(sym, data, **params)
+                    with telemetry.span(
+                        "arcticdb.write",
+                        **{
+                            "db.system": "arcticdb",
+                            "db.operation": "write",
+                            "arcticdb.library": lib_name,
+                            "arcticdb.symbol": sym,
+                            "arcticdb.rows": len(data.index),
+                        },
+                    ):
+                        if isinstance(data.index, pd.DatetimeIndex):
+                            if clean:
+                                lib.delete(sym)
+                            result = lib.update(
+                                sym,
+                                data,
+                                upsert=True,
+                                date_range=(data.index[0], data.index[-1]),
+                                metadata=write_metadata,
+                                **params,
+                            )
+                        elif write_pickle:
+                            result = lib.write_pickle(
+                                sym,
+                                data,
+                                metadata=write_metadata,
+                                **params,
+                            )
 
-                    else:
-                        result = lib.write(sym, data, **params)
+                        else:
+                            result = lib.write(
+                                sym,
+                                data,
+                                metadata=write_metadata,
+                                **params,
+                            )
 
                     libraries[lib.name][result.symbol] = result.version
 
@@ -478,10 +695,19 @@ def symbol_publisher(
                     logging.info(
                         "Snapshotting %s for %s %s", lib_name, snapshot, versions
                     )
-                    lib = arctic.get_library(lib_name)
-                    if snapshot in lib.list_snapshots():
-                        lib.delete_snapshot(snapshot)
-                    lib.snapshot(snapshot_name=snapshot, versions=versions)
+                    with telemetry.span(
+                        "arcticdb.snapshot",
+                        **{
+                            "db.system": "arcticdb",
+                            "db.operation": "snapshot",
+                            "arcticdb.library": lib_name,
+                            "arcticdb.snapshot": snapshot,
+                        },
+                    ):
+                        lib = arctic.get_library(lib_name)
+                        if snapshot in lib.list_snapshots():
+                            lib.delete_snapshot(snapshot)
+                        lib.snapshot(snapshot_name=snapshot, versions=versions)
 
             if dry_run:
                 assert isinstance(out, tuple)

@@ -35,7 +35,7 @@ repos:
         pass_filenames: false
       - id: pytest
         name: run pytest
-        entry: "uv run pytest"
+        entry: "uv run pytest -n auto"
         language: system
         types: [python]
         pass_filenames: false

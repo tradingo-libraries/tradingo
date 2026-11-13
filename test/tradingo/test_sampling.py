@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+from arcticdb import ReadRequest
 
 from tradingo.sampling.yf import (
     ProviderDataError,
@@ -197,11 +198,19 @@ class TestAlignSeries:
         assert s2.name == "test"
 
     def test_align_series_with_series(self) -> None:
-        s1 = pd.Series([1, 2, 3], index=[0, 1, 2])
-        s2 = pd.Series([4, 5, 6], index=[1, 2, 3])
+        s1 = pd.Series([1, 2, 3], index=pd.date_range("2026-05-19", periods=3))
+        s2 = pd.Series([4, 5, 6], index=pd.date_range("2026-05-20", periods=3))
         result1, result2 = _align_series(s1, s2)
-        assert list(result1.index) == [1, 2]
-        assert list(result2.index) == [1, 2]
+        pd.testing.assert_index_equal(
+            result1.index,
+            pd.date_range("2026-05-20", periods=3),
+            check_names=False,
+        )
+        pd.testing.assert_index_equal(
+            result2.index,
+            pd.date_range("2026-05-20", periods=3),
+            check_names=False,
+        )
 
     def test_align_series_invalid_type_raises(self) -> None:
         s = pd.Series([1, 2, 3])
@@ -338,6 +347,19 @@ class TestGetIgService:
 
         mock_service.create_session.assert_called_once()
         assert service == mock_service
+        # The limiter's login sleep costs ~2s per DAG task; off unless asked for.
+        assert mock_ig_service_cls.call_args[1]["use_rate_limiter"] is False
+
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_rate_limiter_opt_in(
+        self, mock_ig_service_cls: MagicMock, mock_config: MagicMock
+    ) -> None:
+        from tradingo.sampling.ig import get_ig_service
+
+        get_ig_service(use_rate_limiter=True)
+
+        assert mock_ig_service_cls.call_args[1]["use_rate_limiter"] is True
 
     @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
     @patch("tradingo.sampling.ig.IGService")
@@ -822,15 +844,22 @@ class TestIgCreateUniverse:
             ),
         )
 
-        def read_side_effect(symbol: str, date_range: Any = None) -> MagicMock:
+        def read_side_effect(
+            symbol: str | ReadRequest,
+            date_range: Any = None,
+        ) -> MagicMock:
             mock_item = MagicMock()
             if ".bid" in symbol:
                 mock_item.data = bid_data
             else:
                 mock_item.data = ask_data
+            if isinstance(symbol, ReadRequest):
+                symbol = symbol.symbol
+            mock_item.symbol = symbol
             return mock_item
 
         mock_lib.read.side_effect = read_side_effect
+        mock_lib.read_batch.side_effect = lambda s: [read_side_effect(i) for i in s]
 
         instruments = pd.DataFrame(
             {"name": ["FTSE 100"]},
@@ -846,7 +875,47 @@ class TestIgCreateUniverse:
         )
 
         assert len(result) == 12  # 4 bid + 4 ask + 4 mid
-        assert mock_lib.read.call_count == 2  # bid and ask
+        assert mock_lib.read_batch.call_count == 1  # bid and ask
+
+
+class TestMeasureIgPriceScales:
+    """Measure IG price / source price for dukascopy and yfinance mappings."""
+
+    def test_measure_ig_price_scales(self) -> None:
+        from tradingo.sampling.instruments import measure_ig_price_scales
+
+        def market(epic: str, bid: float | None, offer: float | None) -> Any:
+            return {
+                "instrument": {"epic": epic, "name": epic},
+                "snapshot": {"bid": bid, "offer": offer, "marketStatus": "TRADEABLE"},
+            }
+
+        service = MagicMock()
+        service.fetch_markets_by_epics.return_value = [
+            market("CS.D.USDJPY.TODAY.IP", 15840.0, 15841.0),
+            market("CS.D.USDCAD.TODAY.IP", 13972.0, 13973.0),
+            market("CC.D.VIX.USS.IP", None, None),
+        ]
+        prices = pd.Series({"USD/JPY": 158.42, "USD/CAD": 1.39716, "VOL": 17.6})
+
+        result = measure_ig_price_scales(
+            prices,
+            {
+                "USD/JPY": "CS.D.USDJPY.TODAY.IP",
+                "USD/CAD": "CS.D.USDCAD.TODAY.IP",
+                "VOL": "CC.D.VIX.USS.IP",
+                "XXX": "NOT.A.MARKET",
+            },
+            account_id="SB1",
+            service=service,
+        )
+
+        service.switch_account.assert_called_once_with("SB1", False)
+        # raw ratio, not rounded
+        assert result.loc["USD/JPY", "price_scale"] == pytest.approx(15840.5 / 158.42)
+        assert result.loc["USD/CAD", "price_scale"] == pytest.approx(13972.5 / 1.39716)
+        assert pd.isna(result.loc["VOL", "price_scale"])  # closed market
+        assert "XXX" not in result.index
 
 
 if __name__ == "__main__":
