@@ -9,6 +9,7 @@ from tradingo.dag import (
     DAG,
     BatchMode,
     Stage,
+    Task,
     generate_batch_schedule,
     generate_intervals,
 )
@@ -793,6 +794,22 @@ class TestRunBatchedRecovery:
 
         # Should have run the remaining 3 steps (a[interval2], b[interval1], b[interval2])
         assert len(call_log_dated) == 3
+
+
+def test_task_function_name_returns_underlying_function() -> None:
+    """function_name exposes the private _function path read-only."""
+    task = Task(
+        name="signal.trend",
+        function="tradingo.signals.trend",
+        task_args=(),
+        task_kwargs={},
+        symbols_out=[],
+        symbols_in={},
+        load_args={},
+        publish_args={},
+    )
+    assert task.function_name == "tradingo.signals.trend"
+    assert task.function_name == task._function
 
 
 if __name__ == "__main__":

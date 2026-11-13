@@ -91,6 +91,11 @@ class Task:
         )
 
     @property
+    def function_name(self) -> str:
+        """Fully-qualified import path of the underlying task function."""
+        return self._function
+
+    @property
     def function(self) -> Callable[..., Any]:
         """task function — built once and cached."""
         if self._cached_function is not None:
