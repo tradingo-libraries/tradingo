@@ -397,12 +397,12 @@ def test_downstream_tasks_ib_function_ref(
     task_config = out["trades"]["trades.myportfolio"]
     fn_ref = task_config["function"]
     assert fn_ref == "tradingo.engine.ib.adjust_position_sizes"
-    # Verify it resolves to a callable even without ib_insync installed
+    # Verify it resolves to a callable even without ib_async installed
     import sys
     from unittest.mock import MagicMock
 
-    if "ib_insync" not in sys.modules:
-        sys.modules["ib_insync"] = MagicMock()
+    if "ib_async" not in sys.modules:
+        sys.modules["ib_async"] = MagicMock()
     fn = _resolve_function(fn_ref)
     assert callable(fn)
 
