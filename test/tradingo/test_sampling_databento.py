@@ -194,13 +194,6 @@ class TestGetCost:
         }
         assert isinstance(out.index, pd.DatetimeIndex)
 
-    def test_over_budget_raises(self, client: MagicMock) -> None:
-        with pytest.raises(ProviderDataError, match="exceeds max_cost_usd"):
-            get_cost(**REQUEST, max_cost_usd="10")
-
-    def test_within_budget_passes(self, client: MagicMock) -> None:
-        assert get_cost(**REQUEST, max_cost_usd="12.5").iloc[0]["cost_usd"] == 12.5
-
 
 class TestDownloadBars:
     def test_downloads_once(

@@ -236,14 +236,13 @@ def get_cost(
     start: str,
     end: str,
     stype_in: str = "raw_symbol",
-    max_cost_usd: float | str | None = None,
     api_key: str | None = None,
 ) -> pd.DataFrame:
     """Price a :func:`download_bars` request without downloading anything.
 
     Calls the free ``metadata`` endpoints for cost (USD), billable bytes and
-    record count. If *max_cost_usd* is set and the quote exceeds it, raises
-    :class:`ProviderDataError` so tasks depending on this one don't run.
+    record count. Publishing the quote is left to the caller's ``symbols_out``;
+    deciding whether to pay for the download is too (e.g. a human approval).
 
     :return: one-row frame indexed by the quote time
     """
@@ -275,12 +274,6 @@ def get_cost(
         cost,
         len(symbols),
     )
-    # Airflow params arrive as strings
-    budget = float(max_cost_usd) if max_cost_usd not in (None, "") else None  # type: ignore[arg-type]
-    if budget is not None and cost > budget:
-        raise ProviderDataError(
-            f"databento quote ${cost:.2f} exceeds max_cost_usd=${budget:.2f}"
-        )
     return result
 
 
