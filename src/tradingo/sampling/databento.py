@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import databento as db
 import pandas as pd
@@ -184,6 +184,104 @@ def download_instruments(path: str | Path, currency: str = "USD") -> pd.DataFram
         raise ProviderDataError(f"no symbols found in databento download at {path}")
 
     return pd.DataFrame.from_dict(rows, orient="index").rename_axis("symbol")
+
+
+def _historical(api_key: str | None) -> db.Historical:
+    return db.Historical(key=api_key)
+
+
+def download_bars(
+    *,
+    dataset: str,
+    symbols: list[str],
+    schema: str,
+    start: str,
+    end: str,
+    output_dir: str | Path,
+    stype_in: str = "raw_symbol",
+    api_key: str | None = None,
+) -> None:
+    """Fetch *symbols* from the Databento timeseries API into *output_dir*.
+
+    Streams straight to one ``.dbn.zst`` file (readable by :func:`ingest_bars`)
+    rather than holding the response in memory. A file that already exists is
+    left alone so a re-run doesn't pay for the same data twice.
+    """
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{dataset}.{schema}.{start}_{end}.dbn.zst"
+    if out_path.exists():
+        logger.info("%s already downloaded, skipping", out_path)
+        return
+
+    tmp_path = out_path.with_suffix(".part")
+    _historical(api_key).timeseries.get_range(
+        dataset=dataset,
+        symbols=symbols,
+        schema=schema,
+        start=start,
+        end=end,
+        stype_in=stype_in,
+        path=tmp_path,
+    )
+    tmp_path.rename(out_path)
+    logger.info("wrote %s (%d bytes)", out_path, out_path.stat().st_size)
+
+
+def get_cost(
+    *,
+    dataset: str,
+    symbols: list[str],
+    schema: str,
+    start: str,
+    end: str,
+    stype_in: str = "raw_symbol",
+    max_cost_usd: float | str | None = None,
+    api_key: str | None = None,
+) -> pd.DataFrame:
+    """Price a :func:`download_bars` request without downloading anything.
+
+    Calls the free ``metadata`` endpoints for cost (USD), billable bytes and
+    record count. If *max_cost_usd* is set and the quote exceeds it, raises
+    :class:`ProviderDataError` so tasks depending on this one don't run.
+
+    :return: one-row frame indexed by the quote time
+    """
+    meta = _historical(api_key).metadata
+    request: dict[str, Any] = {
+        "dataset": dataset,
+        "symbols": symbols,
+        "schema": schema,
+        "start": start,
+        "end": end,
+        "stype_in": stype_in,
+    }
+    cost = float(meta.get_cost(**request))
+    result = pd.DataFrame(
+        {
+            "cost_usd": [cost],
+            "billable_bytes": [meta.get_billable_size(**request)],
+            "record_count": [meta.get_record_count(**request)],
+            "n_symbols": [len(symbols)],
+        },
+        index=pd.DatetimeIndex([pd.Timestamp.now(tz="UTC")]),
+    )
+    logger.info(
+        "databento quote %s %s %s..%s: $%.2f (%d symbols)",
+        dataset,
+        schema,
+        start,
+        end,
+        cost,
+        len(symbols),
+    )
+    # Airflow params arrive as strings
+    budget = float(max_cost_usd) if max_cost_usd not in (None, "") else None  # type: ignore[arg-type]
+    if budget is not None and cost > budget:
+        raise ProviderDataError(
+            f"databento quote ${cost:.2f} exceeds max_cost_usd=${budget:.2f}"
+        )
+    return result
 
 
 def ingest_bars(

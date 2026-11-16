@@ -18,7 +18,9 @@ from tradingo.sampling.databento import (  # noqa: E402
     ProviderDataError,
     create_universe,
     discover,
+    download_bars,
     download_instruments,
+    get_cost,
     ingest_bars,
     load,
 )
@@ -161,3 +163,60 @@ class TestCreateUniverse:
         )
 
         assert list(open_.columns) == ["AAA"]
+
+
+REQUEST: dict[str, Any] = {
+    "dataset": "XNAS.ITCH",
+    "symbols": ["SPY", "QQQ"],
+    "schema": "ohlcv-1m",
+    "start": "2024-01-01",
+    "end": "2024-02-01",
+}
+
+
+class TestGetCost:
+    @pytest.fixture
+    def client(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        client = MagicMock()
+        client.metadata.get_cost.return_value = 12.5
+        client.metadata.get_billable_size.return_value = 1_000
+        client.metadata.get_record_count.return_value = 40
+        monkeypatch.setattr("tradingo.sampling.databento._historical", lambda _: client)
+        return client
+
+    def test_returns_quote(self, client: MagicMock) -> None:
+        out = get_cost(**REQUEST)
+        assert out.iloc[0].to_dict() == {
+            "cost_usd": 12.5,
+            "billable_bytes": 1_000,
+            "record_count": 40,
+            "n_symbols": 2,
+        }
+        assert isinstance(out.index, pd.DatetimeIndex)
+
+    def test_over_budget_raises(self, client: MagicMock) -> None:
+        with pytest.raises(ProviderDataError, match="exceeds max_cost_usd"):
+            get_cost(**REQUEST, max_cost_usd="10")
+
+    def test_within_budget_passes(self, client: MagicMock) -> None:
+        assert get_cost(**REQUEST, max_cost_usd="12.5").iloc[0]["cost_usd"] == 12.5
+
+
+class TestDownloadBars:
+    def test_downloads_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = MagicMock()
+        client.timeseries.get_range.side_effect = lambda path, **_: Path(
+            path
+        ).write_bytes(FIXTURE_FILE.read_bytes())
+        monkeypatch.setattr("tradingo.sampling.databento._historical", lambda _: client)
+
+        request = {k: v for k, v in REQUEST.items()}
+        download_bars(**request, output_dir=tmp_path)
+        download_bars(**request, output_dir=tmp_path)
+
+        assert client.timeseries.get_range.call_count == 1
+        (written,) = tmp_path.iterdir()
+        assert written.name == "XNAS.ITCH.ohlcv-1m.2024-01-01_2024-02-01.dbn.zst"
+        assert len(discover(tmp_path)) == 1
