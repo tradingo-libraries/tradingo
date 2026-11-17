@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from arcticdb import Arctic, LibraryOptions
-from arcticdb.exceptions import NoSuchVersionException
+from arcticdb.exceptions import NoSuchVersionException, StreamDescriptorMismatch
 
 from tradingo.symbols import (
     Symbol,
@@ -864,3 +864,72 @@ def test_symbol_publisher_coerce_types_float_to_int(
     assert result["A"].dtype == np.int64
     assert result["A"].tolist() == [1, 2, 3, 4]
     assert "casting column 'A' from float64 to int64" in caplog.text
+
+
+def _stored_with_float_strings(arctic: Arctic, sym: str) -> pd.DatetimeIndex:
+    """A log first written when its string column was all NaN (float64)."""
+    index = pd.date_range("2026-01-01", periods=4, tz="UTC", name="DateTime")
+    arctic.get_library("my-lib", create_if_missing=True).write(
+        sym,
+        pd.DataFrame(
+            {
+                "dealId": [np.nan, np.nan],
+                "epic": ["X", "nan"],
+                "size": [1.0, 2.0],
+                "old": [1, 2],
+            },
+            index=index[:2],
+        ),
+    )
+    return index
+
+
+def test_symbol_publisher_migrate_schema(
+    arctic: Arctic, caplog: pytest.LogCaptureFixture
+) -> None:
+    index = _stored_with_float_strings(arctic, "migrate")
+
+    @symbol_publisher("my-lib/migrate", migrate_schema=True)
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "dealId": pd.Series(["D1", None], dtype=object, index=index[2:]),
+                "epic": pd.Series(["Y", None], dtype=object, index=index[2:]),
+                "size": [3.0, np.nan],
+                "level": [10.0, np.nan],
+            },
+            index=index[2:],
+        )
+
+    with caplog.at_level("WARNING"):
+        publisher(arctic=arctic, dry_run=False)
+
+    lib = arctic.get_library("my-lib")
+    result = cast(pd.DataFrame, lib.read("migrate").data)
+    assert list(result.columns) == ["dealId", "epic", "size", "level"]
+    assert result["dealId"].tolist() == [None, None, "D1", None]
+    assert result["epic"].tolist() == ["X", None, "Y", None]
+    assert result["size"].tolist()[:3] == [1.0, 2.0, 3.0]
+    assert result["level"].isna().tolist() == [True, True, False, True]
+    assert "migrating 2 rows (dropping columns ['old'])" in caplog.text
+    # the pre-migration version is kept
+    assert len(lib.list_versions("migrate")) == 3
+
+
+def test_symbol_publisher_schema_mismatch_raises_without_migrate(
+    arctic: Arctic,
+) -> None:
+    index = _stored_with_float_strings(arctic, "no-migrate")
+
+    @symbol_publisher("my-lib/no-migrate")
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "dealId": pd.Series(["D1"], dtype=object),
+                "size": [3.0],
+                "old": [3],
+            },
+        ).set_axis(index[2:3])
+
+    with pytest.raises(StreamDescriptorMismatch):
+        publisher(arctic=arctic, dry_run=False)
