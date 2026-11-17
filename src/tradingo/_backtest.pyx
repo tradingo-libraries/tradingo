@@ -6,10 +6,17 @@ from libc.math cimport isnan, signbit
 import numpy as np
 
 
-cdef sign(float x):
+cdef inline float sign(float x):
     if signbit(x):
         return -1
     return 1
+
+
+cdef inline float mark(float price, float avg_open_price, float position):
+    # mark-to-market of the position held after the bar's trade
+    if position == 0.0:
+        return 0.0
+    return (price - avg_open_price) * position
 
 
 @cython.boundscheck(False)
@@ -35,16 +42,16 @@ cpdef compute_backtest(
     cdef float[:] avg_open_price = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
     cdef float[:] stop_trade = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
 
-    unrealised_pnl[0] = 0
     realised_pnl[0] = 0
-    total_pnl[0] = 0
     net_investment[0] = 0
     net_position[0] = trades[0]
     if trades[0] != 0.0:
         avg_open_price[0] = bid[0] if trades[0] < 0 else ask[0]
     else:
         avg_open_price[0] = 0.0
-    net_exposure[0] = trades[0] * avg_open_price[0]
+    unrealised_pnl[0] = mark((bid[0] + ask[0]) / 2, avg_open_price[0], trades[0])
+    total_pnl[0] = unrealised_pnl[0]
+    net_exposure[0] = trades[0] * (bid[0] + ask[0]) / 2
     stop_trade[0] = 0
 
     # transient output variables
@@ -63,6 +70,7 @@ cpdef compute_backtest(
     cdef float trade_price
     cdef float c_stop_limit
     cdef float c_stop_loss
+    cdef float closed
 
     for idx in range(1, num_days):
 
@@ -90,7 +98,6 @@ cpdef compute_backtest(
             trade_quantity += m_loss_trade
 
         dividend = dividends[idx]
-        m_unrealised_pnl = (price - avg_open_price[idx_prev]) * m_net_position 
 
         m_realised_pnl = realised_pnl[idx_prev]
         m_avg_open_price = avg_open_price[idx_prev] if m_net_position != 0 else 0.0
@@ -103,22 +110,20 @@ cpdef compute_backtest(
             m_net_investment = max(
                 m_net_investment, abs(m_net_position * m_avg_open_price)
             )
-            # realized pnl
-            if abs(m_net_position + trade_quantity) < abs(m_net_position):
+            if m_net_position != 0 and sign(trade_quantity) != sign(m_net_position):
+                # realized pnl on the part of the position that is closed
+                closed = min(abs(trade_quantity), abs(m_net_position))
                 m_realised_pnl += (
-                    (trade_price - m_avg_open_price) * abs(trade_quantity) * sign(m_net_position)
+                    (trade_price - m_avg_open_price) * closed * sign(m_net_position)
                 )
-
-            # avg open price
-            if abs(m_net_position + trade_quantity) > abs(m_net_position):
+                # close-and-open: the remainder opens at the trade price
+                if abs(trade_quantity) > abs(m_net_position):
+                    m_avg_open_price = trade_price
+            else:
+                # avg open price
                 m_avg_open_price = (
                     (m_avg_open_price * m_net_position) + (trade_price * trade_quantity)
                 ) / (m_net_position + trade_quantity)
-            else:
-                # Check if it is close-and-open
-                if trade_quantity > abs(m_net_position):
-                    m_avg_open_price = trade_price
-
 
 
         if dividend != 0 and not isnan(dividend):
@@ -126,8 +131,7 @@ cpdef compute_backtest(
 
         # total pnl
         m_net_position += trade_quantity
-        if m_net_position == 0.0:
-            m_unrealised_pnl = 0.0
+        m_unrealised_pnl = mark(price, m_avg_open_price, m_net_position)
 
         m_total_pnl = m_realised_pnl + m_unrealised_pnl
 
