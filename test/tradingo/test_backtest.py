@@ -179,3 +179,80 @@ def test_backtest_all_closed(
         total_pnl,
         check_dtype=False,
     )
+
+
+@pytest.mark.parametrize(
+    "position, bid, ask, expected",
+    (
+        pytest.param(
+            [1, 2, 1, 0],
+            [10, 12, 14, 13],
+            [10, 12, 14, 13],
+            {
+                # the closed unit is not also counted as unrealised on the trade bar
+                "total_pnl": [0, 2, 6, 5],
+                "realised_pnl": [0, 0, 3, 5],
+                "avg_open_price": [10, 11, 11, 11],
+            },
+            id="partial-close",
+        ),
+        pytest.param(
+            [1, -2, -2],
+            [10, 12, 11],
+            [10, 12, 11],
+            {
+                "realised_pnl": [0, 2, 2],
+                "avg_open_price": [10, 12, 12],
+                "unrealised_pnl": [0, 0, 2],
+                "total_pnl": [0, 2, 4],
+            },
+            id="flip-long-to-short",
+        ),
+        pytest.param(
+            [-1, 1, 1],
+            [10, 8, 9],
+            [10, 8, 9],
+            {
+                "realised_pnl": [0, 2, 2],
+                "avg_open_price": [10, 8, 8],
+                "total_pnl": [0, 2, 3],
+            },
+            id="flip-short-to-long",
+        ),
+        pytest.param(
+            [1, 1, 0],
+            [9, 10, 11],
+            [10, 11, 12],
+            {
+                # bought at the ask, marked at the mid
+                "unrealised_pnl": [-0.5, 0.5, np.nan],
+                "realised_pnl": [0, 0, 1],
+                "total_pnl": [-0.5, 0.5, 1],
+            },
+            id="spread",
+        ),
+    ),
+)
+def test_backtest_trade_marking(
+    position: list[float],
+    bid: list[float],
+    ask: list[float],
+    expected: dict[str, list[float]],
+) -> None:
+    index = pd.bdate_range("2024-11-25", periods=len(position))
+
+    def frame(values: list[float]) -> pd.DataFrame:
+        return pd.DataFrame({"ABC": values}, index=index, dtype="float64")
+
+    bt = dict(
+        zip(
+            ("portfolio", *backtest.BACKTEST_FIELDS),
+            backtest.backtest(
+                portfolio=frame(position), bid_close=frame(bid), ask_close=frame(ask)
+            ),
+        )
+    )
+    for field, values in expected.items():
+        pd.testing.assert_frame_equal(
+            bt[field], frame(values), check_dtype=False, check_freq=False, obj=field
+        )
