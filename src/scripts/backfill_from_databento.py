@@ -95,7 +95,11 @@ def backfill(
     skip_ig: bool = False,
 ) -> None:
     arctic = Arctic(arctic_uri)
-    bars = {symbol: df for df, (symbol,) in ingest_bars(dbn_path, schema=schema)}
+    chunks: dict[str, list[pd.DataFrame]] = {}
+    for batch in ingest_bars(dbn_path, schema=schema):
+        for df, (symbol,) in batch:
+            chunks.setdefault(symbol, []).append(df)
+    bars = {symbol: pd.concat(dfs) for symbol, dfs in chunks.items()}
 
     yf_lib = arctic.get_library(yf_raw_lib, create_if_missing=True)
 
