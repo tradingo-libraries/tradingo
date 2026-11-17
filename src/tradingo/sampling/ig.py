@@ -550,3 +550,41 @@ def sample_ig_positions(
         final_position[final_position != 0].to_dict(),
     )
     return window_deals, position, avg_open_price
+
+
+ACCOUNT_COLUMNS = ("balance", "available", "deposit", "profitLoss")
+
+
+def sample_ig_account(service: IGService | None = None) -> pd.DataFrame:
+    """DAG node: one-row snapshot of the IG account's funds at sample time.
+
+    Columns are ``balance`` (cash), ``available`` (free to trade), ``deposit``
+    (margin in use) and ``profitLoss`` (open-position P&L as reported by IG).
+    The account is the one the session is logged in to, falling back to the
+    preferred account.
+    """
+    own_service = service is None
+    svc = service or get_ig_service()
+    try:
+        now = pd.Timestamp.now("UTC")
+        accounts = svc.fetch_accounts()
+        acc_number = getattr(svc, "ACC_NUMBER", None)
+    finally:
+        if own_service:
+            svc.session.close()
+
+    row = pd.Series(np.nan, index=list(ACCOUNT_COLUMNS), dtype=float)
+    if accounts is not None and len(accounts) and "balance" in accounts.columns:
+        chosen = accounts[accounts["accountId"] == acc_number]
+        if chosen.empty and "preferred" in accounts.columns:
+            chosen = accounts[accounts["preferred"].astype(bool)]
+        if chosen.empty:
+            chosen = accounts
+        first = chosen.iloc[0]
+        for col in ACCOUNT_COLUMNS:
+            row[col] = pd.to_numeric(first.get(col), errors="coerce")
+
+    out = row.to_frame(now).T.astype(float)
+    out.index = pd.DatetimeIndex(out.index, name="DateTime")
+    logger.info("Sampled IG account funds: %s", row.to_dict())
+    return out
