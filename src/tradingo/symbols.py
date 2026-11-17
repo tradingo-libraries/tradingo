@@ -21,7 +21,7 @@ from urllib.parse import parse_qsl, urlparse
 import arcticdb as adb
 import numpy as np
 import pandas as pd
-from arcticdb.exceptions import NoSuchVersionException
+from arcticdb.exceptions import NoSuchVersionException, StreamDescriptorMismatch
 from arcticdb_ext.exceptions import InternalException
 
 from tradingo import telemetry
@@ -223,6 +223,58 @@ def _coerce_to_schema(
             sym,
         )
     return data
+
+
+_NULL_STRINGS = frozenset({"nan", "None"})
+
+
+def _conform_to(stored: pd.DataFrame, data: pd.DataFrame) -> pd.DataFrame:
+    """Reshape ``stored`` to the columns and dtypes of ``data``.
+
+    Missing columns are null, columns ``data`` doesn't have are dropped. Object
+    columns hold ``str`` or ``None``; the strings ``"nan"`` / ``"None"`` (what
+    ``astype(str)`` makes of a missing value) become ``None``. Other columns are
+    cast numerically with unparseable values as NaN.
+    """
+    conformed = stored.reindex(columns=data.columns)
+    for column in data.columns:
+        dtype = data[column].dtype
+        values = conformed[column]
+        if pd.api.types.is_object_dtype(dtype):
+            conformed[column] = pd.Series(
+                [
+                    None if v is None or pd.isna(v) or v in _NULL_STRINGS else str(v)
+                    for v in values
+                ],
+                index=conformed.index,
+                dtype=object,
+            )
+        else:
+            conformed[column] = pd.to_numeric(values, errors="coerce").astype(dtype)
+    return conformed
+
+
+def _migrate_symbol(lib: adb.library.Library, sym: str, data: pd.DataFrame) -> None:
+    """Rewrite the stored ``sym`` in the schema of ``data``.
+
+    The previous version stays in the version history.
+    """
+    stored = lib.read(sym)
+    dropped = [c for c in stored.data.columns if c not in data.columns]
+    logger.warning(
+        "%s: stored schema differs from the published frame, migrating %s rows"
+        " (dropping columns %s). Mismatch: %s",
+        sym,
+        len(stored.data.index),
+        dropped,
+        getattr(lib._nvs, "last_mismatch_msg", None),
+    )
+    lib.write(
+        sym,
+        _conform_to(stored.data, data),
+        metadata=stored.metadata,
+        prune_previous_versions=False,
+    )
 
 
 class SymbolParseError(Exception):
@@ -555,7 +607,17 @@ def symbol_publisher(
     coerce_columns: bool = False,
     coerce_index: bool = False,
     coerce_types: bool = False,
+    migrate_schema: bool = False,
 ) -> Callable[[Callable[P, R]], PublishedFunction[P, R]]:
+    """Publish the frames ``func`` returns to ``symbols``.
+
+    ``coerce_*`` bend the published frame to the stored schema. ``migrate_schema``
+    goes the other way for functions with a fixed output schema: when an update
+    is rejected because the stored schema differs, the stored history is
+    rewritten in the published frame's schema (with a warning) and the update
+    retried.
+    """
+
     def decorator(
         func: Callable[P, R],
     ) -> PublishedFunction[P, R]:
@@ -664,7 +726,8 @@ def symbol_publisher(
                         if isinstance(data.index, pd.DatetimeIndex):
                             if clean:
                                 lib.delete(sym)
-                            result = lib.update(
+                            update = functools.partial(
+                                lib.update,
                                 sym,
                                 data,
                                 upsert=True,
@@ -672,6 +735,13 @@ def symbol_publisher(
                                 metadata=write_metadata,
                                 **params,
                             )
+                            try:
+                                result = update()
+                            except StreamDescriptorMismatch:
+                                if not migrate_schema:
+                                    raise
+                                _migrate_symbol(lib, sym, data)
+                                result = update()
                         elif write_pickle:
                             result = lib.write_pickle(
                                 sym,
