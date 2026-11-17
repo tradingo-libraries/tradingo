@@ -77,6 +77,18 @@ TEMPLATE_CASES = [
         id="forexsb",
     ),
     pytest.param(
+        "instruments/databento.yaml",
+        {
+            **_DATES,
+            "universe_name": "test-universe",
+            "symbols": ["AAPL", "MSFT"],
+            "databento_path": "/tmp/databento-data",
+            "raw_prices_lib": "prices_databento",
+            "TP_INCLUDE_INSTRUMENTS": True,
+        },
+        id="databento",
+    ),
+    pytest.param(
         "portfolio_construction.yaml",
         {
             **_DATES,
@@ -115,3 +127,26 @@ def test_template_parses(template_name: str, variables: dict[str, Any]) -> None:
     assert result, f"Template {template_name} rendered to an empty config"
     tasks = collect_task_configs(result)
     assert tasks, f"Template {template_name} produced no task configs"
+
+
+def test_databento_path_readers_wait_for_writers() -> None:
+    """Both tasks reading databento_path wait for the tasks that write it."""
+    variables: dict[str, Any] = {
+        **_DATES,
+        "universe_name": "test-universe",
+        "symbols": ["AAPL"],
+        "databento_path": "/tmp/databento-data",
+        "raw_prices_lib": "prices_databento",
+        "TP_INCLUDE_INSTRUMENTS": True,
+        "raw_depends_on": ["download.test-universe.bars"],
+    }
+    result = config.read_config_template(
+        TEMPLATES_DIR / "instruments/databento.yaml", variables
+    )
+    tasks = collect_task_configs(result)
+    assert tasks["download.test-universe"]["depends_on"] == [
+        "download.test-universe.bars"
+    ]
+    assert tasks["sample.test-universe.raw"]["depends_on"] == [
+        "download.test-universe.bars"
+    ]

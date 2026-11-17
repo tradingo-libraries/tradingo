@@ -12,8 +12,9 @@
 #    pulls, so a one-off/backfill DAG run should normally pass explicit
 #    start_date/end_date covering the whole download rather than relying on
 #    a single trigger's narrow data_interval window.
-# 7. raw_depends_on: optional list of task names the raw ingest must wait for
-#    (e.g. an API download task writing into databento_path)
+# 7. raw_depends_on: optional list of task names that write into
+#    databento_path (e.g. an API download task). Both tasks that read the
+#    path, the instruments task and the raw ingest, wait for them.
 #
 # Unlike the yfinance/IG/IB providers, Databento historical downloads are
 # static files already sitting on disk rather than a live API — there is one
@@ -22,7 +23,7 @@
 # name, mirroring sampling.ig.get_activity_history.
 
 "download.{{ universe_name }}":
-  depends_on: []
+  depends_on: {{ raw_depends_on | default([]) }}
   function: tradingo.sampling.databento.download_instruments
   symbols_out:
     - "instruments/{{ universe_name }}"
