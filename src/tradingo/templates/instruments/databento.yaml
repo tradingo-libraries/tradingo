@@ -14,6 +14,10 @@
 #    a single trigger's narrow data_interval window.
 # 7. raw_depends_on: optional list of task names the raw ingest must wait for
 #    (e.g. an API download task writing into databento_path)
+# 8. chunk_size: optional, DBN records decoded per raw-ingest batch (default
+#    5,000,000, ~1.5 GB peak); each batch is written before the next
+# 9. batch_freq: optional pandas offset alias the universe step reads and
+#    writes one window at a time (default "QS"); null builds it in one go
 #
 # Unlike the yfinance/IG/IB providers, Databento historical downloads are
 # static files already sitting on disk rather than a live API — there is one
@@ -39,6 +43,7 @@
     path: "{{ databento_path }}"
     schema: "{{ databento_schema | default('ohlcv-1m') }}"
     symbols: {{ symbols }}
+    chunk_size: {{ chunk_size | default(5000000) }}
   publish_args:
     template: "{{ raw_prices_lib }}/{0}"
     astype: float
@@ -53,6 +58,7 @@
     pricelib: "{{ raw_prices_lib }}"
     start_date: "{{ start_date if start_date is defined else data_interval_start }}"
     end_date: "{{ end_date if end_date is defined else data_interval_end }}"
+    batch_freq: {{ batch_freq | default("QS") }}
   depends_on:
     - "sample.{{ universe_name }}.raw"
   symbols_in:

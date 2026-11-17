@@ -10,6 +10,7 @@ See: https://github.com/databento/databento-python
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -129,6 +130,23 @@ def load(
     :param map_symbols: resolve instrument_id back to the raw symbol string,
         passed through to ``DBNStore.to_df``
     """
+    frames: list[pd.DataFrame] = []
+    for info in _select(path, schema=schema, symbols=symbols):
+        store = db.DBNStore.from_file(info.path)
+        df = store.to_df(map_symbols=map_symbols)
+        df["dataset"] = info.dataset
+        frames.append(df)
+
+    return pd.concat(frames).sort_index()
+
+
+def _select(
+    path: str | Path,
+    *,
+    schema: str | None,
+    symbols: list[str] | None,
+) -> list[DBNFileInfo]:
+    """Files under *path* matching *schema*/*symbols*, in start-time order."""
     infos = discover(path)
 
     if schema is not None:
@@ -141,15 +159,7 @@ def load(
         raise ProviderDataError(
             f"no dbn files under {path} match schema={schema!r} symbols={symbols!r}"
         )
-
-    frames: list[pd.DataFrame] = []
-    for info in sorted(infos, key=lambda i: i.start):
-        store = db.DBNStore.from_file(info.path)
-        df = store.to_df(map_symbols=map_symbols)
-        df["dataset"] = info.dataset
-        frames.append(df)
-
-    return pd.concat(frames).sort_index()
+    return sorted(infos, key=lambda i: i.start)
 
 
 def download_instruments(path: str | Path, currency: str = "USD") -> pd.DataFrame:
@@ -281,45 +291,52 @@ def ingest_bars(
     path: str | Path,
     schema: str | None = None,
     symbols: list[str] | None = None,
-) -> tuple[tuple[pd.DataFrame, tuple[str]], ...]:
-    """Load a Databento historical download and split it into one OHLCV
-    DataFrame per symbol.
+    chunk_size: int = 5_000_000,
+) -> Iterator[tuple[tuple[pd.DataFrame, tuple[str]], ...]]:
+    """Stream a Databento historical download as per-symbol OHLCV batches.
 
-    The whole download is decoded once and grouped by symbol, so this is
-    intended to be wired up as a single bulk ingest task, published with
-    :func:`tradingo.symbols.symbol_publisher`'s ``template=`` mechanism
-    (mirrors ``sampling.ig.get_activity_history``) rather than one task per
-    symbol.
+    Each DBN file is decoded *chunk_size* records at a time (records are in
+    time order) and every chunk is split by symbol, so memory is bounded by the
+    chunk rather than the download. Intended to be wired up as a single bulk
+    ingest task, published with :func:`tradingo.symbols.symbol_publisher`'s
+    ``template=`` mechanism: each yielded batch is written (``lib.update`` over
+    its date range) before the next chunk is decoded. Overlapping files just
+    rewrite the same rows.
 
     :param path: file or directory containing a Databento download
     :param schema: only ingest files matching this schema (e.g. ``"ohlcv-1m"``)
     :param symbols: only ingest files whose queried symbols intersect this list
-    :return: one ``(ohlcv, (symbol,))`` pair per symbol found
+    :param chunk_size: records decoded per batch (peak ~300 MB per million)
+    :return: per chunk, one ``(ohlcv, (symbol,))`` pair per symbol in it
     """
-    df = load(path, schema=schema, symbols=symbols)
+    for info in _select(path, schema=schema, symbols=symbols):
+        logger.info("ingesting %s (%d bytes)", info.path, info.nbytes)
+        store = db.DBNStore.from_file(info.path)
+        for df in store.to_df(count=chunk_size):
+            yield tuple(
+                (
+                    group[list(_OHLCV_COLUMNS)]
+                    .rename(columns=_OHLCV_COLUMNS)
+                    .sort_index(),
+                    (str(symbol),),
+                )
+                for symbol, group in df.groupby("symbol", sort=False)
+            )
 
-    return tuple(
-        (
-            group[list(_OHLCV_COLUMNS)].rename(columns=_OHLCV_COLUMNS).sort_index(),
-            (str(symbol),),
-        )
-        for symbol, group in df.groupby("symbol")
-    )
 
-
-@symbols.lib_provider(pricelib="{raw_price_lib}")  # pyright: ignore
+@symbols.lib_provider(pricelib="{raw_price_lib}")  # type: ignore[type-var]  # pyright: ignore
 def create_universe(
     pricelib: Library,
     instruments: pd.DataFrame,
     end_date: pd.Timestamp | None,
     start_date: pd.Timestamp | None,
-) -> tuple[
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-]:
+    batch_freq: str | None = None,
+) -> (
+    tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
+    | Iterator[
+        tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
+    ]
+):
     """
     Create one arctic symbol for each OHLCV field from Databento bars.
     Each symbol contains all instruments defined for the universe.
@@ -327,20 +344,15 @@ def create_universe(
     Mirrors sampling.yf.create_universe — reads bars already stored in
     ArcticDB by ingest_bars and assembles them into the standard
     5-DataFrame layout (Open, High, Low, Close, Volume).
+
+    With *batch_freq* (a pandas offset alias, e.g. ``"QS"``) and both dates
+    set, the range is read and yielded one window at a time, for the
+    publisher to write window by window, instead of building the whole wide
+    frame in memory (1-minute bars for ~100 symbols over years doesn't fit).
     """
 
     start_date = pd.Timestamp(start_date) if start_date else None
     end_date = pd.Timestamp(end_date) if end_date else None
-
-    def get_data(symbol: str) -> pd.DataFrame:
-        df = pd.DataFrame(pricelib.read(symbol, date_range=(start_date, end_date)).data)
-        if isinstance(df.index, pd.DatetimeIndex):
-            df.index = (
-                df.index.tz_localize("UTC")
-                if df.index.tz is None
-                else df.index.tz_convert("UTC")
-            )
-        return df
 
     available_symbols = pricelib.list_symbols()
     if missing_symbols := set(instruments.index.difference(available_symbols)):
@@ -353,18 +365,62 @@ def create_universe(
         symbol for symbol in instruments.index.to_list() if symbol in available_symbols
     ]
 
-    result = pd.concat(
-        (get_data(symbol) for symbol in universe_symbols),
-        axis=1,
-        keys=universe_symbols,
-    ).reorder_levels([1, 0], axis=1)
-    return (
-        cast(pd.DataFrame, result["Open"]),
-        cast(pd.DataFrame, result["High"]),
-        cast(pd.DataFrame, result["Low"]),
-        cast(pd.DataFrame, result["Close"]),
-        cast(pd.DataFrame, result["Volume"]),
-    )
+    def get_data(
+        symbol: str, start: pd.Timestamp | None, end: pd.Timestamp | None
+    ) -> pd.DataFrame:
+        df = pd.DataFrame(pricelib.read(symbol, date_range=(start, end)).data)
+        if isinstance(df.index, pd.DatetimeIndex):
+            df.index = (
+                df.index.tz_localize("UTC")
+                if df.index.tz is None
+                else df.index.tz_convert("UTC")
+            )
+        return df
+
+    def fields(
+        start: pd.Timestamp | None, end: pd.Timestamp | None
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        frames = [get_data(symbol, start, end) for symbol in universe_symbols]
+        if all(frame.empty for frame in frames):
+            # Nothing traded in this window: the publisher skips empty frames.
+            return cast(
+                tuple[
+                    pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
+                ],
+                tuple(pd.DataFrame(columns=universe_symbols) for _ in range(5)),
+            )
+        result = pd.concat(frames, axis=1, keys=universe_symbols).reorder_levels(
+            [1, 0], axis=1
+        )
+        # Every window carries every symbol, so batched updates share one schema.
+        return cast(
+            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame],
+            tuple(
+                cast(pd.DataFrame, result[field]).reindex(columns=universe_symbols)
+                for field in ("Open", "High", "Low", "Close", "Volume")
+            ),
+        )
+
+    if batch_freq is None:
+        return fields(start_date, end_date)
+    if start_date is None or end_date is None:
+        raise ValueError("batch_freq needs both start_date and end_date")
+
+    def batches() -> (
+        Iterator[
+            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
+        ]
+    ):
+        assert start_date is not None and end_date is not None
+        edges = pd.date_range(start_date, end_date, freq=batch_freq)
+        bounds = [start_date, *(e for e in edges if start_date < e < end_date)]
+        for lo, hi in zip(bounds, [*bounds[1:], None], strict=True):
+            # date_range is inclusive at both ends; stop short of the next window.
+            upper = end_date if hi is None else hi - pd.Timedelta(1, "ns")
+            logger.info("create_universe window %s..%s", lo, upper)
+            yield fields(lo, upper)
+
+    return batches()
 
 
 def igtrading_from_bars(

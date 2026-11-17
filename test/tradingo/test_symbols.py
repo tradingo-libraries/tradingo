@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import Any, cast
 
 import numpy as np
@@ -541,6 +542,31 @@ def test_symbol_publisher_with_template(arctic: Arctic) -> None:
     publisher(arctic=arctic, dry_run=False)
     assert "sym1" in arctic.get_library("lib1").list_symbols()
     assert "sym2" in arctic.get_library("lib2").list_symbols()
+
+
+def test_symbol_publisher_generator_publishes_each_batch(arctic: Arctic) -> None:
+    def frame(start: str, value: float) -> pd.DataFrame:
+        return pd.DataFrame(
+            {"A": [value] * 2}, index=pd.date_range(start, periods=2, freq="D")
+        )
+
+    @symbol_publisher(template="batch-lib/{0}")  # type: ignore
+    def publisher() -> Iterator[tuple[tuple[pd.DataFrame, tuple[str]], ...]]:
+        yield (frame("2026-01-01", 1.0), ("sym",)), (frame("2026-01-01", 5.0), ("x",))
+        yield ((frame("2026-01-03", 2.0), ("sym",)),)
+
+    publisher(arctic=arctic, dry_run=False)
+    publisher(arctic=arctic, dry_run=False, clean=True)
+
+    lib = arctic.get_library("batch-lib")
+    result = cast(pd.DataFrame, lib.read("sym").data)
+    # clean deletes before the first batch only, so both batches survive.
+    assert result["A"].tolist() == [1.0, 1.0, 2.0, 2.0]
+    assert cast(pd.DataFrame, lib.read("x").data)["A"].tolist() == [5.0, 5.0]
+
+    dry = publisher(arctic=arctic, dry_run=True)
+    assert dry is not None
+    assert dry[("batch-lib/sym", "A")].tolist() == [1.0, 1.0, 2.0, 2.0]
 
 
 def test_symbol_publisher_write_pickle(arctic: Arctic) -> None:

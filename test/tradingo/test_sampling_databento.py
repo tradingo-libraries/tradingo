@@ -91,17 +91,26 @@ class TestDownloadInstruments:
 
 class TestIngestBars:
     def test_returns_one_pair_per_symbol(self) -> None:
-        result = ingest_bars(FIXTURE_FILE)
-        assert len(result) == 1
-        df, (symbol,) = result[0]
+        (batch,) = list(ingest_bars(FIXTURE_FILE))
+        assert len(batch) == 1
+        df, (symbol,) = batch[0]
         assert symbol == "ESH1"
         assert list(df.columns) == ["Open", "High", "Low", "Close", "Volume"]
         assert not df.empty
 
     def test_symbols_filter(self) -> None:
-        result = ingest_bars(FIXTURE_FILE, symbols=["ESH1"])
-        assert len(result) == 1
-        assert result[0][1] == ("ESH1",)
+        (batch,) = list(ingest_bars(FIXTURE_FILE, symbols=["ESH1"]))
+        assert len(batch) == 1
+        assert batch[0][1] == ("ESH1",)
+
+    def test_chunks_cover_whole_download(self) -> None:
+        whole = load(FIXTURE_FILE)
+        batches = list(ingest_bars(FIXTURE_FILE, chunk_size=2))
+        assert len(batches) == -(-len(whole) // 2)
+        chunked = pd.concat(df for batch in batches for df, _ in batch)
+        expected = whole[["open", "high", "low", "close", "volume"]]
+        assert chunked.to_numpy().tolist() == expected.to_numpy().tolist()
+        assert chunked.index.equals(expected.index)
 
 
 class TestCreateUniverse:
@@ -163,6 +172,49 @@ class TestCreateUniverse:
         )
 
         assert list(open_.columns) == ["AAA"]
+
+    def test_batch_freq_yields_disjoint_windows(self) -> None:
+        idx = pd.date_range("2024-01-01", "2024-12-31", freq="D", tz="UTC")
+        data = {"AAA": self._make_ohlcv(idx), "BBB": self._make_ohlcv(idx[:100])}
+        pricelib = MagicMock()
+        pricelib.list_symbols.return_value = list(data)
+
+        def read(symbol: str, date_range: Any = None) -> MagicMock:
+            item = MagicMock()
+            lo, hi = date_range
+            item.data = data[symbol].loc[lo:hi]
+            return item
+
+        pricelib.read.side_effect = read
+        instruments = pd.DataFrame(index=pd.Index(["AAA", "BBB"], name="symbol"))
+
+        windows = list(
+            getattr(create_universe, "__wrapped__")(
+                pricelib=pricelib,
+                instruments=instruments,
+                start_date=pd.Timestamp("2024-01-01", tz="UTC"),
+                end_date=pd.Timestamp("2024-12-31", tz="UTC"),
+                batch_freq="QS",
+            )
+        )
+
+        assert len(windows) == 4
+        closes = [close for _, _, _, close, _ in windows]
+        assert all(list(close.columns) == ["AAA", "BBB"] for close in closes)
+        combined = pd.concat(closes)
+        assert combined.index.equals(idx)
+        assert combined["BBB"].notna().sum() == 100
+
+    def test_batch_freq_needs_dates(self) -> None:
+        pricelib = self._make_pricelib({})
+        with pytest.raises(ValueError, match="batch_freq"):
+            getattr(create_universe, "__wrapped__")(
+                pricelib=pricelib,
+                instruments=pd.DataFrame(index=pd.Index([], name="symbol")),
+                start_date=None,
+                end_date=None,
+                batch_freq="QS",
+            )
 
 
 REQUEST: dict[str, Any] = {
