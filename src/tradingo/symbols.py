@@ -21,7 +21,7 @@ from urllib.parse import parse_qsl, urlparse
 import arcticdb as adb
 import numpy as np
 import pandas as pd
-from arcticdb.exceptions import NoSuchVersionException
+from arcticdb.exceptions import NoSuchVersionException, StreamDescriptorMismatch
 from arcticdb_ext.exceptions import InternalException
 
 from tradingo import telemetry
@@ -223,6 +223,58 @@ def _coerce_to_schema(
             sym,
         )
     return data
+
+
+_NULL_STRINGS = frozenset({"nan", "None"})
+
+
+def _conform_to(stored: pd.DataFrame, data: pd.DataFrame) -> pd.DataFrame:
+    """Reshape ``stored`` to the columns and dtypes of ``data``.
+
+    Missing columns are null, columns ``data`` doesn't have are dropped. Object
+    columns hold ``str`` or ``None``; the strings ``"nan"`` / ``"None"`` (what
+    ``astype(str)`` makes of a missing value) become ``None``. Other columns are
+    cast numerically with unparseable values as NaN.
+    """
+    conformed = stored.reindex(columns=data.columns)
+    for column in data.columns:
+        dtype = data[column].dtype
+        values = conformed[column]
+        if pd.api.types.is_object_dtype(dtype):
+            conformed[column] = pd.Series(
+                [
+                    None if v is None or pd.isna(v) or v in _NULL_STRINGS else str(v)
+                    for v in values
+                ],
+                index=conformed.index,
+                dtype=object,
+            )
+        else:
+            conformed[column] = pd.to_numeric(values, errors="coerce").astype(dtype)
+    return conformed
+
+
+def _migrate_symbol(lib: adb.library.Library, sym: str, data: pd.DataFrame) -> None:
+    """Rewrite the stored ``sym`` in the schema of ``data``.
+
+    The previous version stays in the version history.
+    """
+    stored = lib.read(sym)
+    dropped = [c for c in stored.data.columns if c not in data.columns]
+    logger.warning(
+        "%s: stored schema differs from the published frame, migrating %s rows"
+        " (dropping columns %s). Mismatch: %s",
+        sym,
+        len(stored.data.index),
+        dropped,
+        getattr(lib._nvs, "last_mismatch_msg", None),
+    )
+    lib.write(
+        sym,
+        _conform_to(stored.data, data),
+        metadata=stored.metadata,
+        prune_previous_versions=False,
+    )
 
 
 class SymbolParseError(Exception):
@@ -555,7 +607,17 @@ def symbol_publisher(
     coerce_columns: bool = False,
     coerce_index: bool = False,
     coerce_types: bool = False,
+    migrate_schema: bool = False,
 ) -> Callable[[Callable[P, R]], PublishedFunction[P, R]]:
+    """Publish the frames ``func`` returns to ``symbols``.
+
+    ``coerce_*`` bend the published frame to the stored schema. ``migrate_schema``
+    goes the other way for functions with a fixed output schema: when an update
+    is rejected because the stored schema differs, the stored history is
+    rewritten in the published frame's schema (with a warning) and the update
+    retried.
+    """
+
     def decorator(
         func: Callable[P, R],
     ) -> PublishedFunction[P, R]:
@@ -593,43 +655,61 @@ def symbol_publisher(
             # Publishing implies the function produced data.
             assert out is not None
 
-            # Extract dynamic metadata from trailing dict in return tuple.
-            dynamic_metadata: dict[str, Any] = {}
-            if isinstance(out, (tuple, list)) and out and isinstance(out[-1], dict):
-                *_frames, dynamic_metadata = out
-                out = tuple(_frames)
-
-            if not isinstance(out, (tuple, list)):
-                out = (out,)
-
-            write_metadata: dict[str, Any] | None = {
-                **(metadata or {}),
-                **dynamic_metadata,
-            } or None
-
             logger.info("Publishing %s to %s", symbols or template, arctic)
 
-            if template:
-                out, symbols_ = tuple(zip(*out))
-                formatted_symbols = tuple(template.format(*s) for s in symbols_)
-            else:
-                formatted_symbols = symbols
+            # A generator is published batch by batch: each item is what the
+            # function would otherwise return, and is written before the next is
+            # produced, so the whole output never has to be held in memory.
+            batches = out if inspect.isgenerator(out) else (out,)
 
             libraries: DefaultDict[str, dict[str, int]] = defaultdict(dict)
+            cleaned: set[tuple[str, str]] = set()
+            dry_run_frames: dict[str, list[pd.DataFrame]] = defaultdict(list)
 
-            for data, symbol in zip(out, formatted_symbols, strict=True):
-                assert isinstance(data, pd.DataFrame), type(data)
-                if data.empty:
+            for batch in batches:
+                # Extract dynamic metadata from trailing dict in return tuple.
+                dynamic_metadata: dict[str, Any] = {}
+                if (
+                    isinstance(batch, (tuple, list))
+                    and batch
+                    and isinstance(batch[-1], dict)
+                ):
+                    *_frames, dynamic_metadata = batch
+                    batch = tuple(_frames)
+
+                if not isinstance(batch, (tuple, list)):
+                    batch = (batch,)
+
+                write_metadata: dict[str, Any] | None = {
+                    **(metadata or {}),
+                    **dynamic_metadata,
+                } or None
+
+                if template:
+                    if not batch:
+                        continue
+                    batch, symbols_ = tuple(zip(*batch))
+                    formatted_symbols = tuple(template.format(*s) for s in symbols_)
+                else:
+                    formatted_symbols = symbols
+
+                if dry_run:
+                    for data, symbol in zip(batch, formatted_symbols, strict=True):
+                        dry_run_frames[symbol].append(data)
                     continue
 
-                if astype:
-                    data = data.astype(
-                        astype
-                        if not isinstance(astype, dict)
-                        else {k: v for k, v in astype.items() if k in data.columns}
-                    )
+                for data, symbol in zip(batch, formatted_symbols, strict=True):
+                    assert isinstance(data, pd.DataFrame), type(data)
+                    if data.empty:
+                        continue
 
-                if not dry_run:
+                    if astype:
+                        data = data.astype(
+                            astype
+                            if not isinstance(astype, dict)
+                            else {k: v for k, v in astype.items() if k in data.columns}
+                        )
+
                     parsed_symbol = Symbol.parse(
                         symbol,
                         kwargs,
@@ -662,9 +742,13 @@ def symbol_publisher(
                         },
                     ):
                         if isinstance(data.index, pd.DatetimeIndex):
-                            if clean:
+                            # Only before a symbol's first batch, so a later
+                            # batch doesn't wipe the earlier ones.
+                            if clean and (lib_name, sym) not in cleaned:
                                 lib.delete(sym)
-                            result = lib.update(
+                                cleaned.add((lib_name, sym))
+                            update = functools.partial(
+                                lib.update,
                                 sym,
                                 data,
                                 upsert=True,
@@ -672,6 +756,13 @@ def symbol_publisher(
                                 metadata=write_metadata,
                                 **params,
                             )
+                            try:
+                                result = update()
+                            except StreamDescriptorMismatch:
+                                if not migrate_schema:
+                                    raise
+                                _migrate_symbol(lib, sym, data)
+                                result = update()
                         elif write_pickle:
                             result = lib.write_pickle(
                                 sym,
@@ -710,8 +801,14 @@ def symbol_publisher(
                         lib.snapshot(snapshot_name=snapshot, versions=versions)
 
             if dry_run:
-                assert isinstance(out, tuple)
-                return pd.concat(out, keys=formatted_symbols, axis=1)
+                return pd.concat(
+                    [
+                        frames[0] if len(frames) == 1 else pd.concat(frames)
+                        for frames in dry_run_frames.values()
+                    ],
+                    keys=list(dry_run_frames),
+                    axis=1,
+                )
 
             return None
 

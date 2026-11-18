@@ -1,5 +1,6 @@
 """Tests for tradingo.engine module - position management."""
 
+import json
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -799,3 +800,69 @@ class TestActionsFrameSchema:
             assert frame["limitDistance"].dtype == float
             assert frame["size"].dtype == float
             assert frame.index.name == "DateTime"
+            assert frame.dtypes.equals(frames[0].dtypes)
+
+    def test_missing_fields_are_null(self) -> None:
+        from tradingo.engine.ig import _actions_frame, _skipped
+
+        frame = _actions_frame([_skipped("X", "MARKET_CLOSED", 0.0, 1.0)])
+        assert frame["dealId"].dtype == object
+        assert frame["dealId"].tolist() == [None]
+        assert frame["guaranteedStop"].isna().all()
+
+    def test_deal_confirm_fields(self) -> None:
+        from tradingo.engine.ig import _actions_frame
+
+        frame = _actions_frame(
+            [
+                {
+                    "date": "2026-11-17T20:15:40.9",
+                    "dealStatus": "ACCEPTED",
+                    "dealId": "DIAAAAYVGTWMEBW",
+                    "affectedDeals": [
+                        {"dealId": "DIAAAAYVGTWMEBW", "status": "AMENDED"}
+                    ],
+                    "guaranteedStop": False,
+                    "trailingStop": True,
+                    "expiry": "-",
+                    "level": 6800.5,
+                }
+            ]
+        )
+        row = frame.iloc[0]
+        assert row["dealId"] == "DIAAAAYVGTWMEBW"
+        assert json.loads(row["affectedDeals"]) == [
+            {"dealId": "DIAAAAYVGTWMEBW", "status": "AMENDED"}
+        ]
+        assert row["guaranteedStop"] == 0.0
+        assert row["trailingStop"] == 1.0
+        assert row["level"] == 6800.5
+
+    def test_skipped_then_deal_appends_to_arctic(self) -> None:
+        """A skipped-only first write must not fix string columns as float."""
+        from arcticdb import Arctic
+
+        from tradingo.engine.ig import _actions_frame, _skipped
+
+        lib = Arctic("mem://trade-log").get_library("live", create_if_missing=True)
+        skipped = _actions_frame([_skipped("X", "MARKET_EDITS_ONLY", 0.0, 1.0)])
+        deal = _actions_frame(
+            [
+                {
+                    "date": (skipped.index[0] + pd.Timedelta("1min")).isoformat(),
+                    "dealStatus": "ACCEPTED",
+                    "dealId": "D1",
+                    "affectedDeals": [],
+                }
+            ]
+        )
+        for frame in (skipped, deal):
+            lib.update(
+                "trades",
+                frame,
+                upsert=True,
+                date_range=(frame.index[0], frame.index[-1]),
+            )
+        stored = lib.read("trades").data
+        assert stored["dealId"].tolist() == [None, "D1"]
+        assert stored["dealStatus"].tolist() == ["SKIPPED", "ACCEPTED"]

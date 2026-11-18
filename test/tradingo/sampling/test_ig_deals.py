@@ -12,6 +12,7 @@ from tradingo.sampling.ig import (
     _ig_query_time,
     activities_to_deals,
     deals_to_positions,
+    sample_ig_account,
     sample_ig_positions,
 )
 
@@ -201,6 +202,37 @@ def test_live_run_extends_to_now() -> None:
         service=svc,
     )
     assert backfill.index[-1] == end - pd.Timedelta("2D")
+
+
+def test_sample_ig_account_picks_logged_in_account() -> None:
+    svc = MagicMock()
+    svc.ACC_NUMBER = "B"
+    svc.fetch_accounts.return_value = pd.DataFrame(
+        {
+            "accountId": ["A", "B"],
+            "preferred": [True, False],
+            "balance": [1.0, 1000.5],
+            "available": [1.0, 900.0],
+            "deposit": [0.0, 100.5],
+            "profitLoss": [0.0, -12.25],
+        }
+    )
+    out = sample_ig_account(service=svc)
+    assert out.shape == (1, 4)
+    assert out.iloc[0].to_dict() == {
+        "balance": 1000.5,
+        "available": 900.0,
+        "deposit": 100.5,
+        "profitLoss": -12.25,
+    }
+
+
+def test_sample_ig_account_no_accounts_is_nan() -> None:
+    svc = MagicMock()
+    svc.fetch_accounts.return_value = pd.DataFrame()
+    out = sample_ig_account(service=svc)
+    assert out.shape == (1, 4)
+    assert out.isna().all(axis=None)
 
 
 def test_query_time_is_london_local() -> None:

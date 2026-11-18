@@ -21,6 +21,7 @@ Safety rails (all observed failure modes on the live account):
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from collections.abc import Iterable
 from typing import Any, Hashable, cast
@@ -315,39 +316,45 @@ def _skipped(epic: str, reason: str, current: float, target: float) -> dict[str,
     }
 
 
-# Fixed schema of the trade log. Deal confirms carry all of these but skipped /
-# no-op actions only a handful, and ArcticDB ``update`` rejects any frame whose
-# columns differ from the stored version, so every frame is padded to this.
-ACTION_FLOAT_COLUMNS = (
-    "level",
-    "size",
-    "stopLevel",
-    "limitLevel",
-    "stopDistance",
-    "limitDistance",
-    "profit",
-)
-ACTION_COLUMNS = (
-    "status",
-    "reason",
-    "dealStatus",
-    "epic",
-    "expiry",
-    "dealReference",
-    "dealId",
-    "affectedDeals",
-    "level",
-    "size",
-    "direction",
-    "stopLevel",
-    "limitLevel",
-    "stopDistance",
-    "limitDistance",
-    "guaranteedStop",
-    "trailingStop",
-    "profit",
-    "profitCurrency",
-)
+# Fixed schema of the trade log: every field an IG deal confirm or a skipped
+# action can carry. A field an action doesn't have is null (None / NaN), never
+# a different type, so every frame has the same columns and dtypes whichever
+# actions it holds. ArcticDB ``update`` rejects a frame whose schema differs
+# from the stored version; logs stored under an older schema are rewritten by
+# the publisher (``migrate_schema``).
+# ``str`` columns are object dtype holding ``str`` or ``None``. The boolean
+# flags are float (1.0 / 0.0 / NaN): ArcticDB has no nullable bool.
+ACTION_SCHEMA: dict[str, type] = {
+    "status": str,
+    "reason": str,
+    "dealStatus": str,
+    "epic": str,
+    "expiry": str,
+    "dealReference": str,
+    "dealId": str,
+    "affectedDeals": str,
+    "level": float,
+    "size": float,
+    "direction": str,
+    "stopLevel": float,
+    "limitLevel": float,
+    "stopDistance": float,
+    "limitDistance": float,
+    "guaranteedStop": float,
+    "trailingStop": float,
+    "profit": float,
+    "profitCurrency": str,
+}
+ACTION_COLUMNS = tuple(ACTION_SCHEMA)
+
+
+def _to_str(value: Any) -> str | None:
+    if isinstance(value, (list, dict)):
+        # affectedDeals is a list of {dealId, status} dicts
+        return json.dumps(value)
+    if value is None or pd.isna(value):
+        return None
+    return str(value)
 
 
 def _actions_frame(actions: list[dict[str, Any]]) -> pd.DataFrame:
@@ -362,9 +369,17 @@ def _actions_frame(actions: list[dict[str, Any]]) -> pd.DataFrame:
             name="DateTime",
         )
         frame = frame.sort_index()
-    frame = frame.reindex(columns=list(ACTION_COLUMNS))
-    for column in ACTION_FLOAT_COLUMNS:
-        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype(float)
+    unknown = sorted(set(frame.columns) - set(ACTION_SCHEMA))
+    if unknown:
+        logger.warning("Dropping trade log fields not in ACTION_SCHEMA: %s", unknown)
+    frame = frame.reindex(columns=list(ACTION_SCHEMA))
+    for column, kind in ACTION_SCHEMA.items():
+        if kind is str:
+            frame[column] = pd.Series(
+                [_to_str(v) for v in frame[column]], index=frame.index, dtype=object
+            )
+        else:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce").astype(float)
     return frame
 
 
