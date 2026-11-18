@@ -13,9 +13,11 @@ classifiers = [
 dependencies = [
   "numpy>=2.3.2",
   "numba>=0.65",
-  # pandas 2.3.3 is the only 2.x with cp314 wheels; pandas 3.x has none yet, so
-  # cap <3 (a pandas-3 migration is a separate, later effort).
-  "pandas>=2.3.3,<3",
+  "pandas>=3.1",
+  # arcticdb only accepts pandas-3 str columns when they are pyarrow-backed,
+  # and still imports pytz, which pandas 3 no longer pulls in.
+  "pyarrow>=18",
+  "pytz",
   "pandera",
   "arcticdb>=6.8.0",
   "PyYAML",
@@ -43,7 +45,7 @@ dev = [
   "mypy>=1.15.0",
   "debugpy>=1.8.13",
   "pre-commit>=3.6.0",
-  "pandas-stubs>=2.3.3.260113",
+  "pandas-stubs>=3.1.0.261029",
   "pytest-cov>=7.0.0",
   "types-requests>=2.32.4.20260107",
   "httpx>=0.28.1",
@@ -73,6 +75,11 @@ databento = [
 
 
 [tool.uv]
+# arcticdb (<=6.28.3) still declares pandas<3 although it reads and writes
+# pandas-3 frames fine (pyarrow-backed strings; reads return ns datetimes).
+# Override until upstream lifts the cap. Overrides don't propagate, so every
+# downstream project that locks arcticdb repeats this.
+override-dependencies = ["pandas>=3.1"]
 # Several transitive deps gained cp314 wheels only in recent releases; older
 # versions that still satisfy our (loose) pins have no cp314 wheel and fail to
 # build from source. Steer these transitive deps up on 3.14 only — this

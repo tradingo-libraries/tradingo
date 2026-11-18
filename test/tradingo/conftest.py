@@ -14,7 +14,9 @@ def prices() -> pd.DataFrame:
 
     returns = pd.DataFrame(
         np.random.normal(0, annual_std / np.sqrt(260), (100, 60)),
-        index=pd.bdate_range(start="2024-01-03 00:00:00+00:00", periods=100),
+        index=pd.bdate_range(start="2024-01-03 00:00:00+00:00", periods=100).as_unit(
+            "ns"
+        ),
         columns=pd.Index(
             [
                 "".join(np.random.choice(list(string.ascii_uppercase), 4))

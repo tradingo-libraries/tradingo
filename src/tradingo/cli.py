@@ -58,7 +58,7 @@ def parse_interval(value: str) -> pd.Timedelta:
     if unit in {"month", "months", "mo"}:
         return pd.Timedelta(days=n * 30)
 
-    if unit in {"week", "weeks"}:
+    if unit in {"w", "week", "weeks"}:
         return pd.Timedelta(weeks=n)
 
     try:

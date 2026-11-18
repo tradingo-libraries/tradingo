@@ -31,7 +31,7 @@ def test_symbol_provider(arctic: Arctic) -> None:
     def publisher(input_1: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(
             1,
-            index=pd.date_range("2025-01-01", "2026-01-01"),
+            index=pd.date_range("2025-01-01", "2026-01-01", unit="ns"),
             columns=["A"],
         )
 
@@ -45,7 +45,7 @@ def test_symbols_function_is_provided_for_and_published(arctic: Arctic) -> None:
 
     data = pd.DataFrame(
         1,
-        index=pd.date_range("2026-01-27", "2026-01-28"),
+        index=pd.date_range("2026-01-27", "2026-01-28", unit="ns"),
         columns=["A"],
     )
 
@@ -66,7 +66,7 @@ def test_symbols_provider_fallsback_to_pickle(arctic: Arctic) -> None:
 
     data = pd.DataFrame(
         1,
-        index=pd.date_range("2026-01-27", "2026-01-28"),
+        index=pd.date_range("2026-01-27", "2026-01-28", unit="ns"),
         columns=["A"],
     )
 
@@ -87,12 +87,12 @@ def test_symbols_provider_pass_a_list(arctic: Arctic) -> None:
 
     data1 = pd.DataFrame(
         2.0,
-        index=pd.date_range("2026-01-25", "2026-01-26", tz="utc"),
+        index=pd.date_range("2026-01-25", "2026-01-26", tz="utc", unit="ns"),
         columns=["A"],
     )
     data2 = pd.DataFrame(
         1.0,
-        index=pd.date_range("2026-01-27", "2026-01-28", tz="utc"),
+        index=pd.date_range("2026-01-27", "2026-01-28", tz="utc", unit="ns"),
         columns=["A"],
     )
 
@@ -197,7 +197,7 @@ def test_symbol_provider_with_symbol_prefix(arctic: Arctic) -> None:
     lib = arctic.get_library(name="my-lib", create_if_missing=True)
     data = pd.DataFrame(
         1.0,
-        index=pd.date_range("2026-01-01", "2026-01-05", tz="utc"),
+        index=pd.date_range("2026-01-01", "2026-01-05", tz="utc", unit="ns"),
         columns=["A"],
     )
     lib.write("prefix-symbol", data)
@@ -248,7 +248,7 @@ def test_symbol_provider_date_range_filtering(arctic: Arctic) -> None:
     lib = arctic.get_library(name="my-lib", create_if_missing=True)
     data = pd.DataFrame(
         {"A": range(10)},
-        index=pd.date_range("2026-01-01", periods=10, tz="utc"),
+        index=pd.date_range("2026-01-01", periods=10, tz="utc", unit="ns"),
     )
     lib.write("range-symbol", data)
 
@@ -270,11 +270,11 @@ def test_symbol_provider_dict_of_symbols(arctic: Arctic) -> None:
     lib = arctic.get_library(name="my-lib", create_if_missing=True)
     data1 = pd.DataFrame(
         {"A": [1.0]},
-        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+        index=pd.date_range("2026-01-01", periods=1, tz="utc", unit="ns"),
     )
     data2 = pd.DataFrame(
         {"B": [2.0]},
-        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+        index=pd.date_range("2026-01-01", periods=1, tz="utc", unit="ns"),
     )
     lib.write("sym1", data1)
     lib.write("sym2", data2)
@@ -314,7 +314,7 @@ def test_symbol_provider_passes_dates_to_function(arctic: Arctic) -> None:
     lib = arctic.get_library(name="my-lib", create_if_missing=True)
     data = pd.DataFrame(
         {"A": [1.0]},
-        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+        index=pd.date_range("2026-01-01", periods=1, tz="utc", unit="ns"),
     )
     lib.write("symbol", data)
 
@@ -337,7 +337,7 @@ def test_symbol_provider_metadata_query_param(arctic: Arctic) -> None:
     lib = arctic.get_library(name="my-lib", create_if_missing=True)
     data = pd.DataFrame(
         {"A": [1.0]},
-        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+        index=pd.date_range("2026-01-01", periods=1, tz="utc", unit="ns"),
     )
     lib.write("meta-sym", data, metadata={"run": 1, "reasoning": "bullish"})
 
@@ -353,7 +353,7 @@ def test_symbol_provider_metadata_with_as_of(arctic: Arctic) -> None:
     lib = arctic.get_library(name="my-lib", create_if_missing=True)
     data = pd.DataFrame(
         {"A": [1.0]},
-        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+        index=pd.date_range("2026-01-01", periods=1, tz="utc", unit="ns"),
     )
     lib.write("versioned-meta", data, metadata={"run": 1})
     lib.write("versioned-meta", data, metadata={"run": 2})
@@ -370,7 +370,7 @@ def test_symbol_provider_with_columns_query_param(arctic: Arctic) -> None:
     lib = arctic.get_library(name="my-lib", create_if_missing=True)
     data = pd.DataFrame(
         {"A": [1.0], "B": [2.0], "C": [3.0]},
-        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+        index=pd.date_range("2026-01-01", periods=1, tz="utc", unit="ns"),
     )
     lib.write("multi-col-symbol", data)
 
@@ -395,7 +395,7 @@ def test_symbol_provider_optional_returns_data_when_present(arctic: Arctic) -> N
     lib = arctic.get_library("my-lib", create_if_missing=True)
     data = pd.DataFrame(
         {"A": [1.0]},
-        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+        index=pd.date_range("2026-01-01", periods=1, tz="utc", unit="ns"),
     )
     lib.write("optional-sym", data)
 
@@ -447,8 +447,12 @@ def test_symbol_publisher_no_symbols_acts_as_envelope(arctic: Arctic) -> None:
 def test_symbol_publisher_dry_run_returns_concat(arctic: Arctic) -> None:
     @symbol_publisher("lib1/sym1", "lib2/sym2")
     def publisher() -> tuple[pd.DataFrame, pd.DataFrame]:
-        df1 = pd.DataFrame({"A": [1]}, index=pd.date_range("2026-01-01", periods=1))
-        df2 = pd.DataFrame({"B": [2]}, index=pd.date_range("2026-01-01", periods=1))
+        df1 = pd.DataFrame(
+            {"A": [1]}, index=pd.date_range("2026-01-01", periods=1, unit="ns")
+        )
+        df2 = pd.DataFrame(
+            {"B": [2]}, index=pd.date_range("2026-01-01", periods=1, unit="ns")
+        )
         return df1, df2
 
     result = publisher(arctic=arctic, dry_run=True)
@@ -462,7 +466,7 @@ def test_symbol_publisher_with_symbol_prefix(arctic: Arctic) -> None:
     def publisher() -> pd.DataFrame:
         return pd.DataFrame(
             {"A": [1.0]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
 
     publisher(arctic=arctic, dry_run=False)
@@ -475,7 +479,7 @@ def test_symbol_publisher_with_symbol_postfix(arctic: Arctic) -> None:
     def publisher() -> pd.DataFrame:
         return pd.DataFrame(
             {"A": [1.0]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
 
     publisher(arctic=arctic, dry_run=False)
@@ -488,7 +492,7 @@ def test_symbol_publisher_with_prefix_and_postfix(arctic: Arctic) -> None:
     def publisher() -> pd.DataFrame:
         return pd.DataFrame(
             {"A": [1.0]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
 
     publisher(arctic=arctic, dry_run=False)
@@ -501,7 +505,7 @@ def test_symbol_publisher_with_astype_single(arctic: Arctic) -> None:
     def publisher() -> pd.DataFrame:
         return pd.DataFrame(
             {"A": [1.0, 2.0]},
-            index=pd.date_range("2026-01-01", periods=2),
+            index=pd.date_range("2026-01-01", periods=2, unit="ns"),
         )
 
     publisher(arctic=arctic, dry_run=False)
@@ -518,7 +522,7 @@ def test_symbol_publisher_with_astype_dict(arctic: Arctic) -> None:
     def publisher() -> pd.DataFrame:
         return pd.DataFrame(
             {"A": [1.0, 2.0], "B": [3.0, 4.0]},
-            index=pd.date_range("2026-01-01", periods=2),
+            index=pd.date_range("2026-01-01", periods=2, unit="ns"),
         )
 
     publisher(arctic=arctic, dry_run=False)
@@ -535,8 +539,12 @@ def test_symbol_publisher_with_template(arctic: Arctic) -> None:
             tuple[pd.DataFrame, tuple[str, str]], tuple[pd.DataFrame, tuple[str, str]]
         ]
     ):
-        df1 = pd.DataFrame({"A": [1]}, index=pd.date_range("2026-01-01", periods=1))
-        df2 = pd.DataFrame({"B": [2]}, index=pd.date_range("2026-01-01", periods=1))
+        df1 = pd.DataFrame(
+            {"A": [1]}, index=pd.date_range("2026-01-01", periods=1, unit="ns")
+        )
+        df2 = pd.DataFrame(
+            {"B": [2]}, index=pd.date_range("2026-01-01", periods=1, unit="ns")
+        )
         return (df1, ("lib1", "sym1")), (df2, ("lib2", "sym2"))
 
     publisher(arctic=arctic, dry_run=False)
@@ -547,7 +555,8 @@ def test_symbol_publisher_with_template(arctic: Arctic) -> None:
 def test_symbol_publisher_generator_publishes_each_batch(arctic: Arctic) -> None:
     def frame(start: str, value: float) -> pd.DataFrame:
         return pd.DataFrame(
-            {"A": [value] * 2}, index=pd.date_range(start, periods=2, freq="D")
+            {"A": [value] * 2},
+            index=pd.date_range(start, periods=2, freq="D", unit="ns"),
         )
 
     @symbol_publisher(template="batch-lib/{0}")  # type: ignore
@@ -589,7 +598,7 @@ def test_symbol_publisher_with_snapshot(arctic: Arctic) -> None:
     def publisher() -> pd.DataFrame:
         return pd.DataFrame(
             {"A": [1.0]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
 
     publisher(arctic=arctic, dry_run=False, snapshot="my-snapshot")
@@ -602,7 +611,7 @@ def test_symbol_publisher_snapshot_replaces_existing(arctic: Arctic) -> None:
     def publisher(value: int) -> pd.DataFrame:
         return pd.DataFrame(
             {"A": [float(value)]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
 
     publisher(arctic=arctic, value=1, dry_run=False, snapshot="replace-snap")
@@ -617,7 +626,7 @@ def test_symbol_publisher_with_clean(arctic: Arctic) -> None:
     lib = arctic.get_library("my-lib", create_if_missing=True)
     old_data = pd.DataFrame(
         {"A": [0.0]},
-        index=pd.date_range("2025-01-01", periods=1, tz="utc"),
+        index=pd.date_range("2025-01-01", periods=1, tz="utc", unit="ns"),
     )
     lib.write("clean-symbol", old_data)
 
@@ -625,7 +634,7 @@ def test_symbol_publisher_with_clean(arctic: Arctic) -> None:
     def publisher() -> pd.DataFrame:
         return pd.DataFrame(
             {"A": [1.0]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
 
     publisher(arctic=arctic, dry_run=False, clean=True)
@@ -650,7 +659,7 @@ def test_symbol_publisher_dynamic_metadata(arctic: Arctic) -> None:
     def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
         df = pd.DataFrame(
             {"A": [1.0]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
         return df, {"reasoning": "bullish", "tokens_in": 100}
 
@@ -664,7 +673,7 @@ def test_symbol_publisher_dynamic_metadata_merges_static(arctic: Arctic) -> None
     def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
         df = pd.DataFrame(
             {"A": [1.0]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
         return df, {"dynamic_key": "dynamic_val"}
 
@@ -680,7 +689,7 @@ def test_symbol_publisher_dynamic_metadata_dry_run_excludes_dict(
     def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
         df = pd.DataFrame(
             {"A": [1.0]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
         return df, {"reasoning": "test"}
 
@@ -694,7 +703,7 @@ def test_symbol_publisher_rejects_positional_args(arctic: Arctic) -> None:
     def publisher(value: int) -> pd.DataFrame:
         return pd.DataFrame(
             {"A": [float(value)]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
 
     with pytest.raises(ValueError, match="Keyword only arguments"):
@@ -706,7 +715,7 @@ def test_symbol_publisher_with_formatted_symbol(arctic: Arctic) -> None:
     def publisher(name: str) -> pd.DataFrame:
         return pd.DataFrame(
             {"A": [1.0]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
 
     publisher(arctic=arctic, name="formatted-sym", dry_run=False)
@@ -721,7 +730,7 @@ def test_symbol_publisher_with_library_options(arctic: Arctic) -> None:
     def publisher() -> pd.DataFrame:
         return pd.DataFrame(
             {"A": range(100)},
-            index=pd.date_range("2026-01-01", periods=100),
+            index=pd.date_range("2026-01-01", periods=100, unit="ns"),
         )
 
     publisher(arctic=arctic, dry_run=False)
@@ -791,7 +800,7 @@ def test_lib_provider_with_symbol_publisher(arctic: Arctic) -> None:
     def func(arctic: Arctic, output_lib: Library) -> pd.DataFrame:
         return pd.DataFrame(
             {"A": [1.0]},
-            index=pd.date_range("2026-01-01", periods=1),
+            index=pd.date_range("2026-01-01", periods=1, unit="ns"),
         )
 
     func(arctic=arctic, dry_run=False)  # type: ignore
@@ -803,7 +812,7 @@ def test_provider_and_publisher_passes_arctic_to_function(arctic: Arctic) -> Non
     lib = arctic.get_library("my-lib", create_if_missing=True)
     data = pd.DataFrame(
         {"A": [1.0]},
-        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+        index=pd.date_range("2026-01-01", periods=1, tz="utc", unit="ns"),
     )
     lib.write("input-sym", data)
 
@@ -822,7 +831,7 @@ def test_coerce_to_schema_columns_and_index(
 ) -> None:
     from tradingo.symbols import _coerce_columns, _coerce_index
 
-    idx = pd.date_range("2024-01-01", periods=3, freq="D")
+    idx = pd.date_range("2024-01-01", periods=3, freq="D", unit="ns")
     df = pd.DataFrame({"b": 1.0, "z": 2.0}, index=idx)
 
     with caplog.at_level("WARNING"):
@@ -869,7 +878,7 @@ def test_coerce_types(caplog: pytest.LogCaptureFixture) -> None:
 def test_symbol_publisher_coerce_types_float_to_int(
     arctic: Arctic, caplog: pytest.LogCaptureFixture
 ) -> None:
-    index = pd.date_range("2026-01-01", periods=4, tz="UTC")
+    index = pd.date_range("2026-01-01", periods=4, tz="UTC", unit="ns")
 
     rows: dict[str, Any] = {}
 
@@ -894,7 +903,7 @@ def test_symbol_publisher_coerce_types_float_to_int(
 
 def _stored_with_float_strings(arctic: Arctic, sym: str) -> pd.DatetimeIndex:
     """A log first written when its string column was all NaN (float64)."""
-    index = pd.date_range("2026-01-01", periods=4, tz="UTC", name="DateTime")
+    index = pd.date_range("2026-01-01", periods=4, tz="UTC", name="DateTime", unit="ns")
     arctic.get_library("my-lib", create_if_missing=True).write(
         sym,
         pd.DataFrame(
@@ -933,8 +942,12 @@ def test_symbol_publisher_migrate_schema(
     lib = arctic.get_library("my-lib")
     result = cast(pd.DataFrame, lib.read("migrate").data)
     assert list(result.columns) == ["dealId", "epic", "size", "level"]
-    assert result["dealId"].tolist() == [None, None, "D1", None]
-    assert result["epic"].tolist() == ["X", None, "Y", None]
+    assert result["dealId"].astype(object).where(
+        result["dealId"].notna(), None
+    ).tolist() == [None, None, "D1", None]
+    assert result["epic"].astype(object).where(
+        result["epic"].notna(), None
+    ).tolist() == ["X", None, "Y", None]
     assert result["size"].tolist()[:3] == [1.0, 2.0, 3.0]
     assert result["level"].isna().tolist() == [True, True, False, True]
     assert "migrating 2 rows (dropping columns ['old'])" in caplog.text
