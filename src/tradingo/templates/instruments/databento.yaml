@@ -3,8 +3,13 @@
 #    the batch download's metadata.json "query.symbols")
 # 3. databento_path: path to a Databento historical/batch download directory
 #    (or a single .dbn/.dbn.zst file)
-# 4. databento_schema: DBN schema to ingest (default "ohlcv-1m")
+# 4. databento_schema: DBN schema to ingest (default "ohlcv-1m"). A quote
+#    schema (bbo-1s, bbo-1m, cbbo-*, mbp-1, tbbo, tcbbo) switches the sample
+#    tasks to ingest_quotes/create_quote_universe, which publish
+#    prices/<universe>.{bid,ask}.{close,size} instead of the mid OHLCV
 # 5. raw_prices_lib: ArcticDB library name for raw price storage
+#    (quotes go to raw_quotes_lib, default <raw_prices_lib>_quotes, as they
+#    can't share per-symbol keys with the bars)
 # 6. start_date / end_date: date range for create_universe — optional,
 #    defaults to data_interval_start / data_interval_end (the Airflow
 #    trigger window). Databento historical downloads are static files
@@ -37,6 +42,45 @@
     path: "{{ databento_path }}"
   enabled: {{ TP_INCLUDE_INSTRUMENTS }}
 
+# {% if (databento_schema | default('ohlcv-1m')) in ['bbo-1s', 'bbo-1m', 'cbbo-1s', 'cbbo-1m', 'mbp-1', 'tbbo', 'tcbbo'] %}
+# {% set quotes_lib = raw_quotes_lib | default(raw_prices_lib ~ "_quotes") %}
+"sample.{{ universe_name }}.raw":
+  depends_on: {{ raw_depends_on | default([]) }}
+  function: tradingo.sampling.databento.ingest_quotes
+  params:
+    path: "{{ databento_path }}"
+    schema: "{{ databento_schema }}"
+    symbols: {{ symbols }}
+    chunk_size: {{ chunk_size | default(5000000) }}
+  publish_args:
+    template: "{{ quotes_lib }}/{0}"
+    astype: float
+  symbols_out:
+  #{% for symbol in symbols %}
+    - "{{ quotes_lib }}/{{ symbol }}"
+  #{% endfor %}
+
+"sample.{{ universe_name }}":
+  function: tradingo.sampling.databento.create_quote_universe
+  params:
+    pricelib: "{{ quotes_lib }}"
+    start_date: "{{ start_date if start_date is defined else data_interval_start }}"
+    end_date: "{{ end_date if end_date is defined else data_interval_end }}"
+    batch_freq: {{ batch_freq | default("QS") }}
+  depends_on:
+    - "sample.{{ universe_name }}.raw"
+  symbols_in:
+    instruments: "instruments/{{ universe_name }}"
+  load_args:
+    no_date: true
+  publish_args:
+    astype: float
+  symbols_out:
+    - prices/{{ universe_name }}.bid.close
+    - prices/{{ universe_name }}.ask.close
+    - prices/{{ universe_name }}.bid.size
+    - prices/{{ universe_name }}.ask.size
+# {% else %}
 "sample.{{ universe_name }}.raw":
   depends_on: {{ raw_depends_on | default([]) }}
   function: tradingo.sampling.databento.ingest_bars
@@ -72,3 +116,4 @@
   #{% for occurence in ["open", "high", "low", "close", "volume"] %}
   - prices/{{ universe_name }}.mid.{{ occurence }}
   #{% endfor %}
+# {% endif %}

@@ -33,6 +33,18 @@ _OHLCV_COLUMNS = {
     "volume": "Volume",
 }
 
+# Schemas that carry top-of-book quotes (the bid/ask that ohlcv-* lacks).
+QUOTE_SCHEMAS = frozenset(
+    {"bbo-1s", "bbo-1m", "cbbo-1s", "cbbo-1m", "mbp-1", "tbbo", "tcbbo"}
+)
+
+_QUOTE_COLUMNS = {
+    "bid_px_00": "Bid",
+    "ask_px_00": "Ask",
+    "bid_sz_00": "BidSize",
+    "ask_sz_00": "AskSize",
+}
+
 
 class ProviderDataError(Exception):
     """Raised if there is an issue with data availability
@@ -287,6 +299,47 @@ def get_cost(
     return result
 
 
+def _ingest(
+    path: str | Path,
+    schema: str | None,
+    symbols: list[str] | None,
+    chunk_size: int,
+    columns: dict[str, str],
+) -> Iterator[tuple[tuple[pd.DataFrame, tuple[str]], ...]]:
+    for info in _select(path, schema=schema, symbols=symbols):
+        logger.info("ingesting %s (%d bytes)", info.path, info.nbytes)
+        store = db.DBNStore.from_file(info.path)
+        for df in store.to_df(count=chunk_size):
+            yield tuple(
+                (
+                    group[list(columns)].rename(columns=columns).sort_index(),
+                    (str(symbol),),
+                )
+                for symbol, group in df.groupby("symbol", sort=False)
+            )
+
+
+def ingest_quotes(
+    path: str | Path,
+    schema: str | None = None,
+    symbols: list[str] | None = None,
+    chunk_size: int = 5_000_000,
+) -> Iterator[tuple[tuple[pd.DataFrame, tuple[str]], ...]]:
+    """Like :func:`ingest_bars`, for a top-of-book quote schema.
+
+    Keeps the best bid/ask and their sizes (``Bid``, ``Ask``, ``BidSize``,
+    ``AskSize``); prices are NaN where that side of the book was empty.
+
+    :param schema: a quote schema, e.g. ``"bbo-1m"``, ``"tbbo"``, ``"mbp-1"``
+    :return: per chunk, one ``(quotes, (symbol,))`` pair per symbol in it
+    """
+    if schema is not None and schema not in QUOTE_SCHEMAS:
+        raise ProviderDataError(
+            f"{schema!r} is not a quote schema, expected one of {sorted(QUOTE_SCHEMAS)}"
+        )
+    return _ingest(path, schema, symbols, chunk_size, _QUOTE_COLUMNS)
+
+
 def ingest_bars(
     path: str | Path,
     schema: str | None = None,
@@ -309,47 +362,18 @@ def ingest_bars(
     :param chunk_size: records decoded per batch (peak ~300 MB per million)
     :return: per chunk, one ``(ohlcv, (symbol,))`` pair per symbol in it
     """
-    for info in _select(path, schema=schema, symbols=symbols):
-        logger.info("ingesting %s (%d bytes)", info.path, info.nbytes)
-        store = db.DBNStore.from_file(info.path)
-        for df in store.to_df(count=chunk_size):
-            yield tuple(
-                (
-                    group[list(_OHLCV_COLUMNS)]
-                    .rename(columns=_OHLCV_COLUMNS)
-                    .sort_index(),
-                    (str(symbol),),
-                )
-                for symbol, group in df.groupby("symbol", sort=False)
-            )
+    return _ingest(path, schema, symbols, chunk_size, _OHLCV_COLUMNS)
 
 
-@symbols.lib_provider(pricelib="{raw_price_lib}")  # type: ignore[type-var]  # pyright: ignore
-def create_universe(
+def _wide_fields(
     pricelib: Library,
     instruments: pd.DataFrame,
+    field_names: tuple[str, ...],
     end_date: pd.Timestamp | None,
     start_date: pd.Timestamp | None,
-    batch_freq: str | None = None,
-) -> (
-    tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
-    | Iterator[
-        tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
-    ]
-):
-    """
-    Create one arctic symbol for each OHLCV field from Databento bars.
-    Each symbol contains all instruments defined for the universe.
-
-    Mirrors sampling.yf.create_universe — reads bars already stored in
-    ArcticDB by ingest_bars and assembles them into the standard
-    5-DataFrame layout (Open, High, Low, Close, Volume).
-
-    With *batch_freq* (a pandas offset alias, e.g. ``"QS"``) and both dates
-    set, the range is read and yielded one window at a time, for the
-    publisher to write window by window, instead of building the whole wide
-    frame in memory (1-minute bars for ~100 symbols over years doesn't fit).
-    """
+    batch_freq: str | None,
+) -> tuple[pd.DataFrame, ...] | Iterator[tuple[pd.DataFrame, ...]]:
+    """One symbols-wide frame per *field_names*; see :func:`create_universe`."""
 
     start_date = pd.Timestamp(start_date) if start_date else None
     end_date = pd.Timestamp(end_date) if end_date else None
@@ -379,26 +403,18 @@ def create_universe(
 
     def fields(
         start: pd.Timestamp | None, end: pd.Timestamp | None
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    ) -> tuple[pd.DataFrame, ...]:
         frames = [get_data(symbol, start, end) for symbol in universe_symbols]
         if all(frame.empty for frame in frames):
             # Nothing traded in this window: the publisher skips empty frames.
-            return cast(
-                tuple[
-                    pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
-                ],
-                tuple(pd.DataFrame(columns=universe_symbols) for _ in range(5)),
-            )
+            return tuple(pd.DataFrame(columns=universe_symbols) for _ in field_names)
         result = pd.concat(frames, axis=1, keys=universe_symbols).reorder_levels(
             [1, 0], axis=1
         )
         # Every window carries every symbol, so batched updates share one schema.
-        return cast(
-            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame],
-            tuple(
-                cast(pd.DataFrame, result[field]).reindex(columns=universe_symbols)
-                for field in ("Open", "High", "Low", "Close", "Volume")
-            ),
+        return tuple(
+            cast(pd.DataFrame, result[field]).reindex(columns=universe_symbols)
+            for field in field_names
         )
 
     if batch_freq is None:
@@ -406,11 +422,7 @@ def create_universe(
     if start_date is None or end_date is None:
         raise ValueError("batch_freq needs both start_date and end_date")
 
-    def batches() -> (
-        Iterator[
-            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
-        ]
-    ):
+    def batches() -> Iterator[tuple[pd.DataFrame, ...]]:
         assert start_date is not None and end_date is not None
         edges = pd.date_range(start_date, end_date, freq=batch_freq)
         bounds = [start_date, *(e for e in edges if start_date < e < end_date)]
@@ -421,6 +433,77 @@ def create_universe(
             yield fields(lo, upper)
 
     return batches()
+
+
+@symbols.lib_provider(pricelib="{raw_price_lib}")  # type: ignore[type-var]  # pyright: ignore
+def create_universe(
+    pricelib: Library,
+    instruments: pd.DataFrame,
+    end_date: pd.Timestamp | None,
+    start_date: pd.Timestamp | None,
+    batch_freq: str | None = None,
+) -> (
+    tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
+    | Iterator[
+        tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
+    ]
+):
+    """
+    Create one arctic symbol for each OHLCV field from Databento bars.
+    Each symbol contains all instruments defined for the universe.
+
+    Mirrors sampling.yf.create_universe — reads bars already stored in
+    ArcticDB by ingest_bars and assembles them into the standard
+    5-DataFrame layout (Open, High, Low, Close, Volume).
+
+    With *batch_freq* (a pandas offset alias, e.g. ``"QS"``) and both dates
+    set, the range is read and yielded one window at a time, for the
+    publisher to write window by window, instead of building the whole wide
+    frame in memory (1-minute bars for ~100 symbols over years doesn't fit).
+    """
+    return cast(
+        tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
+        | Iterator[
+            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
+        ],
+        _wide_fields(
+            pricelib,
+            instruments,
+            ("Open", "High", "Low", "Close", "Volume"),
+            end_date,
+            start_date,
+            batch_freq,
+        ),
+    )
+
+
+@symbols.lib_provider(pricelib="{raw_price_lib}")  # type: ignore[type-var]  # pyright: ignore
+def create_quote_universe(
+    pricelib: Library,
+    instruments: pd.DataFrame,
+    end_date: pd.Timestamp | None,
+    start_date: pd.Timestamp | None,
+    batch_freq: str | None = None,
+) -> (
+    tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
+    | Iterator[tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]]
+):
+    """
+    Like :func:`create_universe`, for quotes stored by :func:`ingest_quotes`:
+    one symbols-wide frame each for Bid, Ask, BidSize and AskSize.
+    """
+    return cast(
+        tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]
+        | Iterator[tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]],
+        _wide_fields(
+            pricelib,
+            instruments,
+            ("Bid", "Ask", "BidSize", "AskSize"),
+            end_date,
+            start_date,
+            batch_freq,
+        ),
+    )
 
 
 def igtrading_from_bars(
