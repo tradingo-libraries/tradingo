@@ -6,13 +6,13 @@ from libc.math cimport isnan, signbit
 import numpy as np
 
 
-cdef inline float sign(float x):
+cdef inline double sign(double x):
     if signbit(x):
         return -1
     return 1
 
 
-cdef inline float mark(float price, float avg_open_price, float position):
+cdef inline double mark(double price, double avg_open_price, double position):
     # mark-to-market of the position held after the bar's trade
     if position == 0.0:
         return 0.0
@@ -22,25 +22,25 @@ cdef inline float mark(float price, float avg_open_price, float position):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cpdef compute_backtest(
-    float[:] trades,
-    float[:] bid,
-    float[:] ask,
-    float[:] stop_limit,
-    float[:] stop_loss,
-    float[:] dividends,
+    double[:] trades,
+    double[:] bid,
+    double[:] ask,
+    double[:] stop_limit,
+    double[:] stop_loss,
+    double[:] dividends,
 ):
 
     cdef size_t num_days = trades.shape[0]
     cdef size_t idx, idx_prev
  
-    cdef float[:] unrealised_pnl = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] realised_pnl = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] total_pnl = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] net_investment = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] net_position = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] net_exposure = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] avg_open_price = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] stop_trade = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
+    cdef double[:] unrealised_pnl = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] realised_pnl = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] total_pnl = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] net_investment = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] net_position = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] net_exposure = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] avg_open_price = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] stop_trade = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
 
     realised_pnl[0] = 0
     net_investment[0] = 0
@@ -55,22 +55,23 @@ cpdef compute_backtest(
     stop_trade[0] = 0
 
     # transient output variables
-    cdef float m_net_position = 0
-    cdef float m_avg_open_price = 0
-    cdef float m_unrealised_pnl = 0
-    cdef float m_total_pnl = 0
-    cdef float m_realised_pnl = 0
-    cdef float m_net_investment = 0
-    cdef float m_loss_trade = 0
-    cdef float m_net_exposure = 0
+    cdef double m_net_position = 0
+    cdef double m_avg_open_price = 0
+    cdef double m_unrealised_pnl = 0
+    cdef double m_total_pnl = 0
+    cdef double m_realised_pnl = 0
+    cdef double m_net_investment = 0
+    cdef double m_loss_trade = 0
+    cdef double m_net_exposure = 0
 
     # loop variables
-    cdef float price
-    cdef float trade_quantity
-    cdef float trade_price
-    cdef float c_stop_limit
-    cdef float c_stop_loss
-    cdef float closed
+    cdef double price
+    cdef double trade_quantity
+    cdef double trade_price
+    cdef double c_stop_limit
+    cdef double c_stop_loss
+    cdef double closed
+    cdef double dividend
 
     for idx in range(1, num_days):
 
