@@ -150,3 +150,33 @@ def test_databento_path_readers_wait_for_writers() -> None:
     assert tasks["sample.test-universe.raw"]["depends_on"] == [
         "download.test-universe.bars"
     ]
+
+
+def test_databento_quote_schema_publishes_bid_ask() -> None:
+    """A quote schema swaps the bar tasks for the bid/ask ones."""
+    variables: dict[str, Any] = {
+        **_DATES,
+        "universe_name": "test-universe",
+        "symbols": ["AAPL"],
+        "databento_path": "/tmp/databento-data",
+        "databento_schema": "bbo-1m",
+        "raw_prices_lib": "prices_databento",
+        "TP_INCLUDE_INSTRUMENTS": True,
+    }
+    result = config.read_config_template(
+        TEMPLATES_DIR / "instruments/databento.yaml", variables
+    )
+    tasks = collect_task_configs(result)
+    raw = tasks["sample.test-universe.raw"]
+    assert raw["function"] == "tradingo.sampling.databento.ingest_quotes"
+    assert raw["params"]["schema"] == "bbo-1m"
+    assert raw["symbols_out"] == ["prices_databento_quotes/AAPL"]
+    universe = tasks["sample.test-universe"]
+    assert universe["function"] == "tradingo.sampling.databento.create_quote_universe"
+    assert universe["params"]["pricelib"] == "prices_databento_quotes"
+    assert universe["symbols_out"] == [
+        "prices/test-universe.bid.close",
+        "prices/test-universe.ask.close",
+        "prices/test-universe.bid.size",
+        "prices/test-universe.ask.size",
+    ]

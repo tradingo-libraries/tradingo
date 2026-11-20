@@ -12,16 +12,19 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-pytest.importorskip("databento")
+db = pytest.importorskip("databento")
 
+from tradingo.sampling import databento  # noqa: E402
 from tradingo.sampling.databento import (  # noqa: E402
     ProviderDataError,
+    create_quote_universe,
     create_universe,
     discover,
     download_bars,
     download_instruments,
     get_cost,
     ingest_bars,
+    ingest_quotes,
     load,
 )
 
@@ -111,6 +114,67 @@ class TestIngestBars:
         expected = whole[["open", "high", "low", "close", "volume"]]
         assert chunked.to_numpy().tolist() == expected.to_numpy().tolist()
         assert chunked.index.equals(expected.index)
+
+
+class TestIngestQuotes:
+    def test_rejects_non_quote_schema(self) -> None:
+        with pytest.raises(ProviderDataError, match="not a quote schema"):
+            ingest_quotes(FIXTURE_FILE, schema="ohlcv-1m")
+
+    def test_keeps_best_bid_ask_per_symbol(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        idx = pd.date_range("2024-01-01 14:30", periods=2, freq="min", tz="UTC")
+        decoded = pd.DataFrame(
+            {
+                "symbol": ["AAA", "BBB"],
+                "price": [10.0, 20.0],
+                "bid_px_00": [9.9, 19.9],
+                "ask_px_00": [10.1, 20.1],
+                "bid_sz_00": [100, 200],
+                "ask_sz_00": [110, 210],
+            },
+            index=idx,
+        )
+        info = MagicMock(path=Path("x.dbn.zst"), nbytes=1)
+        monkeypatch.setattr(databento, "_select", lambda *a, **k: [info])
+        store = MagicMock()
+        store.to_df.return_value = iter([decoded])
+        monkeypatch.setattr(db.DBNStore, "from_file", lambda p: store)
+
+        (batch,) = list(ingest_quotes("x", schema="bbo-1m"))
+
+        assert [symbol for _, symbol in batch] == [("AAA",), ("BBB",)]
+        df, _ = batch[0]
+        assert list(df.columns) == ["Bid", "Ask", "BidSize", "AskSize"]
+        assert df.iloc[0].tolist() == [9.9, 10.1, 100, 110]
+
+
+class TestCreateQuoteUniverse:
+    def test_assembles_wide_quote_tables(self) -> None:
+        idx = pd.date_range("2024-01-01", periods=3, freq="D", tz="UTC")
+        quotes = pd.DataFrame(
+            {"Bid": 1.0, "Ask": 2.0, "BidSize": 3.0, "AskSize": 4.0}, index=idx
+        )
+        pricelib = MagicMock()
+        pricelib.list_symbols.return_value = ["AAA", "BBB"]
+        pricelib.read.side_effect = lambda symbol, date_range=None: MagicMock(
+            data=quotes
+        )
+        instruments = pd.DataFrame(index=pd.Index(["AAA", "BBB"], name="symbol"))
+
+        bid, ask, bid_size, ask_size = getattr(create_quote_universe, "__wrapped__")(
+            pricelib=pricelib,
+            instruments=instruments,
+            end_date=None,
+            start_date=None,
+        )
+
+        assert list(bid.columns) == ["AAA", "BBB"]
+        assert (bid == 1.0).all().all()
+        assert (ask == 2.0).all().all()
+        assert (bid_size == 3.0).all().all()
+        assert (ask_size == 4.0).all().all()
 
 
 class TestCreateUniverse:
