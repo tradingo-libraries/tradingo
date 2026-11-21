@@ -864,5 +864,7 @@ class TestActionsFrameSchema:
                 date_range=(frame.index[0], frame.index[-1]),
             )
         stored = lib.read("trades").data
-        assert stored["dealId"].tolist() == [None, "D1"]
+        assert stored["dealId"].astype(object).where(
+            stored["dealId"].notna(), None
+        ).tolist() == [None, "D1"]
         assert stored["dealStatus"].tolist() == ["SKIPPED", "ACCEPTED"]

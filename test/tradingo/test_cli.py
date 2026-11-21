@@ -43,7 +43,7 @@ from tradingo.execution_plan import ExecutionPlan
 @pytest.fixture
 def sample_prices() -> pd.DataFrame:
     """Create sample price data for testing."""
-    dates = pd.bdate_range(start="2024-01-01", periods=30, tz="UTC")
+    dates = pd.bdate_range(start="2024-01-01", periods=30, tz="UTC").as_unit("ns")
     return pd.DataFrame(
         {
             "AAPL": [100 + i * 0.5 for i in range(30)],

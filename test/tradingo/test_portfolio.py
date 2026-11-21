@@ -39,7 +39,7 @@ def arctic() -> Arctic:
 @pytest.fixture
 def date_range() -> pd.DatetimeIndex:
     """Standard date range for tests."""
-    return pd.bdate_range(start="2024-01-01", periods=20, tz="UTC")
+    return pd.bdate_range(start="2024-01-01", periods=20, tz="UTC").as_unit("ns")
 
 
 @pytest.fixture
@@ -1039,7 +1039,9 @@ class TestApplyDealingRules:
     ) -> None:
         """Test dealing rules on a single instrument."""
 
-        dates = pd.date_range("2024-01-01", periods=len(theoretical_position))
+        dates = pd.date_range(
+            "2024-01-01", periods=len(theoretical_position), unit="ns"
+        )
         positions = pd.DataFrame({"SYM": theoretical_position}, index=dates)
         instruments = pd.DataFrame(
             {
@@ -1057,7 +1059,7 @@ class TestApplyDealingRules:
     def test_apply_dealing_rules_multiple_instruments(self) -> None:
         """Test dealing rules applied independently per instrument."""
 
-        dates = pd.date_range("2024-01-01", periods=4)
+        dates = pd.date_range("2024-01-01", periods=4, unit="ns")
         positions = pd.DataFrame(
             {
                 "A": [0.0, 2.5, 4.5, 6.5],  # lot_size=2, min_deal=0
@@ -1087,7 +1089,7 @@ class TestApplyDealingRules:
     def test_apply_dealing_rules_strips_float_noise(self) -> None:
         """Lot multiples are exact to the lot size's decimal places."""
 
-        dates = pd.date_range("2024-01-01", periods=2)
+        dates = pd.date_range("2024-01-01", periods=2, unit="ns")
         positions = pd.DataFrame({"SOXX": [0.0, 14.1234]}, index=dates)
         instruments = pd.DataFrame(
             {
@@ -1105,7 +1107,7 @@ class TestApplyDealingRules:
     def test_apply_dealing_rules_missing_instruments(self) -> None:
         """Missing instruments default to lot_size=1, min_deal=0."""
 
-        dates = pd.date_range("2024-01-01", periods=3)
+        dates = pd.date_range("2024-01-01", periods=3, unit="ns")
         positions = pd.DataFrame({"MISSING": [0.0, 1.5, 2.5]}, index=dates)
         instruments = pd.DataFrame(
             {
@@ -1463,7 +1465,7 @@ class TestVolatilityTarget:
     @pytest.fixture
     def vol_dates(self) -> pd.DatetimeIndex:
         """Date index with enough periods for rolling volatility calculation."""
-        return pd.bdate_range(start="2024-01-01", periods=50, tz="UTC")
+        return pd.bdate_range(start="2024-01-01", periods=50, tz="UTC").as_unit("ns")
 
     @pytest.fixture
     def stable_prices(self, vol_dates: pd.DatetimeIndex) -> pd.DataFrame:
@@ -1850,7 +1852,7 @@ class TestMapPositions:
 
     @pytest.fixture
     def index(self) -> pd.DatetimeIndex:
-        return pd.date_range("2026-11-02", periods=3, freq="D", tz="UTC")
+        return pd.date_range("2026-11-02", periods=3, freq="D", tz="UTC", unit="ns")
 
     @pytest.fixture
     def mapping(self) -> dict[str, dict[str, object]]:

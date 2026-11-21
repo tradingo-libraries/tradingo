@@ -123,7 +123,7 @@ def _coerce_types(
             continue
         series = data[column]
         if type_name.startswith(("UTF", "ASCII")):
-            if (
+            if isinstance(series.dtype, pd.StringDtype) or (
                 series.dtype == object
                 and series.map(lambda v: pd.isna(v) or isinstance(v, str)).all()
             ):
@@ -231,23 +231,24 @@ _NULL_STRINGS = frozenset({"nan", "None"})
 def _conform_to(stored: pd.DataFrame, data: pd.DataFrame) -> pd.DataFrame:
     """Reshape ``stored`` to the columns and dtypes of ``data``.
 
-    Missing columns are null, columns ``data`` doesn't have are dropped. Object
-    columns hold ``str`` or ``None``; the strings ``"nan"`` / ``"None"`` (what
-    ``astype(str)`` makes of a missing value) become ``None``. Other columns are
-    cast numerically with unparseable values as NaN.
+    Missing columns are null, columns ``data`` doesn't have are dropped. String
+    columns (``object`` or pandas ``str``) hold ``str`` or a missing value; the
+    strings ``"nan"`` / ``"None"`` (what ``astype(str)`` makes of a missing value)
+    become missing. Other columns are cast numerically with unparseable values
+    as NaN.
     """
     conformed = stored.reindex(columns=data.columns)
     for column in data.columns:
         dtype = data[column].dtype
         values = conformed[column]
-        if pd.api.types.is_object_dtype(dtype):
+        if pd.api.types.is_object_dtype(dtype) or isinstance(dtype, pd.StringDtype):
             conformed[column] = pd.Series(
                 [
                     None if v is None or pd.isna(v) or v in _NULL_STRINGS else str(v)
                     for v in values
                 ],
                 index=conformed.index,
-                dtype=object,
+                dtype=dtype,
             )
         else:
             conformed[column] = pd.to_numeric(values, errors="coerce").astype(dtype)

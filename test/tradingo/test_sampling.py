@@ -914,7 +914,7 @@ class TestMeasureIgPriceScales:
         # raw ratio, not rounded
         assert result.loc["USD/JPY", "price_scale"] == pytest.approx(15840.5 / 158.42)
         assert result.loc["USD/CAD", "price_scale"] == pytest.approx(13972.5 / 1.39716)
-        assert pd.isna(result.loc["VOL", "price_scale"])  # closed market
+        assert result["price_scale"].isna()["VOL"]  # closed market
         assert "XXX" not in result.index
 
 
