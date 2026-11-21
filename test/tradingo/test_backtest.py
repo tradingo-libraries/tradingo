@@ -256,3 +256,78 @@ def test_backtest_trade_marking(
         pd.testing.assert_frame_equal(
             bt[field], frame(values), check_dtype=False, check_freq=False, obj=field
         )
+
+
+def _vectorised_pnl(
+    position: pd.DataFrame, bid: pd.DataFrame, ask: pd.DataFrame
+) -> pd.DataFrame:
+    """Reference PnL: cash from fills at ask (buys) / bid (sells) plus the
+    position marked at mid. Equivalent to
+    ``(pos.shift() * mid.diff()).cumsum() - (|trade| * half_spread).cumsum()``."""
+    trades = position.diff().fillna(position)
+    fills = ask.where(trades > 0, bid)
+    cash = -(trades * fills).cumsum()
+    return cash + position * (bid + ask) / 2
+
+
+@pytest.mark.parametrize(
+    "position",
+    (
+        pytest.param([10, -5, -5, -5], id="long-to-short-smaller"),
+        pytest.param([-10, 5, 5, 5], id="short-to-long-smaller"),
+        pytest.param([10, -10, -10, -10], id="long-to-short-exact"),
+        pytest.param([-10, 10, 10, 10], id="short-to-long-exact"),
+        pytest.param([10, -15, -15, -15], id="long-to-short-larger"),
+        pytest.param([-10, 15, 15, 15], id="short-to-long-larger"),
+        pytest.param([10, 5, 5, 5], id="partial-reduce"),
+        pytest.param([10, 15, 15, 15], id="add"),
+        pytest.param([10, 0, 0, 0], id="close"),
+        pytest.param([10, -10, 10, -10], id="repeated-exact-flips"),
+    ),
+)
+def test_backtest_matches_vectorised_pnl_on_every_bar(position: list[float]) -> None:
+    index = pd.bdate_range("2024-11-25", periods=len(position))
+    bid = pd.DataFrame({"ABC": [100.0, 110.0, 105.0, 107.0]}, index=index)
+    ask = bid + 0.2
+    pos = pd.DataFrame({"ABC": position}, index=index, dtype="float64")
+
+    summary, *fields = backtest.backtest(portfolio=pos, bid_close=bid, ask_close=ask)
+    bt = dict(zip(backtest.BACKTEST_FIELDS, fields))
+
+    expected = _vectorised_pnl(pos, bid, ask)
+    pd.testing.assert_frame_equal(
+        bt["total_pnl"], expected, check_dtype=False, check_freq=False, atol=1e-4
+    )
+    pd.testing.assert_series_equal(
+        summary["total_pnl"],
+        expected["ABC"],
+        check_dtype=False,
+        check_freq=False,
+        check_names=False,
+        atol=1e-4,
+    )
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_backtest_precision_on_long_high_turnover_book(seed: int) -> None:
+    """~1m-unit FX book trading most bars over 50k bars. float32 running
+    sums drift by whole units here; float64 accumulation stays within the
+    rounding of the stored float32 level."""
+    rng = np.random.default_rng(seed)
+    n = 50_000
+    index = pd.date_range("2020-01-01", periods=n, freq="5min")
+    mid = 1.1 * np.exp(np.cumsum(rng.normal(0, 3e-4, n)))
+    half = mid * rng.uniform(0.5e-4, 2e-4, n)
+    target = np.round(rng.normal(0, 1e6, n), -2)
+    target[rng.random(n) < 0.3] = np.nan  # hold some bars
+    pos = pd.DataFrame({"EURUSD": target}, index=index).ffill().fillna(0.0)
+    bid = pd.DataFrame({"EURUSD": mid - half}, index=index)
+    ask = pd.DataFrame({"EURUSD": mid + half}, index=index)
+
+    _, *fields = backtest.backtest(portfolio=pos, bid_close=bid, ask_close=ask)
+    total = dict(zip(backtest.BACKTEST_FIELDS, fields))["total_pnl"]["EURUSD"]
+    expected = _vectorised_pnl(pos, bid, ask)["EURUSD"]
+
+    # float32 storage of the level: relative rounding ~6e-8
+    tolerance = 1e-6 * expected.abs().max() + 0.05
+    assert (total.astype("float64") - expected).abs().max() < tolerance

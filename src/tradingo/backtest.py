@@ -90,10 +90,10 @@ def backtest(
 
     def optional(
         frame: Optional[pd.DataFrame], name: object, idx: pd.Index, fill: float
-    ) -> npt.NDArray[np.float32]:
+    ) -> npt.NDArray[np.float64]:
         if frame is None:
-            return np.full(len(idx), fill, dtype="float32")
-        return frame[name].reindex(idx).fillna(fill).to_numpy(dtype="float32")
+            return np.full(len(idx), fill, dtype="float64")
+        return frame[name].reindex(idx).fillna(fill).to_numpy(dtype="float64")
 
     for j, name in enumerate(columns):
         start = int(starts[j])
@@ -103,10 +103,13 @@ def backtest(
         inst_index = index[start:]
         offset = start - out_start
 
+        # The kernel accumulates in float64: float32 running sums drift by
+        # whole units over long, high-turnover books. Outputs are stored as
+        # float32 below, which only rounds each level (no accumulation).
         result = _backtest.compute_backtest(
-            trades.iloc[start:, j].fillna(0.0).to_numpy(dtype="float32"),
-            bid_close.iloc[start:, j].to_numpy(dtype="float32"),
-            ask_close.iloc[start:, j].to_numpy(dtype="float32"),
+            trades.iloc[start:, j].fillna(0.0).to_numpy(dtype="float64"),
+            bid_close.iloc[start:, j].to_numpy(dtype="float64"),
+            ask_close.iloc[start:, j].to_numpy(dtype="float64"),
             optional(stop_limit, name, inst_index, np.nan),
             optional(stop_loss, name, inst_index, np.nan),
             optional(dividends, name, inst_index, 0.0),
