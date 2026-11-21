@@ -30,6 +30,7 @@ dependencies = [
   "ipython>=9.1.0",
   "tabula>=1.0.5",
   "tabula-py>=2.10.0",
+  "dukascopy-python",
 ]
 
 [dependency-groups]
@@ -44,17 +45,30 @@ dev = [
   "pre-commit>=3.6.0",
   "pandas-stubs>=2.3.3.260113",
   "pytest-cov>=7.0.0",
+  "types-requests>=2.32.4.20260107",
+  "httpx>=0.28.1",
+  "types-croniter>=6.0.0.20250809",
+  "fakeredis>=2.35.1",
+  "pytest-xdist[psutil]>=3.8.0",
+  "opentelemetry-sdk>=1.27",
 ]
 research = [
   "dtale",
   "jupyter",
 ]
-monitor = [
-  "dash>=2.18.2",
-  "dash-bootstrap-components>=1.5.0",
+serve = [
+  "croniter>=6.0.0",
+  "fastapi",
+]
+worker = [
+  "celery>=5.0",
+  "redis>=4.0",
 ]
 ib = [
   "ib_async>=2.1.0",
+]
+databento = [
+  "databento",
 ]
 
 
@@ -88,10 +102,15 @@ requires = [
 line-length = 88
 target-version = ['py311']
 
+[project.entry-points."airflow.plugins"]
+tradingo_otel = "tradingo.airflow_plugin:TradingoOtelPlugin"
+
+[project.entry-points.opentelemetry_traces_sampler]
+tradingo_task = "tradingo.sampler:task_root_sampler"
+
 [project.scripts]
 tradingo-cli = "tradingo.cli:main"
 tradingo-engine-ib = "tradingo.engine.ib:main"
-tradingo-monitor = "monitor.app:main"
 
 [tool.setuptools_scm]
 
@@ -100,19 +119,22 @@ profile = "black"
 
 [tool.mypy]
 exclude = [
-  "src/monitor",
   "build",
 ]
 
 [[tool.mypy.overrides]]
 module = [
+  "celery",
+  "celery.*",
+  "redis",
+  "redis.*",
   "pandas.plotting._matplotlib.style",
   "arcticdb",
   "arcticdb.*",
   "arcticdb_ext",
   "arcticdb_ext.*",
   "dateutil",
-  "dateutil.*", 
+  "dateutil.*",
   "sklearn.*",
   "yfinance",
   "riskfolio",
@@ -121,12 +143,26 @@ module = [
   "numba",
   "pandas_market_calendars",
   "trading_ig.*",
+  "dukascopy_python",
+  "dukascopy_python.*",
   "ib_async",
   "ib_async.*",
+  "databento",
+  "databento.*",
   "Cython.*",
   "dash",
+  "requests.exceptions",
+  "uvicorn",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+  "ib_insync",
+  "ib_insync.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
 strict = true
 
 [tool.coverage.run]
@@ -134,7 +170,6 @@ source = ["src/tradingo"]
 branch = true
 omit = [
   "src/tradingo/templates/*",
-  "src/monitor/*",
 ]
 
 [tool.coverage.report]

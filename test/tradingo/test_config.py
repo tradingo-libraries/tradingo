@@ -19,13 +19,22 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]
     os.environ.update(old_env)
 
 
+@pytest.fixture(autouse=True)
+def clear_tp_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove any TP_* variables inherited from the shell so tests start clean."""
+    for key in [k for k in os.environ if k.startswith("TP_")]:
+        monkeypatch.delenv(key)
+
+
 @pytest.fixture
 def config_home(tmp_path: Path) -> Path:
     (tmp_path / "configs").mkdir(exist_ok=True)
     (tmp_path / "configs" / "signals").mkdir(exist_ok=True)
     (tmp_path / "configs" / "universes").mkdir(exist_ok=True)
 
-    (tmp_path / "configs" / "myconfig.yaml").write_text(textwrap.dedent("""\
+    (tmp_path / "configs" / "myconfig.yaml").write_text(
+        textwrap.dedent(
+            """\
         {% set universe_name = 'myuniverse' %}
         prices:
             include: "file://{{ TP_TEMPLATES }}/instruments/ig-trading.yaml"
@@ -55,19 +64,24 @@ def config_home(tmp_path: Path) -> Path:
                 portfolio:
                 aum: 10000
                 multiplier: 0.5
-        """))
+        """
+        )
+    )
     (tmp_path / "configs" / "signals" / "mysignals.yaml").write_text(
-        textwrap.dedent("""\
+        textwrap.dedent(
+            """\
             "signals.intraday_momentum.myuniverse": 
                 function: func
                 symbols_in: []
                 symbols_out: []
                 depends_on: ["sample.{{ universe_name }}"]
                 params: {}
-            """)
+            """
+        )
     )
     (tmp_path / "configs" / "universes" / "myuniverse.yaml").write_text(
-        textwrap.dedent("""\
+        textwrap.dedent(
+            """\
             universe_name: im-multi-asset-3
             raw_prices_lib: prices_igtrading
             epics:
@@ -82,7 +96,8 @@ def config_home(tmp_path: Path) -> Path:
             interval: 15min
             start_date: "2017-01-01 00:00:00+00:00"
             end_date: "{{ data_interval_end }}"
-            """)
+            """
+        )
     )
 
     return tmp_path / "configs"
@@ -94,7 +109,9 @@ def config_home_two_models(tmp_path: Path) -> Path:
     (tmp_path / "configs" / "signals").mkdir(exist_ok=True)
     (tmp_path / "configs" / "universes").mkdir(exist_ok=True)
 
-    (tmp_path / "configs" / "balancedconfig.yaml").write_text(textwrap.dedent("""\
+    (tmp_path / "configs" / "balancedconfig.yaml").write_text(
+        textwrap.dedent(
+            """\
         prices:
             prices.bonds:
                 include: "file://{{ TP_TEMPLATES }}/instruments/yfinance.yaml"
@@ -160,9 +177,12 @@ def config_home_two_models(tmp_path: Path) -> Path:
                     currency: GBP
                     aum: 10000
                     multiplier: 1.0
-        """))
+        """
+        )
+    )
     (tmp_path / "configs" / "universes" / "equities-universe.yaml").write_text(
-        textwrap.dedent("""\
+        textwrap.dedent(
+            """\
             universe_name: equities-universe
             raw_prices_lib: equities_prices_lib
             tickers:
@@ -174,10 +194,12 @@ def config_home_two_models(tmp_path: Path) -> Path:
             end_date: "{{ data_interval_end }}"
             currency: GBP
             fx_universe_name: fx-universe
-            """)
+            """
+        )
     )
     (tmp_path / "configs" / "universes" / "bonds-universe.yaml").write_text(
-        textwrap.dedent("""\
+        textwrap.dedent(
+            """\
             universe_name: bonds-universe
             raw_prices_lib: bonds_prices_lib
             tickers:
@@ -189,10 +211,12 @@ def config_home_two_models(tmp_path: Path) -> Path:
             end_date: "{{ data_interval_end }}"
             currency: GBP
             fx_universe_name: fx-universe
-            """)
+            """
+        )
     )
     (tmp_path / "configs" / "universes" / "fx-universe.yaml").write_text(
-        textwrap.dedent("""\
+        textwrap.dedent(
+            """\
             universe_name: fx-universe
             raw_prices_lib: fx_prices_lib
             tickers:
@@ -201,7 +225,8 @@ def config_home_two_models(tmp_path: Path) -> Path:
             interval: 30min
             start_date: "2017-01-01 00:00:00+00:00"
             end_date: "{{ data_interval_end }}"
-            """)
+            """
+        )
     )
 
     return tmp_path / "configs"
@@ -218,7 +243,7 @@ def test_config(config_home: Path) -> None:
 
     out = config.read_config_template(
         config_home / "myconfig.yaml",
-        variables=os.environ,
+        variables=dict(os.environ),
     )
 
     dag.DAG.from_config(out)
@@ -235,7 +260,7 @@ def test_multiple_models(config_home_two_models: Path) -> None:
 
     out = config.read_config_template(
         config_home_two_models / "balancedconfig.yaml",
-        variables=os.environ,
+        variables=dict(os.environ),
     )
 
     dag.DAG.from_config(out)
@@ -297,14 +322,18 @@ def downstream_tasks_config_home(tmp_path: Path) -> Path:
     configs = tmp_path / "configs"
     configs.mkdir()
 
-    (configs / "trading.yaml").write_text(textwrap.dedent("""\
+    (configs / "trading.yaml").write_text(
+        textwrap.dedent(
+            """\
             trades:
                 include: "file://{{ TP_TEMPLATES }}/downstream_tasks.yaml"
                 variables:
                     portfolio_name: myportfolio
                     universe_name: myuniverse
                     tradingEnabled: false
-            """))
+            """
+        )
+    )
     return configs
 
 
@@ -338,7 +367,9 @@ def test_downstream_tasks_ib_function_ref(
 ) -> None:
     """downstream_tasks template accepts explicit IB engine function reference."""
     configs = downstream_tasks_config_home
-    (configs / "trading_ib.yaml").write_text(textwrap.dedent("""\
+    (configs / "trading_ib.yaml").write_text(
+        textwrap.dedent(
+            """\
             trades:
                 include: "file://{{ TP_TEMPLATES }}/downstream_tasks.yaml"
                 variables:
@@ -346,7 +377,9 @@ def test_downstream_tasks_ib_function_ref(
                     universe_name: myuniverse
                     tradingEnabled: false
                     engineFunction: tradingo.engine.ib.adjust_position_sizes
-            """))
+            """
+        )
+    )
 
     env = TradingoConfig.from_env(
         env={
@@ -372,3 +405,44 @@ def test_downstream_tasks_ib_function_ref(
         sys.modules["ib_async"] = MagicMock()
     fn = _resolve_function(fn_ref)
     assert callable(fn)
+
+
+def test_csv_include_column_and_index_col(tmp_path: Path) -> None:
+    csv = tmp_path / "map.csv"
+    csv.write_text(
+        textwrap.dedent(
+            """\
+            # measured 2026-11-04
+            source,epic,price_scale,quote_ccy
+            USD/JPY,CS.D.USDJPY.TODAY.IP,100,JPY
+            E_DAAX,IX.D.DAX.DAILY.IP,1,
+            """
+        )
+    )
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        textwrap.dedent(
+            f"""\
+            task:
+              function: tradingo.portfolio.map_positions
+              params:
+                epics:
+                  include: "file://{csv}"
+                  column: epic
+                mapping:
+                  include: "file://{csv}"
+                  index_col: source
+            """
+        )
+    )
+    params = config.read_config_template(cfg, {})["task"]["params"]
+
+    assert params["epics"] == ["CS.D.USDJPY.TODAY.IP", "IX.D.DAX.DAILY.IP"]
+    assert params["mapping"] == {
+        "USD/JPY": {
+            "epic": "CS.D.USDJPY.TODAY.IP",
+            "price_scale": 100,
+            "quote_ccy": "JPY",
+        },
+        "E_DAAX": {"epic": "IX.D.DAX.DAILY.IP", "price_scale": 1},
+    }

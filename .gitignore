@@ -255,3 +255,7 @@ src/tradingo/_backtest.c
 Untitled*.ipynb
 
 quickfix.txt
+
+data/
+
+scratch**
