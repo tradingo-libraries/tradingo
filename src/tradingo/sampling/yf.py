@@ -115,17 +115,18 @@ def create_universe(
     instruments: pd.DataFrame,
     end_date: pd.Timestamp | None,
     start_date: pd.Timestamp | None,
-) -> tuple[
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-]:
+    actions: bool = False,
+) -> tuple[pd.DataFrame, ...]:
     """
     Create one arctic symbol for each OHLCV prices from yahoo finance.
     Each symbol contains all tickers defined for the universe.
+
+    With ``actions``, also returns Dividends and Stock Splits panels (the raw
+    symbols must have been sampled with ``sample_equity(actions=True)``).
     """
+    fields = ["Open", "High", "Low", "Close", "Volume"]
+    if actions:
+        fields += ["Dividends", "Stock Splits"]
 
     start_date = pd.Timestamp(start_date) if start_date else None
     end_date = pd.Timestamp(end_date) if end_date else None
@@ -155,18 +156,16 @@ def create_universe(
     present_symbols = [
         symbol for symbol in instruments.index.to_list() if symbol in available_symbols
     ]
+    if not present_symbols:
+        # nothing sampled yet (e.g. a first run outside market hours):
+        # empty frames are skipped by the publisher.
+        return tuple(pd.DataFrame() for _ in fields)
     result = pd.concat(
         [get_data(symbol) for symbol in present_symbols],
         axis=1,
         keys=present_symbols,
     ).reorder_levels([1, 0], axis=1)
-    return (
-        cast(pd.DataFrame, result["Open"]),
-        cast(pd.DataFrame, result["High"]),
-        cast(pd.DataFrame, result["Low"]),
-        cast(pd.DataFrame, result["Close"]),
-        cast(pd.DataFrame, result["Volume"]),
-    )
+    return tuple(cast(pd.DataFrame, result[field]) for field in fields)
 
 
 def adjust_fx_series(

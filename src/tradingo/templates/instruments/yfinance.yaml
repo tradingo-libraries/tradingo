@@ -3,6 +3,8 @@
 # 2. raw_prices_lib
 # 3. universe_name
 # 4. fx_universe_name
+# 5. actions (optional, default false): also record Dividends / Stock Splits
+#    on the raw symbols and publish prices/<universe>.{dividends,stock_splits}
 "download.{{ universe_name }}":
   depends_on: []
   function: tradingo.sampling.instruments.download_instruments
@@ -26,6 +28,7 @@
     start_date: "{{ start_date if start_date is defined else data_interval_start }}"
     end_date: "{{ data_interval_end }}"
     interval: "{{ interval }}"
+    actions: {{ actions | default(false) }}
 # {% endfor %}
 
 "sample.{{ universe_name }}":
@@ -34,6 +37,7 @@
     pricelib: "{{ raw_prices_lib }}"
     start_date: "{{ start_date if start_date is defined else data_interval_start }}"
     end_date: "{{ data_interval_end }}"
+    actions: {{ actions | default(false) }}
   depends_on:
     # {%for ticker in tickers %}
     - "sample.{{ ticker }}"
@@ -48,6 +52,10 @@
     # {% for occurence in ["open", "high", "low", "close", "volume"] %}
     - prices/{{ universe_name }}.mid.{{ occurence }}
     # {% endfor %}
+    # {% if actions | default(false) %}
+    - prices/{{ universe_name }}.dividends
+    - prices/{{ universe_name }}.stock_splits
+    # {% endif %}
 
 # {% if currency and fx_universe_name %}
 "sample.{{ universe_name }}.{{ currency }}":
