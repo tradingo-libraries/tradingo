@@ -329,3 +329,207 @@ class TestDownloadBars:
         (written,) = tmp_path.iterdir()
         assert written.name == "XNAS.ITCH.ohlcv-1m.2024-01-01_2024-02-01.dbn.zst"
         assert len(discover(tmp_path)) == 1
+
+
+def _info(
+    dataset: str, schema: str, start: str, end: str, syms: tuple[str, ...]
+) -> databento.DBNFileInfo:
+    return databento.DBNFileInfo(
+        path=Path(f"{start}_{end}.dbn.zst"),
+        dataset=dataset,
+        schema=schema,
+        stype_in="raw_symbol",
+        stype_out="instrument_id",
+        start=pd.Timestamp(start, tz="UTC"),
+        end=pd.Timestamp(end, tz="UTC"),
+        symbols=syms,
+        nbytes=0,
+    )
+
+
+class TestChunks:
+    def test_splits_at_quarter_starts_keeping_ends(self) -> None:
+        assert databento._chunks("2024-01-15", "2024-08-01", "QS") == [
+            ("2024-01-15", "2024-04-01"),
+            ("2024-04-01", "2024-07-01"),
+            ("2024-07-01", "2024-08-01"),
+        ]
+
+    def test_aligned_range(self) -> None:
+        assert databento._chunks("2024-01-01", "2024-07-01", "QS") == [
+            ("2024-01-01", "2024-04-01"),
+            ("2024-04-01", "2024-07-01"),
+        ]
+
+    def test_short_range_and_none_are_one_chunk(self) -> None:
+        assert databento._chunks("2024-01-01", "2024-02-01", "QS") == [
+            ("2024-01-01", "2024-02-01")
+        ]
+        assert databento._chunks("2019-01-01", "2026-11-20", None) == [
+            ("2019-01-01", "2026-11-20")
+        ]
+
+
+HALF_YEAR = {**REQUEST, "start": "2024-01-01", "end": "2024-07-01"}
+
+
+class TestChunkedDownload:
+    @pytest.fixture
+    def client(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        client = MagicMock()
+        client.timeseries.get_range.side_effect = lambda path, **_: Path(
+            path
+        ).write_bytes(FIXTURE_FILE.read_bytes())
+        monkeypatch.setattr("tradingo.sampling.databento._historical", lambda _: client)
+        return client
+
+    def test_one_file_per_chunk(self, tmp_path: Path, client: MagicMock) -> None:
+        download_bars(**HALF_YEAR, output_dir=tmp_path)
+
+        calls = client.timeseries.get_range.call_args_list
+        assert [(c.kwargs["start"], c.kwargs["end"]) for c in calls] == [
+            ("2024-01-01", "2024-04-01"),
+            ("2024-04-01", "2024-07-01"),
+        ]
+        assert sorted(p.name for p in tmp_path.iterdir()) == [
+            "XNAS.ITCH.ohlcv-1m.2024-01-01_2024-04-01.dbn.zst",
+            "XNAS.ITCH.ohlcv-1m.2024-04-01_2024-07-01.dbn.zst",
+        ]
+        assert Path(calls[0].kwargs["path"]).name.endswith(".dbn.zst.part")
+
+    def test_resumes_after_failed_chunk(
+        self, tmp_path: Path, client: MagicMock
+    ) -> None:
+        write = client.timeseries.get_range.side_effect
+
+        def fail_second(path: Path, **kw: Any) -> None:
+            if kw["start"] == "2024-04-01":
+                raise ConnectionError("stream dropped")
+            write(path, **kw)
+
+        client.timeseries.get_range.side_effect = fail_second
+        with pytest.raises(ConnectionError):
+            download_bars(**HALF_YEAR, output_dir=tmp_path)
+
+        client.timeseries.get_range.reset_mock()
+        client.timeseries.get_range.side_effect = write
+        download_bars(**HALF_YEAR, output_dir=tmp_path)
+
+        (call,) = client.timeseries.get_range.call_args_list
+        assert (call.kwargs["start"], call.kwargs["end"]) == (
+            "2024-04-01",
+            "2024-07-01",
+        )
+
+    def test_skips_chunks_an_existing_file_covers(
+        self, tmp_path: Path, client: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        existing = [
+            # an earlier, differently chunked download: Q1 for a superset of symbols
+            _info(
+                "XNAS.ITCH",
+                "ohlcv-1m",
+                "2023-12-01",
+                "2024-04-01",
+                ("SPY", "QQQ", "IWM"),
+            ),
+            # Q2 files that don't count: missing QQQ, other schema, other dataset
+            _info("XNAS.ITCH", "ohlcv-1m", "2024-04-01", "2024-07-01", ("SPY",)),
+            _info("XNAS.ITCH", "bbo-1m", "2024-04-01", "2024-07-01", ("SPY", "QQQ")),
+            _info("GLBX.MDP3", "ohlcv-1m", "2024-04-01", "2024-07-01", ("SPY", "QQQ")),
+        ]
+        monkeypatch.setattr("tradingo.sampling.databento.discover", lambda _: existing)
+
+        download_bars(**HALF_YEAR, output_dir=tmp_path)
+
+        (call,) = client.timeseries.get_range.call_args_list
+        assert (call.kwargs["start"], call.kwargs["end"]) == (
+            "2024-04-01",
+            "2024-07-01",
+        )
+
+
+FULL_YEAR = {**REQUEST, "start": "2024-01-01", "end": "2025-01-01"}
+
+
+class TestGetCostResume:
+    @pytest.fixture
+    def meta(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        client = MagicMock()
+        client.metadata.get_cost.return_value = 1.5
+        client.metadata.get_billable_size.return_value = 100
+        client.metadata.get_record_count.return_value = 10
+        monkeypatch.setattr("tradingo.sampling.databento._historical", lambda _: client)
+        meta: MagicMock = client.metadata
+        return meta
+
+    def test_prices_only_missing_spans(
+        self, tmp_path: Path, meta: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Q2 already on disk: Q1 and Q3..Q4 remain, priced as two spans
+        on_disk = [
+            _info("XNAS.ITCH", "ohlcv-1m", "2024-04-01", "2024-07-01", ("SPY", "QQQ"))
+        ]
+        monkeypatch.setattr("tradingo.sampling.databento.discover", lambda _: on_disk)
+
+        out = get_cost(**FULL_YEAR, output_dir=tmp_path)
+
+        assert [
+            (c.kwargs["start"], c.kwargs["end"]) for c in meta.get_cost.call_args_list
+        ] == [("2024-01-01", "2024-04-01"), ("2024-07-01", "2025-01-01")]
+        assert out.iloc[0]["cost_usd"] == 3.0
+        assert out.iloc[0]["record_count"] == 20
+
+    def test_fully_downloaded_costs_nothing(
+        self, tmp_path: Path, meta: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        on_disk = [
+            _info("XNAS.ITCH", "ohlcv-1m", "2019-01-01", "2026-01-01", ("SPY", "QQQ"))
+        ]
+        monkeypatch.setattr("tradingo.sampling.databento.discover", lambda _: on_disk)
+
+        out = get_cost(**FULL_YEAR, output_dir=tmp_path)
+
+        meta.get_cost.assert_not_called()
+        assert out.iloc[0]["cost_usd"] == 0.0
+
+    def test_adjacent_files_cover_a_straddling_chunk(
+        self, tmp_path: Path, meta: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # a recovered partial + its tail meet mid-quarter (2024-05-20)
+        on_disk = [
+            _info("XNAS.ITCH", "ohlcv-1m", "2024-05-20", "2025-01-01", ("SPY", "QQQ")),
+            _info("XNAS.ITCH", "ohlcv-1m", "2019-01-01", "2024-05-20", ("SPY", "QQQ")),
+        ]
+        monkeypatch.setattr("tradingo.sampling.databento.discover", lambda _: on_disk)
+
+        out = get_cost(**FULL_YEAR, output_dir=tmp_path)
+
+        meta.get_cost.assert_not_called()
+        assert out.iloc[0]["cost_usd"] == 0.0
+
+    def test_gap_between_files_is_priced(
+        self, tmp_path: Path, meta: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        on_disk = [
+            _info("XNAS.ITCH", "ohlcv-1m", "2024-01-01", "2024-05-01", ("SPY", "QQQ")),
+            _info("XNAS.ITCH", "ohlcv-1m", "2024-06-01", "2025-01-01", ("SPY", "QQQ")),
+        ]
+        monkeypatch.setattr("tradingo.sampling.databento.discover", lambda _: on_disk)
+
+        get_cost(**FULL_YEAR, output_dir=tmp_path)
+
+        (call,) = meta.get_cost.call_args_list
+        assert (call.kwargs["start"], call.kwargs["end"]) == (
+            "2024-04-01",
+            "2024-07-01",
+        )
+
+    def test_without_output_dir_prices_whole_range(self, meta: MagicMock) -> None:
+        get_cost(**FULL_YEAR)
+
+        (call,) = meta.get_cost.call_args_list
+        assert (call.kwargs["start"], call.kwargs["end"]) == (
+            "2024-01-01",
+            "2025-01-01",
+        )
