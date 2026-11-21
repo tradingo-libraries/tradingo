@@ -354,3 +354,30 @@ def test_create_universe_labels_survive_missing_symbol() -> None:
     assert list(close.columns) == ["AAA", "CCC"]
     assert (close["AAA"] == 1.0).all()
     assert (close["CCC"] == 3.0).all()
+
+
+def test_create_universe_actions_adds_dividends_and_splits() -> None:
+    frame = _ohlcv(1.0).assign(Dividends=0.25, **{"Stock Splits": 0.0})
+    lib = _FakeLib({"AAA": frame})
+    instruments = pd.DataFrame(index=pd.Index(["AAA"]))
+
+    result = create_universe.__wrapped__(  # type: ignore[attr-defined]
+        lib, instruments, end_date=None, start_date=None, actions=True
+    )
+
+    assert len(result) == 7
+    dividends, splits = result[5], result[6]
+    assert (dividends["AAA"] == 0.25).all()
+    assert (splits["AAA"] == 0.0).all()
+
+
+def test_create_universe_nothing_sampled_returns_empty_frames() -> None:
+    lib = _FakeLib({})
+    instruments = pd.DataFrame(index=pd.Index(["AAA"]))
+
+    result = create_universe.__wrapped__(  # type: ignore[attr-defined]
+        lib, instruments, end_date=None, start_date=None, actions=True
+    )
+
+    assert len(result) == 7
+    assert all(frame.empty for frame in result)
