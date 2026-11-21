@@ -212,6 +212,85 @@ def _historical(api_key: str | None) -> db.Historical:
     return db.Historical(key=api_key)
 
 
+def _fmt_edge(ts: pd.Timestamp) -> str:
+    return ts.strftime("%Y-%m-%d") if ts == ts.normalize() else ts.isoformat()
+
+
+def _chunks(start: str, end: str, chunk_freq: str | None) -> list[tuple[str, str]]:
+    """Split ``[start, end)`` at *chunk_freq* boundaries (e.g. ``"QS"``).
+
+    The first and last chunks keep *start* / *end* exactly as given, so a
+    range shorter than one period is a single chunk named like before.
+    """
+    if chunk_freq is None:
+        return [(start, end)]
+    lo, hi = pd.Timestamp(start), pd.Timestamp(end)
+    inner = [e for e in pd.date_range(lo, hi, freq=chunk_freq) if lo < e < hi]
+    edges = [start, *(_fmt_edge(e) for e in inner), end]
+    return list(zip(edges[:-1], edges[1:]))
+
+
+def _chunk_name(dataset: str, schema: str, start: str, end: str) -> str:
+    return f"{dataset}.{schema}.{start}_{end}.dbn.zst"
+
+
+def _utc(value: str) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
+def _missing_chunks(
+    *,
+    dataset: str,
+    symbols: list[str],
+    schema: str,
+    start: str,
+    end: str,
+    output_dir: str | Path,
+    stype_in: str,
+    chunk_freq: str | None,
+) -> list[tuple[str, str]]:
+    """Chunks of the request that no DBN file already in *output_dir* covers.
+
+    A chunk's own file name counts as covered. Otherwise the files with the
+    same dataset, schema and ``stype_in``, queried for (at least) all
+    *symbols*, cover a chunk when their header start/end ranges together span
+    it — so a resumed or re-run download, or one over a range an earlier,
+    differently-chunked download already fetched, isn't paid twice.
+    """
+    out_dir = Path(output_dir)
+    try:
+        infos = discover(out_dir) if out_dir.exists() else []
+    except ProviderDataError:
+        infos = []
+    have = sorted(
+        (info.start, info.end)
+        for info in infos
+        if info.dataset == dataset
+        and info.schema == schema
+        and info.stype_in == stype_in
+        and info.end is not None
+        and set(symbols) <= set(info.symbols)
+    )
+
+    def covered(lo: pd.Timestamp, hi: pd.Timestamp) -> bool:
+        reached = lo
+        for file_start, file_end in have:
+            if file_start > reached:
+                break
+            reached = max(reached, file_end)
+            if reached >= hi:
+                return True
+        return False
+
+    return [
+        (lo, hi)
+        for lo, hi in _chunks(start, end, chunk_freq)
+        if not (out_dir / _chunk_name(dataset, schema, lo, hi)).exists()
+        and not covered(_utc(lo), _utc(hi))
+    ]
+
+
 def download_bars(
     *,
     dataset: str,
@@ -221,33 +300,74 @@ def download_bars(
     end: str,
     output_dir: str | Path,
     stype_in: str = "raw_symbol",
+    chunk_freq: str | None = "QS",
     api_key: str | None = None,
 ) -> None:
     """Fetch *symbols* from the Databento timeseries API into *output_dir*.
 
-    Streams straight to one ``.dbn.zst`` file (readable by :func:`ingest_bars`)
-    rather than holding the response in memory. A file that already exists is
-    left alone so a re-run doesn't pay for the same data twice.
+    The range is split at *chunk_freq* boundaries (a pandas offset alias,
+    default quarterly; ``None`` for one request) and each chunk streams to its
+    own ``{dataset}.{schema}.{start}_{end}.dbn.zst`` (readable by
+    :func:`ingest_bars`) via a ``.part`` file, rather than holding the response
+    in memory. Chunks already covered by a file in *output_dir* are skipped
+    (see :func:`_missing_chunks`), so an interrupted download resumes from the
+    first missing chunk and a re-run doesn't pay for the same data twice.
     """
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{dataset}.{schema}.{start}_{end}.dbn.zst"
-    if out_path.exists():
-        logger.info("%s already downloaded, skipping", out_path)
-        return
-
-    tmp_path = out_path.with_suffix(".part")
-    _historical(api_key).timeseries.get_range(
+    missing = _missing_chunks(
         dataset=dataset,
         symbols=symbols,
         schema=schema,
         start=start,
         end=end,
+        output_dir=out_dir,
         stype_in=stype_in,
-        path=tmp_path,
+        chunk_freq=chunk_freq,
     )
-    tmp_path.rename(out_path)
-    logger.info("wrote %s (%d bytes)", out_path, out_path.stat().st_size)
+    n_chunks = len(_chunks(start, end, chunk_freq))
+    logger.info(
+        "%s %s %s..%s: %d of %d chunk(s) to download",
+        dataset,
+        schema,
+        start,
+        end,
+        len(missing),
+        n_chunks,
+    )
+
+    client = _historical(api_key)
+    for i, (lo, hi) in enumerate(missing, 1):
+        out_path = out_dir / _chunk_name(dataset, schema, lo, hi)
+        tmp_path = out_path.with_name(out_path.name + ".part")
+        client.timeseries.get_range(
+            dataset=dataset,
+            symbols=symbols,
+            schema=schema,
+            start=lo,
+            end=hi,
+            stype_in=stype_in,
+            path=tmp_path,
+        )
+        tmp_path.rename(out_path)
+        logger.info(
+            "[%d/%d] wrote %s (%d bytes)",
+            i,
+            len(missing),
+            out_path,
+            out_path.stat().st_size,
+        )
+
+
+def _spans(chunks: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Merge contiguous chunks, so pricing them takes one request per gap."""
+    spans: list[tuple[str, str]] = []
+    for lo, hi in chunks:
+        if spans and spans[-1][1] == lo:
+            spans[-1] = (spans[-1][0], hi)
+        else:
+            spans.append((lo, hi))
+    return spans
 
 
 def get_cost(
@@ -258,6 +378,8 @@ def get_cost(
     start: str,
     end: str,
     stype_in: str = "raw_symbol",
+    output_dir: str | Path | None = None,
+    chunk_freq: str | None = "QS",
     api_key: str | None = None,
 ) -> pd.DataFrame:
     """Price a :func:`download_bars` request without downloading anything.
@@ -266,33 +388,58 @@ def get_cost(
     record count. Publishing the quote is left to the caller's ``symbols_out``;
     deciding whether to pay for the download is too (e.g. a human approval).
 
+    With *output_dir* (and the same *chunk_freq* the download will use), only
+    the chunks :func:`download_bars` would actually fetch are priced, so the
+    quote for a resumed download is what it will cost, not the whole range.
+
     :return: one-row frame indexed by the quote time
     """
+    spans = (
+        [(start, end)]
+        if output_dir is None
+        else _spans(
+            _missing_chunks(
+                dataset=dataset,
+                symbols=symbols,
+                schema=schema,
+                start=start,
+                end=end,
+                output_dir=output_dir,
+                stype_in=stype_in,
+                chunk_freq=chunk_freq,
+            )
+        )
+    )
     meta = _historical(api_key).metadata
-    request: dict[str, Any] = {
-        "dataset": dataset,
-        "symbols": symbols,
-        "schema": schema,
-        "start": start,
-        "end": end,
-        "stype_in": stype_in,
-    }
-    cost = float(meta.get_cost(**request))
+    cost, billable_bytes, record_count = 0.0, 0, 0
+    for lo, hi in spans:
+        request: dict[str, Any] = {
+            "dataset": dataset,
+            "symbols": symbols,
+            "schema": schema,
+            "start": lo,
+            "end": hi,
+            "stype_in": stype_in,
+        }
+        cost += float(meta.get_cost(**request))
+        billable_bytes += meta.get_billable_size(**request)
+        record_count += meta.get_record_count(**request)
     result = pd.DataFrame(
         {
             "cost_usd": [cost],
-            "billable_bytes": [meta.get_billable_size(**request)],
-            "record_count": [meta.get_record_count(**request)],
+            "billable_bytes": [billable_bytes],
+            "record_count": [record_count],
             "n_symbols": [len(symbols)],
         },
         index=pd.DatetimeIndex([pd.Timestamp.now(tz="UTC")]),
     )
     logger.info(
-        "databento quote %s %s %s..%s: $%.2f (%d symbols)",
+        "databento quote %s %s %s..%s (%d span(s) to fetch): $%.2f (%d symbols)",
         dataset,
         schema,
         start,
         end,
+        len(spans),
         cost,
         len(symbols),
     )
