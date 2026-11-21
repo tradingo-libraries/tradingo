@@ -30,7 +30,8 @@ dependencies = [
   "ipython>=9.1.0",
   "tabula>=1.0.5",
   "tabula-py>=2.10.0",
-  "dukascopy-python",
+  # 7.x dropped the INTERVAL_* constants sampling/dukascopy.py imports.
+  "dukascopy-python>=4,<5",
 ]
 
 [dependency-groups]

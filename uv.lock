@@ -5508,7 +5508,7 @@ worker = [
 [package.metadata]
 requires-dist = [
     { name = "arcticdb", specifier = ">=6.8.0" },
-    { name = "dukascopy-python" },
+    { name = "dukascopy-python", specifier = ">=4,<5" },
     { name = "ipython", specifier = ">=9.1.0" },
     { name = "lightgbm", specifier = ">=4.6.0" },
     { name = "lxml", specifier = ">=6.0.3" },
