@@ -9,6 +9,12 @@ The root span carries ``airflow.task_id``; the process-wide sampler (``sitecusto
 tradingo-plat) keeps a root span only if it has that attribute, which is what limits tracing to
 Airflow task execution and drops scheduler/triggerer/broker polling.
 
+When a task ends, its peak resident memory is recorded as the gauge :data:`PEAK_RSS_METRIC`
+(bytes, by ``airflow.dag_id`` / ``airflow.task_id``; in Prometheus
+``tradingo_task_peak_rss_bytes``) and on the root span. It is the larger of the task process's
+own peak and that of the subprocesses it waited for, so it is what the task needs from its
+worker. It is used to route tasks to workers by memory.
+
 Importing this module must not require Airflow or OpenTelemetry; only :data:`TradingoOtelPlugin`
 (built lazily) does.
 """
@@ -16,21 +22,30 @@ Importing this module must not require Airflow or OpenTelemetry; only :data:`Tra
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from typing import Any
 
 try:
     from opentelemetry import context as otel_context
-    from opentelemetry import trace
+    from opentelemetry import metrics, trace
     from opentelemetry.trace import Status, StatusCode
 
     _HAVE_OTEL = True
 except ImportError:  # pragma: no cover
     _HAVE_OTEL = False
 
+try:
+    import resource
+except ImportError:  # pragma: no cover - not on Windows
+    resource = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 TASK_ATTRIBUTE = "airflow.task_id"
+PEAK_RSS_METRIC = "tradingo.task.peak_rss"
+
+_peak_rss_gauge: Any = None
 
 _open: dict[tuple[Any, ...], tuple[Any, Any]] = {}
 _lock = threading.Lock()
@@ -44,6 +59,56 @@ def _key(ti: Any) -> tuple[Any, ...]:
         getattr(ti, "map_index", -1),
         getattr(ti, "try_number", 0),
     )
+
+
+def peak_rss_bytes() -> tuple[int, int] | None:
+    """``(self, children)`` peak resident set size of this process in bytes, if available.
+
+    ``children`` covers terminated subprocesses that were waited for (e.g. the claude CLI). On a
+    forked task process ``self`` includes what it inherited from its parent at fork time.
+    """
+    if resource is None:
+        return None
+    scale = (
+        1 if sys.platform == "darwin" else 1024
+    )  # ru_maxrss: bytes on macOS, KiB on Linux
+    return (
+        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * scale,
+        resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * scale,
+    )
+
+
+def record_peak_rss(ti: Any, span: Any = None) -> None:
+    """Record the task's peak RSS on the :data:`PEAK_RSS_METRIC` gauge and on ``span``."""
+    global _peak_rss_gauge
+    if not _HAVE_OTEL:
+        return
+    rss = peak_rss_bytes()
+    if rss is None:
+        return
+    own, children = rss
+    if span is not None:
+        span.set_attributes(
+            {"process.peak_rss_bytes": own, "process.children_peak_rss_bytes": children}
+        )
+    try:
+        if _peak_rss_gauge is None:
+            _peak_rss_gauge = metrics.get_meter("tradingo.airflow").create_gauge(
+                PEAK_RSS_METRIC,
+                unit="By",
+                description="Peak resident memory of an Airflow task (own or children's)",
+            )
+        _peak_rss_gauge.set(
+            max(own, children),
+            {"airflow.dag_id": ti.dag_id, TASK_ATTRIBUTE: ti.task_id},
+        )
+        # Like the span flush below: the task process may os._exit() before the periodic
+        # reader's next export.
+        flush = getattr(metrics.get_meter_provider(), "force_flush", None)
+        if flush is not None:
+            flush(5000)
+    except Exception:
+        logger.debug("could not record peak RSS", exc_info=True)
 
 
 def start_task_span(ti: Any) -> None:
@@ -74,14 +139,16 @@ def start_task_span(ti: Any) -> None:
 
 
 def end_task_span(ti: Any, error: BaseException | str | None = None) -> None:
-    """Close the root span opened by :func:`start_task_span`; a no-op if there is none."""
+    """Record the task's peak RSS and close the root span opened by :func:`start_task_span`."""
     if not _HAVE_OTEL:
         return
     with _lock:
         entry = _open.pop(_key(ti), None)
     if entry is None:
+        record_peak_rss(ti)
         return
     span, token = entry
+    record_peak_rss(ti, span)
     if error is not None:
         span.set_status(Status(StatusCode.ERROR, str(error)))
         if isinstance(error, BaseException):
