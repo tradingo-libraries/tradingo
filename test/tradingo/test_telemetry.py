@@ -89,6 +89,62 @@ def test_end_without_start_is_a_noop(spans: InMemorySpanExporter) -> None:
     assert not spans.get_finished_spans()
 
 
+@pytest.fixture
+def metric_reader(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+    from opentelemetry import metrics
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    # the global meter provider can only be set once per process; patch the lookups instead
+    monkeypatch.setattr(metrics, "get_meter", provider.get_meter)
+    monkeypatch.setattr(metrics, "get_meter_provider", lambda: provider)
+    monkeypatch.setattr(airflow_plugin, "_peak_rss_gauge", None)
+    yield reader
+    provider.shutdown()
+
+
+def _peak_rss_points(reader: Any) -> list[Any]:
+    data = reader.get_metrics_data()
+    return [
+        point
+        for rm in data.resource_metrics
+        for sm in rm.scope_metrics
+        for metric in sm.metrics
+        if metric.name == airflow_plugin.PEAK_RSS_METRIC
+        for point in metric.data.data_points
+    ]
+
+
+def test_peak_rss_recorded_on_metric_and_span(
+    spans: InMemorySpanExporter, metric_reader: Any
+) -> None:
+    ti = _ti(dag_id="dag", task_id="big")
+    airflow_plugin.start_task_span(ti)
+    airflow_plugin.end_task_span(ti)
+
+    (point,) = _peak_rss_points(metric_reader)
+    assert dict(point.attributes) == {"airflow.dag_id": "dag", "airflow.task_id": "big"}
+    rss = airflow_plugin.peak_rss_bytes()
+    assert rss is not None
+    # this test process is at least tens of MB, so a unit slip (KiB vs bytes) would show
+    assert point.value >= 10 * 2**20
+    assert point.value <= max(rss)
+
+    (root,) = spans.get_finished_spans()
+    assert root.attributes is not None
+    own = root.attributes["process.peak_rss_bytes"]
+    assert isinstance(own, int) and own >= 10 * 2**20
+    assert "process.children_peak_rss_bytes" in root.attributes
+
+
+def test_peak_rss_recorded_without_a_span(metric_reader: Any) -> None:
+    airflow_plugin.end_task_span(_ti(task_id="no-span"))
+    (point,) = _peak_rss_points(metric_reader)
+    assert point.attributes["airflow.task_id"] == "no-span"
+
+
 def test_arcticdb_read_and_write_spans(spans: InMemorySpanExporter) -> None:
     arctic = Arctic("mem://telemetry")
 
