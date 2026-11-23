@@ -1,6 +1,9 @@
 """Dukascopy data accessors."""
 
 import logging
+import time
+from datetime import datetime
+from typing import Any, cast
 
 import dukascopy_python
 import pandas as pd
@@ -744,6 +747,89 @@ def _resolve_instrument(epic: str) -> str:
     )
 
 
+class DukascopyAPIError(ConnectionError):
+    """The Dukascopy API answered with an error (e.g. rate limiting), not data."""
+
+
+# Rows per request: the API's maximum.
+_PAGE_LIMIT = 30_000
+# Attempts per request on network / malformed-response errors. API errors
+# (rate limiting) are not retried here: retrying a rate limit makes it worse,
+# the caller's retry policy decides.
+_REQUEST_ATTEMPTS = 3
+
+
+def _fetch_page(
+    instrument: str, interval: str, offer_side: str, cursor: int
+) -> list[list[Any]]:
+    """One API request: rows from ``cursor`` (ms) on; ``[]`` when there are none."""
+    for attempt in range(_REQUEST_ATTEMPTS):
+        try:
+            page = dukascopy_python._fetch(
+                instrument=instrument,
+                interval=interval,
+                offer_side=offer_side,
+                last_update=cursor,
+                limit=_PAGE_LIMIT,
+            )
+            break
+        except (OSError, ValueError):  # requests errors, bad JSON
+            if attempt == _REQUEST_ATTEMPTS - 1:
+                raise
+            time.sleep(1)
+    if isinstance(page, dict):
+        if not page:  # nothing (more) for this window
+            return []
+        raise DukascopyAPIError(
+            f"{instrument} [{interval} {offer_side}]: {page.get('error', page)}"
+        )
+    return cast(list[list[Any]], page)
+
+
+def _fetch_side(
+    instrument: str,
+    interval: str,
+    offer_side: str,
+    start: datetime,
+    end: datetime,
+) -> pd.DataFrame:
+    """Bars in ``[start, end]`` for one side, paging forward from ``start``.
+
+    Replaces ``dukascopy_python.fetch``, which iterates an error response as
+    rows (``TypeError``), raises ``KeyError: 0`` on the empty page that ends a
+    window short of ``end`` (dropping every bar already fetched), and retries
+    both 8 times with a 1s sleep.
+    """
+    columns = dukascopy_python._get_dataframe_columns_for_timeunit(
+        dukascopy_python._interval_units[interval]
+    )
+    cursor = int(start.timestamp() * 1000)
+    end_ms = end.timestamp() * 1000
+    rows: list[list[Any]] = []
+    first = True
+    while True:
+        page = _fetch_page(instrument, interval, offer_side, cursor)
+        if not first and page and page[0][0] == cursor:
+            page = page[1:]  # pages start at the cursor row, already taken
+        if not page:
+            break
+        past_end = False
+        for row in page:
+            if row[0] > end_ms:
+                past_end = True
+                break
+            rows.append(row)
+            cursor = row[0]
+        if past_end:
+            break
+        first = False
+    df = pd.DataFrame(data=rows, columns=columns)
+    if df.empty:
+        df = df.astype({c: float for c in columns[1:]})
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    return df.set_index("timestamp")
+
+
 def sample_instrument(
     epic: str,
     start_date: pd.Timestamp,
@@ -786,36 +872,22 @@ def sample_instrument(
     start_pydatetime = start_dt.to_pydatetime()
     end_pydatetime = end_dt.to_pydatetime()
 
-    empty = pd.DataFrame(columns=["Open", "High", "Low", "Close"], dtype=float)
-    empty.index = pd.DatetimeIndex([], tz="utc")
-
-    try:
-        bid = dukascopy_python.fetch(
-            instrument,
-            dk_interval,
-            dukascopy_python.OFFER_SIDE_BID,
-            start_pydatetime,
-            end_pydatetime,
-        )
-        ask = dukascopy_python.fetch(
-            instrument,
-            dk_interval,
-            dukascopy_python.OFFER_SIDE_ASK,
-            start_pydatetime,
-            end_pydatetime,
-        )
-    except (TypeError, KeyError) as e:
-        # dukascopy_python raises TypeError (row[0] is a string) or KeyError: 0
-        # (lastUpdates[0] on an empty-dict API response) when no data is available
-        logger.warning(
-            "No data for %s [%s] %s -> %s: %s",
-            epic,
-            interval,
-            start_dt,
-            end_dt,
-            e,
-        )
-        return empty, empty
+    bid = _fetch_side(
+        instrument,
+        dk_interval,
+        dukascopy_python.OFFER_SIDE_BID,
+        start_pydatetime,
+        end_pydatetime,
+    )
+    ask = _fetch_side(
+        instrument,
+        dk_interval,
+        dukascopy_python.OFFER_SIDE_ASK,
+        start_pydatetime,
+        end_pydatetime,
+    )
+    if bid.empty or ask.empty:
+        logger.warning("No data for %s [%s] %s -> %s", epic, interval, start_dt, end_dt)
 
     def _normalize(df: pd.DataFrame) -> pd.DataFrame:
         """Rename columns to title case to match IG convention."""
