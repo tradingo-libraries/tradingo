@@ -10,6 +10,7 @@ from typing import (
     Any,
     Concatenate,
     DefaultDict,
+    Literal,
     NamedTuple,
     ParamSpec,
     Protocol,
@@ -226,6 +227,35 @@ def _coerce_to_schema(
 
 
 _NULL_STRINGS = frozenset({"nan", "None"})
+
+
+def _union_with_stored(
+    lib: adb.library.Library, sym: str, data: pd.DataFrame
+) -> pd.DataFrame:
+    """Reindex ``data`` to the stored columns followed by its own new ones.
+
+    Stored columns ``data`` doesn't have are null: ``None`` for string columns,
+    NaN otherwise. A frame with new columns then mismatches the stored schema,
+    and the migration keeps every column (see ``_conform_to``).
+    """
+    try:
+        description = lib.get_description(sym)
+    except NoSuchVersionException:
+        return data
+    stored = {c.name: str(c.dtype) for c in description.columns}
+    missing = [c for c in stored if c not in data.columns]
+    if not missing:
+        return data
+    logger.info("%s: filling stored columns absent from this write %s", sym, missing)
+    data = data.reindex(
+        columns=list(stored) + [c for c in data.columns if c not in stored]
+    )
+    for column in missing:
+        if re.search(r"type=(UTF|ASCII)", stored[column]):
+            data[column] = pd.Series(
+                [None] * len(data.index), index=data.index, dtype=object
+            )
+    return data
 
 
 def _conform_to(stored: pd.DataFrame, data: pd.DataFrame) -> pd.DataFrame:
@@ -607,7 +637,7 @@ def symbol_publisher(
     coerce_columns: bool = False,
     coerce_index: bool = False,
     coerce_types: bool = False,
-    migrate_schema: bool = False,
+    migrate_schema: bool | Literal["union"] = False,
 ) -> Callable[[Callable[P, R]], PublishedFunction[P, R]]:
     """Publish the frames ``func`` returns to ``symbols``.
 
@@ -615,7 +645,10 @@ def symbol_publisher(
     goes the other way for functions with a fixed output schema: when an update
     is rejected because the stored schema differs, the stored history is
     rewritten in the published frame's schema (with a warning) and the update
-    retried.
+    retried. ``migrate_schema="union"`` is for frames whose columns vary between
+    writes (e.g. one per epic of a universe that changes): each write is widened
+    to the stored columns, and new columns are added to the stored history, so
+    no column is ever dropped and a read returns every column ever written.
     """
 
     def decorator(
@@ -747,6 +780,8 @@ def symbol_publisher(
                             if clean and (lib_name, sym) not in cleaned:
                                 lib.delete(sym)
                                 cleaned.add((lib_name, sym))
+                            if migrate_schema == "union":
+                                data = _union_with_stored(lib, sym, data)
                             update = functools.partial(
                                 lib.update,
                                 sym,
