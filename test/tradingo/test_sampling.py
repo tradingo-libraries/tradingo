@@ -920,3 +920,102 @@ class TestMeasureIgPriceScales:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+class TestDukascopySampleInstrument:
+    """``tradingo.sampling.dukascopy.sample_instrument`` against a fake API."""
+
+    START = pd.Timestamp("2026-11-23 10:00:00", tz="utc")
+    END = pd.Timestamp("2026-11-23 10:01:00", tz="utc")
+
+    @staticmethod
+    def _ms(ts: str) -> int:
+        return int(pd.Timestamp(ts, tz="utc").timestamp() * 1000)
+
+    def _row(self, ts: str, price: float = 1.1) -> list[float]:
+        return [self._ms(ts), price, price, price, price, 10.0]
+
+    def _patch(self, monkeypatch: pytest.MonkeyPatch, pages: list[Any]) -> list[int]:
+        import dukascopy_python
+
+        cursors: list[int] = []
+        responses = iter(pages)
+
+        def fake_fetch(**kwargs: Any) -> Any:
+            cursors.append(kwargs["last_update"])
+            return next(responses)
+
+        monkeypatch.setattr(dukascopy_python, "_fetch", fake_fetch)
+        monkeypatch.setattr("time.sleep", lambda _: None)
+        return cursors
+
+    def _sample(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        from tradingo.sampling.dukascopy import sample_instrument
+
+        return sample_instrument("EUR/USD", self.START, self.END, "10SEC")
+
+    def test_rate_limit_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from tradingo.sampling.dukascopy import DukascopyAPIError
+
+        error = {"error": "Too Many Requests (Rate limited)."}
+        cursors = self._patch(monkeypatch, [error])
+        with pytest.raises(DukascopyAPIError, match="Rate limited"):
+            self._sample()
+        assert len(cursors) == 1  # not retried
+
+    def test_window_ending_short_keeps_bars(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The provider has bars up to 10:00:20 only; the next page is {}.
+        page = [self._row("2026-11-23 10:00:10"), self._row("2026-11-23 10:00:20")]
+        self._patch(monkeypatch, [page, {}, page, {}])
+        bid, ask = self._sample()
+        assert list(bid.index) == [
+            pd.Timestamp("2026-11-23 10:00:10", tz="utc"),
+            pd.Timestamp("2026-11-23 10:00:20", tz="utc"),
+        ]
+        assert list(bid.columns[:4]) == ["Open", "High", "Low", "Close"]
+        assert ask.equals(bid)
+
+    def test_pages_forward_and_stops_past_end(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        first = [self._row("2026-11-23 10:00:00"), self._row("2026-11-23 10:00:30")]
+        # The next page repeats the cursor row, then runs past the end.
+        second = [self._row("2026-11-23 10:00:30"), self._row("2026-11-23 10:01:00")]
+        second.append(self._row("2026-11-23 10:01:10"))
+        cursors = self._patch(monkeypatch, [first, second, first, second])
+        bid, _ = self._sample()
+        assert [t.strftime("%H:%M:%S") for t in bid.index] == [
+            "10:00:00",
+            "10:00:30",
+            "10:01:00",
+        ]
+        assert cursors[:2] == [
+            self._ms("2026-11-23 10:00"),
+            self._ms("2026-11-23 10:00:30"),
+        ]
+
+    def test_no_data_is_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch, [{}, []])
+        bid, ask = self._sample()
+        assert bid.empty and ask.empty
+        assert isinstance(bid.index, pd.DatetimeIndex) and str(bid.index.tz) == "UTC"
+        assert all(pd.api.types.is_float_dtype(t) for t in bid.dtypes)
+
+    def test_network_error_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import dukascopy_python
+
+        page = [self._row("2026-11-23 10:00:10")]
+        calls = iter([ConnectionError("reset"), page, {}, page, {}])
+
+        def flaky(**kwargs: Any) -> Any:
+            out = next(calls)
+            if isinstance(out, Exception):
+                raise out
+            return out
+
+        monkeypatch.setattr(dukascopy_python, "_fetch", flaky)
+        monkeypatch.setattr("time.sleep", lambda _: None)
+        bid, _ = self._sample()
+        assert len(bid) == 1
