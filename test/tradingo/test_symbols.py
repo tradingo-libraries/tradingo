@@ -959,3 +959,53 @@ def test_symbol_publisher_schema_mismatch_raises_without_migrate(
 
     with pytest.raises(StreamDescriptorMismatch):
         publisher(arctic=arctic, dry_run=False)
+
+
+def test_symbol_publisher_migrate_schema_union_keeps_all_columns(
+    arctic: Arctic,
+) -> None:
+    """A universe whose epics change keeps the old epics' history."""
+    index = pd.date_range("2026-01-01", periods=5, tz="UTC", name="DateTime")
+    frames = iter(
+        [
+            pd.DataFrame(
+                {"KA.SPY": [1.0, 2.0], "SMH": [0.0, 1.0], "note": ["a", "b"]},
+                index=index[:2],
+            ),
+            # epic swapped, string column absent
+            pd.DataFrame({"SI.SPY": [5.0, 0.0], "SMH": [3.0, 3.0]}, index=index[2:4]),
+            # no new columns: a plain update, no migration
+            pd.DataFrame({"SI.SPY": [7.0], "SMH": [4.0]}, index=index[4:]),
+        ]
+    )
+
+    @symbol_publisher("my-lib/union", migrate_schema="union")
+    def publisher() -> pd.DataFrame:
+        return next(frames)
+
+    for _ in range(3):
+        publisher(arctic=arctic, dry_run=False)
+
+    lib = arctic.get_library("my-lib")
+    result = cast(pd.DataFrame, lib.read("union").data)
+    assert list(result.columns) == ["KA.SPY", "SMH", "note", "SI.SPY"]
+    assert result["KA.SPY"].tolist()[:2] == [1.0, 2.0]
+    assert result["KA.SPY"].isna().tolist() == [False, False, True, True, True]
+    assert result["SMH"].tolist() == [0.0, 1.0, 3.0, 3.0, 4.0]
+    assert result["note"].tolist() == ["a", "b", None, None, None]
+    assert result["SI.SPY"].tolist()[2:] == [5.0, 0.0, 7.0]
+    # write, migration rewrite + update, then a single update
+    assert len(lib.list_versions("union")) == 4
+
+
+def test_symbol_publisher_migrate_schema_union_new_symbol(arctic: Arctic) -> None:
+    index = pd.date_range("2026-01-01", periods=2, tz="UTC", name="DateTime")
+
+    @symbol_publisher("my-lib/union-new", migrate_schema="union")
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame({"A": [1.0, 2.0]}, index=index)
+
+    publisher(arctic=arctic, dry_run=False)
+
+    result = cast(pd.DataFrame, arctic.get_library("my-lib").read("union-new").data)
+    assert result["A"].tolist() == [1.0, 2.0]

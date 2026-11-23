@@ -502,7 +502,9 @@ def sample_ig_positions(
     """DAG node: sample IG deals and aggregate them into live position symbols.
 
     Columns are fixed to ``instruments.index`` so the outputs line up with the
-    backtest/portfolio symbols for the same universe and keep a static schema.
+    backtest/portfolio symbols for the same universe. They change when the
+    universe does: publish with ``migrate_schema: union`` to keep the history
+    of epics that left it.
     Note the IG account is shared: an epic traded by two strategies shows the
     account-level net position in both universes.
 
