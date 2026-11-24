@@ -34,8 +34,8 @@ from typing import Any
 import databento as db
 import pandas as pd
 import yfinance as yf
-from trading_ig.rest import IGService
 
+from tradingo.ig_rest import IGService
 from tradingo.sampling.ig import get_ig_service
 
 logger = logging.getLogger(__name__)
