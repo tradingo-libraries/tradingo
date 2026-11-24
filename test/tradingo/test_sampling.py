@@ -328,7 +328,7 @@ class TestGetIgService:
     """Tests for get_ig_service function."""
 
     @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
-    @patch("tradingo.sampling.ig.IGService")
+    @patch("trading_ig.rest.IGService")
     def test_get_ig_service_creates_session(
         self, mock_ig_service_cls: MagicMock, mock_config: MagicMock
     ) -> None:
@@ -351,7 +351,7 @@ class TestGetIgService:
         assert mock_ig_service_cls.call_args[1]["use_rate_limiter"] is False
 
     @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
-    @patch("tradingo.sampling.ig.IGService")
+    @patch("trading_ig.rest.IGService")
     def test_get_ig_service_rate_limiter_opt_in(
         self, mock_ig_service_cls: MagicMock, mock_config: MagicMock
     ) -> None:
@@ -362,7 +362,7 @@ class TestGetIgService:
         assert mock_ig_service_cls.call_args[1]["use_rate_limiter"] is True
 
     @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
-    @patch("tradingo.sampling.ig.IGService")
+    @patch("trading_ig.rest.IGService")
     def test_get_ig_service_uses_override_credentials(
         self, mock_ig_service_cls: MagicMock, mock_config: MagicMock
     ) -> None:
