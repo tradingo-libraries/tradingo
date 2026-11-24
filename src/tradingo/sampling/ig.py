@@ -1,9 +1,7 @@
 """IG data accessors"""
 
-from __future__ import annotations
-
 import logging
-from typing import TYPE_CHECKING, Any, Generator, Hashable, TypeVar, cast
+from typing import Any, Generator, Hashable, TypeVar, cast
 
 import arcticdb as adb
 import dateutil.tz
@@ -13,12 +11,8 @@ from arcticdb.version_store.library import Library
 from tenacity import Retrying, retry_if_exception_type, wait_exponential
 
 from tradingo import symbols
+from tradingo.ig_rest import ApiExceededException, IGService
 from tradingo.settings import IGTradingConfig
-
-if TYPE_CHECKING:
-    # Imported where it's used: ``import trading_ig`` also imports its streaming
-    # client, which starts Lightstreamer's busy-polling threads in this process.
-    from trading_ig.rest import IGService
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +48,6 @@ def get_ig_service(
         retryer below backs off on ``ApiExceededException``. Turn it on for bulk loops
         that make many requests from one process.
     """
-    from trading_ig.rest import ApiExceededException, IGService
-
     config = IGTradingConfig.from_env()
 
     retryer = Retrying(

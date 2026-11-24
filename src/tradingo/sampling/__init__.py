@@ -1,8 +1,7 @@
 """Data samplers, one module per provider.
 
-Submodules are not imported here: importing ``ig`` loads trading_ig, whose
-package import starts Lightstreamer's polling threads (~0.05 core per process,
-for ever). Import the provider module you need, e.g. ``tradingo.sampling.dukascopy``.
+Submodules are not imported here, so a process loads only the providers (and
+SDKs) it uses: import the one you need, e.g. ``tradingo.sampling.dukascopy``.
 """
 
 __all__ = [

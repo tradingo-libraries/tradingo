@@ -28,8 +28,8 @@ from typing import Any, Hashable, cast
 
 import numpy as np
 import pandas as pd
-from trading_ig.rest import IGService
 
+from tradingo.ig_rest import IGService
 from tradingo.sampling.ig import get_ig_service
 
 logger = logging.getLogger(__name__)
