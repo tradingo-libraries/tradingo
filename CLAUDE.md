@@ -147,6 +147,8 @@ my.task.name:
     - "signals/universe"
   params:                               # Extra kwargs passed to function
     speed1: 16
+  publish_args:                         # symbol_publisher options, e.g.
+    dynamic_schema: true                # create output libraries with dynamic schema
 
 my.stage.name:                          # Stage: run tasks a, b, c in one process
   stage: [my.task.a, my.task.b]

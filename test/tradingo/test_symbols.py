@@ -1009,3 +1009,69 @@ def test_symbol_publisher_migrate_schema_union_new_symbol(arctic: Arctic) -> Non
 
     result = cast(pd.DataFrame, arctic.get_library("my-lib").read("union-new").data)
     assert result["A"].tolist() == [1.0, 2.0]
+
+
+def test_symbol_publisher_dynamic_schema_creates_dynamic_library(
+    arctic: Arctic,
+) -> None:
+    index = pd.date_range("2026-01-01", periods=4, tz="UTC", name="DateTime")
+    frames = iter(
+        [
+            pd.DataFrame({"a": [1.0, 2.0]}, index=index[:2]),
+            # a new column needs dynamic schema
+            pd.DataFrame({"a": [3.0, 4.0], "b": [5.0, 6.0]}, index=index[2:]),
+        ]
+    )
+
+    @symbol_publisher("dyn-lib/sym", dynamic_schema=True)
+    def publisher() -> pd.DataFrame:
+        return next(frames)
+
+    publisher(arctic=arctic, dry_run=False)
+    publisher(arctic=arctic, dry_run=False)
+
+    lib = arctic.get_library("dyn-lib")
+    assert lib.options().dynamic_schema
+    result = cast(pd.DataFrame, lib.read("sym").data)
+    assert list(result.columns) == ["a", "b"]
+    assert result["a"].tolist() == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_symbol_publisher_dynamic_schema_overrides_library_options(
+    arctic: Arctic,
+) -> None:
+    options = LibraryOptions(dynamic_schema=False, rows_per_segment=1000)
+
+    @symbol_publisher("dyn-lib-opts/sym", library_options=options, dynamic_schema=True)
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame(
+            {"a": [1.0]},
+            index=pd.DatetimeIndex(["2026-01-01"], tz="UTC", name="DateTime"),
+        )
+
+    publisher(arctic=arctic, dry_run=False)
+
+    created = arctic.get_library("dyn-lib-opts").options()
+    assert created.dynamic_schema
+    assert created.rows_per_segment == 1000
+    # the caller's options are not mutated
+    assert not options.dynamic_schema
+
+
+def test_symbol_publisher_dynamic_schema_warns_on_static_library(
+    arctic: Arctic, caplog: pytest.LogCaptureFixture
+) -> None:
+    arctic.create_library("static-lib")
+
+    @symbol_publisher("static-lib/sym", dynamic_schema=True)
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame(
+            {"a": [1.0]},
+            index=pd.DatetimeIndex(["2026-01-01"], tz="UTC", name="DateTime"),
+        )
+
+    with caplog.at_level("WARNING"):
+        publisher(arctic=arctic, dry_run=False)
+
+    assert not arctic.get_library("static-lib").options().dynamic_schema
+    assert "library static-lib was created with" in caplog.text

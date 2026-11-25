@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import functools
 import inspect
 import logging
@@ -22,7 +23,11 @@ from urllib.parse import parse_qsl, urlparse
 import arcticdb as adb
 import numpy as np
 import pandas as pd
-from arcticdb.exceptions import NoSuchVersionException, StreamDescriptorMismatch
+from arcticdb.exceptions import (
+    MismatchingLibraryOptions,
+    NoSuchVersionException,
+    StreamDescriptorMismatch,
+)
 from arcticdb_ext.exceptions import InternalException
 
 from tradingo import telemetry
@@ -638,6 +643,7 @@ def symbol_publisher(
     coerce_index: bool = False,
     coerce_types: bool = False,
     migrate_schema: bool | Literal["union"] = False,
+    dynamic_schema: bool | None = None,
 ) -> Callable[[Callable[P, R]], PublishedFunction[P, R]]:
     """Publish the frames ``func`` returns to ``symbols``.
 
@@ -649,7 +655,17 @@ def symbol_publisher(
     writes (e.g. one per epic of a universe that changes): each write is widened
     to the stored columns, and new columns are added to the stored history, so
     no column is ever dropped and a read returns every column ever written.
+
+    ``dynamic_schema`` creates missing libraries with ArcticDB dynamic schema
+    (it overrides ``library_options.dynamic_schema``). ArcticDB fixes the option
+    when a library is created, so an existing static library is left as it is
+    (with a warning): migrate it to dynamic schema first.
     """
+
+    if dynamic_schema is not None:
+        library_options = copy.copy(library_options or adb.LibraryOptions())
+        library_options.dynamic_schema = dynamic_schema
+    warned_libraries: set[str] = set()
 
     def decorator(
         func: Callable[P, R],
@@ -755,11 +771,29 @@ def symbol_publisher(
                         len(data.index),
                     )
                     lib_name, sym, params = parsed_symbol
-                    lib = arctic.get_library(
-                        lib_name,
-                        create_if_missing=True,
-                        library_options=library_options,
-                    )
+                    try:
+                        lib = arctic.get_library(
+                            lib_name,
+                            create_if_missing=True,
+                            library_options=library_options,
+                        )
+                    except MismatchingLibraryOptions:
+                        if dynamic_schema is None:
+                            raise
+                        # The option only applies when a library is created.
+                        lib = arctic.get_library(lib_name)
+                        if lib_name not in warned_libraries:
+                            warned_libraries.add(lib_name)
+                            logger.warning(
+                                "dynamic_schema=%s requested for %s/%s but library"
+                                " %s was created with %s; writing with the"
+                                " library's options. Migrate the library first.",
+                                dynamic_schema,
+                                lib_name,
+                                sym,
+                                lib_name,
+                                lib.options(),
+                            )
                     if coerce_columns or coerce_index or coerce_types:
                         data = _coerce_to_schema(
                             lib, sym, data, coerce_columns, coerce_index, coerce_types

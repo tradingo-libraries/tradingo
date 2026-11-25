@@ -814,3 +814,22 @@ def test_task_function_name_returns_underlying_function() -> None:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+def test_publish_args_dynamic_schema_from_config() -> None:
+    """``publish_args.dynamic_schema`` in a task config reaches the publisher."""
+    from arcticdb import Arctic
+
+    arctic = Arctic("mem://test-dag-dynamic-schema")
+    config = {
+        "task.dynamic": {
+            **_make_simple_task("task.dynamic", symbols_out=["dyn-cfg/sym"]),
+            "function": "test.tradingo._dag_helpers.one_row_frame",
+            "publish_args": {"dynamic_schema": True},
+        }
+    }
+    dag = DAG.from_config(config)
+
+    dag["task.dynamic"].function(arctic=arctic, dry_run=False)
+
+    assert arctic.get_library("dyn-cfg").options().dynamic_schema
