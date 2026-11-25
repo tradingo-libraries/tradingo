@@ -245,3 +245,10 @@ def blocking_a(**kwargs: object) -> None:
     gate_c.wait(timeout=5)
     with call_log_lock:
         call_log.append("a")
+
+
+def one_row_frame(**kwargs: object) -> pd.DataFrame:
+    return pd.DataFrame(
+        {"a": [1.0]},
+        index=pd.DatetimeIndex(["2026-01-01"], tz="UTC", name="DateTime"),
+    )
