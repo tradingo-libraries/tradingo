@@ -214,6 +214,18 @@ Set the following env vars:
   5. `IG_SERVICE_USERNAME`
   6. `IG_SERVICE_PASSWORD`
 
+These are the `demo` IG credential profile, which IG tasks use by default. Further
+profiles use their own prefix, `IG_<PROFILE>_*` (e.g. `IG_PROD_USERNAME`,
+`IG_PROD_PASSWORD`, `IG_PROD_API_KEY`, `IG_PROD_ACC_TYPE`, optional
+`IG_PROD_ACC_NUMBER`), and a task selects one with `ig_profile`:
+
+```yaml
+sample.ig.prices:
+  function: tradingo.sampling.ig.sample_instrument
+  params:
+    ig_profile: prod
+```
+
 And run
 
 ```bash

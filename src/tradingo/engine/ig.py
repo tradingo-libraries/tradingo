@@ -31,6 +31,7 @@ import pandas as pd
 
 from tradingo.ig_rest import IGService
 from tradingo.sampling.ig import get_ig_service
+from tradingo.settings import DEFAULT_IG_PROFILE
 
 logger = logging.getLogger(__name__)
 
@@ -391,6 +392,7 @@ def adjust_position_sizes(
     current_positions: pd.DataFrame | None = None,
     check_market_status: bool = True,
     max_target_age: str | None = None,
+    ig_profile: str = DEFAULT_IG_PROFILE,
 ) -> pd.DataFrame:
     """Trade the IG account towards the latest row of ``target_positions``.
 
@@ -400,9 +402,10 @@ def adjust_position_sizes(
     :param check_market_status: skip epics whose market is not ``TRADEABLE``.
     :param max_target_age: e.g. ``"30min"``; skip trading entirely when the
         latest target row is older than this.
+    :param ig_profile: IG credential profile to trade with (``demo``/``prod``).
     :return: trade log indexed by UTC ``DateTime``.
     """
-    service = service or get_ig_service()
+    service = service or get_ig_service(profile=ig_profile)
 
     if _is_stale(target_positions, max_target_age):
         service.session.close()
