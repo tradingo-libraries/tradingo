@@ -165,7 +165,8 @@ my.stage.name:                          # Stage: run tasks a, b, c in one proces
 | `TP_CELERY_BROKER_URL` | Worker only | `redis://localhost:6379/0` | Celery broker |
 | `TP_CELERY_RESULT_BACKEND` | Worker only | `redis://localhost:6379/1` | Celery result backend |
 | `TP_CELERY_QUEUE` | Worker only | `tradingo` | Queue name |
-| `IG_SERVICE_*` | IG only | — | IG Trading API credentials |
+| `IG_SERVICE_*` | IG only | — | IG credentials, `demo` profile (the default) |
+| `IG_<PROFILE>_*` | IG only | — | Other IG credential profiles, e.g. `IG_PROD_USERNAME`; a task picks one with `params: {ig_profile: prod}` |
 | `TRADINGO_LOG_CONFIG` | No | bundled | Logging YAML dictConfig path |
 
 ## Dependency Extras

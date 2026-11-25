@@ -9,6 +9,7 @@ from yfinance import Ticker
 
 from tradingo.sampling.ig import get_ig_service
 from tradingo.sampling.yf import currency_to_symbol
+from tradingo.settings import DEFAULT_IG_PROFILE
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ def download_instruments(
     file: str | None = None,
     tickers: list[str] | str | None = None,
     epics: list[str] | None = None,
+    ig_profile: str = DEFAULT_IG_PROFILE,
 ) -> pd.DataFrame:
     if file:
         return pd.read_csv(
@@ -58,7 +60,7 @@ def download_instruments(
 
     if epics:
         # One request per epic from this process: keep the rate limiter on.
-        service = get_ig_service(use_rate_limiter=True)
+        service = get_ig_service(use_rate_limiter=True, profile=ig_profile)
 
         return (
             pd.DataFrame(
@@ -76,6 +78,7 @@ def measure_ig_price_scales(
     epics: dict[str, str],
     account_id: str | None = None,
     service: Any = None,
+    ig_profile: str = DEFAULT_IG_PROFILE,
 ) -> pd.DataFrame:
     """Measure ``price_scale`` (IG price / source price) for each mapping.
 
@@ -95,7 +98,7 @@ def measure_ig_price_scales(
     :return: frame indexed by source symbol with epic, IG mid, source price,
         ``price_scale`` (the raw ratio) and market status.
     """
-    service = service or get_ig_service()
+    service = service or get_ig_service(profile=ig_profile)
     if account_id:
         service.switch_account(account_id, False)
 

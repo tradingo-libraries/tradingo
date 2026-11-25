@@ -388,6 +388,111 @@ class TestGetIgService:
         assert call_kwargs["api_key"] == "override_key"
         assert call_kwargs["acc_type"] == "LIVE"
 
+    @pytest.mark.parametrize(
+        "profile, prefix",
+        [("demo", "IG_SERVICE"), ("prod", "IG_PROD"), ("PROD", "IG_PROD")],
+    )
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_profile_selects_credentials(
+        self,
+        mock_ig_service_cls: MagicMock,
+        mock_config: MagicMock,
+        profile: str,
+        prefix: str,
+    ) -> None:
+        from tradingo.sampling.ig import get_ig_service
+
+        get_ig_service(profile=profile)
+
+        assert mock_config.call_args[1]["app_prefix"] == prefix
+
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_backoff_is_bounded(
+        self, mock_ig_service_cls: MagicMock, mock_config: MagicMock
+    ) -> None:
+        from tradingo.ig_rest import ApiExceededException
+        from tradingo.sampling.ig import get_ig_service
+
+        get_ig_service(max_attempts=3, max_wait=0)
+        retryer = mock_ig_service_cls.call_args[1]["retryer"]
+        calls = MagicMock(side_effect=ApiExceededException())
+
+        # Gives up after max_attempts and re-raises the IG error itself.
+        with pytest.raises(ApiExceededException):
+            retryer(calls)
+        assert calls.call_count == 3
+
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_backoff_only_retries_allowance(
+        self, mock_ig_service_cls: MagicMock, mock_config: MagicMock
+    ) -> None:
+        from tradingo.sampling.ig import get_ig_service
+
+        get_ig_service(max_wait=0)
+        retryer = mock_ig_service_cls.call_args[1]["retryer"]
+        calls = MagicMock(side_effect=ValueError("bad credentials"))
+
+        with pytest.raises(ValueError):
+            retryer(calls)
+        assert calls.call_count == 1
+
+
+class TestIGProfiles:
+    """IGTradingConfig.for_profile reads one credential set per profile."""
+
+    ENV = {
+        "IG_SERVICE_USERNAME": "demo-user",
+        "IG_SERVICE_PASSWORD": "demo-pass",
+        "IG_SERVICE_API_KEY": "demo-key",
+        "IG_SERVICE_ACC_TYPE": "DEMO",
+        "IG_PROD_USERNAME": "prod-user",
+        "IG_PROD_PASSWORD": "prod-pass",
+        "IG_PROD_API_KEY": "prod-key",
+        "IG_PROD_ACC_TYPE": "LIVE",
+        "IG_PROD_ACC_NUMBER": "ABC12",
+    }
+
+    def test_demo_is_default_and_reads_ig_service(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from tradingo.settings import IGTradingConfig
+
+        for k, v in self.ENV.items():
+            monkeypatch.setenv(k, v)
+
+        config = IGTradingConfig.for_profile()
+        assert (config.username, config.acc_type) == ("demo-user", "DEMO")
+        assert config.acc_number is None
+
+    def test_prod_reads_ig_prod(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from tradingo.settings import IGTradingConfig
+
+        for k, v in self.ENV.items():
+            monkeypatch.setenv(k, v)
+
+        config = IGTradingConfig.for_profile("prod")
+        assert (config.username, config.api_key) == ("prod-user", "prod-key")
+        assert (config.acc_type, config.acc_number) == ("LIVE", "ABC12")
+
+    def test_missing_profile_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from tradingo.settings import EnvProviderError, IGTradingConfig
+
+        for k, v in self.ENV.items():
+            monkeypatch.setenv(k, v)
+
+        with pytest.raises(EnvProviderError):
+            IGTradingConfig.for_profile("staging")
+
+    @pytest.mark.parametrize("profile", ["", "service"])
+    def test_invalid_profile(self, profile: str) -> None:
+        from tradingo.settings import ig_profile_prefix
+
+        with pytest.raises(ValueError):
+            ig_profile_prefix(profile)
+
 
 class TestSampleInstrument:
     """Tests for sample_instrument function."""

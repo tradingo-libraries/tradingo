@@ -8,11 +8,16 @@ import dateutil.tz
 import numpy as np
 import pandas as pd
 from arcticdb.version_store.library import Library
-from tenacity import Retrying, retry_if_exception_type, wait_exponential
+from tenacity import (
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_random_exponential,
+)
 
 from tradingo import symbols
 from tradingo.ig_rest import ApiExceededException, IGService
-from tradingo.settings import IGTradingConfig
+from tradingo.settings import DEFAULT_IG_PROFILE, IGTradingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -38,21 +43,45 @@ def get_ig_service(
     acc_type: str | None = None,
     acc_number: str | None = None,
     use_rate_limiter: bool = False,
+    profile: str = DEFAULT_IG_PROFILE,
+    max_attempts: int = 6,
+    max_wait: float = 60.0,
 ) -> IGService:
     """Logged-in IG session.
 
+    :param profile: credential set, see ``IGTradingConfig.for_profile``: ``demo``
+        (``IG_SERVICE_*``, the default) or e.g. ``prod`` (``IG_PROD_*``). Explicit
+        ``username`` etc. override the profile's values.
     :param use_rate_limiter: trading_ig's in-process token bucket. Its setup sleeps
         60/allowance (~2.1s) on login, then a further ~2.1s before every request after
         the first. It is per process, so it never throttled parallel DAG tasks against
         each other. Off by default: DAG tasks make a handful of requests each and the
         retryer below backs off on ``ApiExceededException``. Turn it on for bulk loops
         that make many requests from one process.
+    :param max_attempts: requests (login included) are tried this many times on
+        ``ApiExceededException`` before it is raised.
+    :param max_wait: cap in seconds on one backoff. IG allowances are per minute, so
+        waiting longer than that buys nothing.
+
+    Backoff is full-jitter exponential (uniform in ``[0, min(max_wait, 2**n)]``), so
+    parallel tasks that hit the allowance together don't log in again in lockstep.
+    With the defaults a request gives up after ~1-2 minutes, rather than retrying
+    forever with an unbounded wait.
     """
-    config = IGTradingConfig.from_env()
+    config = IGTradingConfig.for_profile(profile)
 
     retryer = Retrying(
-        wait=wait_exponential(),
+        wait=wait_random_exponential(multiplier=1, max=max_wait),
+        stop=stop_after_attempt(max_attempts),
         retry=retry_if_exception_type(ApiExceededException),
+        before_sleep=lambda state: logger.warning(
+            "IG API allowance exceeded (profile=%s, attempt %s/%s), retrying in %.1fs",
+            profile,
+            state.attempt_number,
+            max_attempts,
+            state.next_action.sleep if state.next_action else 0.0,
+        ),
+        reraise=True,
     )
 
     service = IGService(
@@ -76,8 +105,9 @@ def sample_instrument(
     interval: str,
     wait: int = 0,
     service: IGService | None = None,
+    ig_profile: str = DEFAULT_IG_PROFILE,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    service = service or get_ig_service()
+    service = service or get_ig_service(profile=ig_profile)
     try:
         result = (
             service.fetch_historical_prices_by_epic(
@@ -223,12 +253,13 @@ def get_activity_history(
     from_date: pd.Timestamp,
     to_date: pd.Timestamp,
     svc: IGService | None = None,
+    ig_profile: str = DEFAULT_IG_PROFILE,
 ) -> tuple[tuple[pd.DataFrame, tuple[Hashable]], ...]:
     """
     get activtiy history and return dataframe per asset
     """
 
-    svc = svc or get_ig_service()
+    svc = svc or get_ig_service(profile=ig_profile)
 
     act = svc.fetch_account_activity_by_date(
         from_date=pd.Timestamp(from_date),
@@ -498,6 +529,7 @@ def sample_ig_positions(
     end_date: pd.Timestamp,
     service: IGService | None = None,
     live_extension: str = "1h",
+    ig_profile: str = DEFAULT_IG_PROFILE,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """DAG node: sample IG deals and aggregate them into live position symbols.
 
@@ -521,7 +553,7 @@ def sample_ig_positions(
         * avg_open_price: one-row wide frame at sample time.
     """
     own_service = service is None
-    svc = service or get_ig_service()
+    svc = service or get_ig_service(profile=ig_profile)
     epics = [str(e) for e in instruments.index]
     start = _utc(start_date)
     end = _utc(end_date)
@@ -557,7 +589,10 @@ def sample_ig_positions(
 ACCOUNT_COLUMNS = ("balance", "available", "deposit", "profitLoss")
 
 
-def sample_ig_account(service: IGService | None = None) -> pd.DataFrame:
+def sample_ig_account(
+    service: IGService | None = None,
+    ig_profile: str = DEFAULT_IG_PROFILE,
+) -> pd.DataFrame:
     """DAG node: one-row snapshot of the IG account's funds at sample time.
 
     Columns are ``balance`` (cash), ``available`` (free to trade), ``deposit``
@@ -566,7 +601,7 @@ def sample_ig_account(service: IGService | None = None) -> pd.DataFrame:
     preferred account.
     """
     own_service = service is None
-    svc = service or get_ig_service()
+    svc = service or get_ig_service(profile=ig_profile)
     try:
         now = pd.Timestamp.now("UTC")
         accounts = svc.fetch_accounts()

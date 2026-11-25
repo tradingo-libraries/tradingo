@@ -259,6 +259,34 @@ class IGTradingConfig(EnvProvider):
     acc_number: str | None = None
     app_prefix = "IG_SERVICE"
 
+    @classmethod
+    def for_profile(
+        cls,
+        profile: str = "demo",
+        env: MutableMapping[str, Any] | None = None,
+    ) -> "IGTradingConfig":
+        """Credentials for a named IG profile.
+
+        The default ``demo`` profile is the ``IG_SERVICE_*`` variables; any other
+        profile ``<name>`` reads ``IG_<NAME>_*``, e.g. ``IG_PROD_USERNAME``.
+        """
+        return cls.from_env(app_prefix=ig_profile_prefix(profile), env=env)
+
+
+DEFAULT_IG_PROFILE = "demo"
+
+
+def ig_profile_prefix(profile: str) -> str:
+    """Environment prefix of an IG credential profile: demo -> IG_SERVICE."""
+    profile = profile.strip().lower()
+    if not profile:
+        raise ValueError("IG profile must not be empty")
+    if profile == DEFAULT_IG_PROFILE:
+        return "IG_SERVICE"
+    if profile == "service":
+        raise ValueError("'service' is the demo profile's prefix; use 'demo'")
+    return f"IG_{profile.upper()}"
+
 
 @dataclasses.dataclass
 class IBTradingConfig(EnvProvider):
