@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+from arcticdb import ReadRequest
 
 from tradingo.sampling.yf import (
     ProviderDataError,
@@ -197,11 +198,19 @@ class TestAlignSeries:
         assert s2.name == "test"
 
     def test_align_series_with_series(self) -> None:
-        s1 = pd.Series([1, 2, 3], index=[0, 1, 2])
-        s2 = pd.Series([4, 5, 6], index=[1, 2, 3])
+        s1 = pd.Series([1, 2, 3], index=pd.date_range("2026-05-19", periods=3))
+        s2 = pd.Series([4, 5, 6], index=pd.date_range("2026-05-20", periods=3))
         result1, result2 = _align_series(s1, s2)
-        assert list(result1.index) == [1, 2]
-        assert list(result2.index) == [1, 2]
+        pd.testing.assert_index_equal(
+            result1.index,
+            pd.date_range("2026-05-20", periods=3),
+            check_names=False,
+        )
+        pd.testing.assert_index_equal(
+            result2.index,
+            pd.date_range("2026-05-20", periods=3),
+            check_names=False,
+        )
 
     def test_align_series_invalid_type_raises(self) -> None:
         s = pd.Series([1, 2, 3])
@@ -338,6 +347,19 @@ class TestGetIgService:
 
         mock_service.create_session.assert_called_once()
         assert service == mock_service
+        # The limiter's login sleep costs ~2s per DAG task; off unless asked for.
+        assert mock_ig_service_cls.call_args[1]["use_rate_limiter"] is False
+
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_rate_limiter_opt_in(
+        self, mock_ig_service_cls: MagicMock, mock_config: MagicMock
+    ) -> None:
+        from tradingo.sampling.ig import get_ig_service
+
+        get_ig_service(use_rate_limiter=True)
+
+        assert mock_ig_service_cls.call_args[1]["use_rate_limiter"] is True
 
     @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
     @patch("tradingo.sampling.ig.IGService")
@@ -365,6 +387,184 @@ class TestGetIgService:
         assert call_kwargs["password"] == "override_pass"
         assert call_kwargs["api_key"] == "override_key"
         assert call_kwargs["acc_type"] == "LIVE"
+
+    @pytest.mark.parametrize(
+        "profile, prefix",
+        [("demo", "IG_SERVICE"), ("prod", "IG_PROD"), ("PROD", "IG_PROD")],
+    )
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_profile_selects_credentials(
+        self,
+        mock_ig_service_cls: MagicMock,
+        mock_config: MagicMock,
+        profile: str,
+        prefix: str,
+    ) -> None:
+        from tradingo.sampling.ig import get_ig_service
+
+        get_ig_service(profile=profile)
+
+        assert mock_config.call_args[1]["app_prefix"] == prefix
+
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_backoff_is_bounded(
+        self, mock_ig_service_cls: MagicMock, mock_config: MagicMock
+    ) -> None:
+        from tradingo.ig_rest import ApiExceededException
+        from tradingo.sampling.ig import get_ig_service
+
+        get_ig_service(max_attempts=3, max_wait=0)
+        retryer = mock_ig_service_cls.call_args[1]["retryer"]
+        calls = MagicMock(side_effect=ApiExceededException())
+
+        # Gives up after max_attempts and re-raises the IG error itself.
+        with pytest.raises(ApiExceededException):
+            retryer(calls)
+        assert calls.call_count == 3
+
+    @staticmethod
+    def _run_on_fake_clock(
+        retryer: Any, window: float
+    ) -> tuple[list[float], list[float], float | None]:
+        """Run ``retryer`` on a fake clock against IG answering
+        ``ApiExceededException`` for the first ``window`` seconds.
+
+        Returns (attempt times, sleeps, time of the successful attempt or None).
+        """
+        from tradingo.ig_rest import ApiExceededException
+
+        clock = [0.0]
+        attempts: list[float] = []
+        sleeps: list[float] = []
+
+        def sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            clock[0] += seconds
+
+        def request() -> float:
+            attempts.append(clock[0])
+            if clock[0] < window:
+                raise ApiExceededException()
+            return clock[0]
+
+        with patch("time.monotonic", lambda: clock[0]):
+            try:
+                return attempts, sleeps, retryer.copy(sleep=sleep)(request)
+            except ApiExceededException:
+                return attempts, sleeps, None
+
+    @pytest.mark.parametrize("seed", range(20))
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_backoff_outlasts_the_allowance_minute(
+        self, mock_ig_service_cls: MagicMock, mock_config: MagicMock, seed: int
+    ) -> None:
+        # IG's allowances are a rolling minute. On 2026-11-26 the demo key was
+        # refused for ~40s after each quarter-hour, and a 6-attempt budget (~13s)
+        # gave up inside it: every trade task failed at login.
+        import random
+
+        from tradingo.sampling.ig import get_ig_service
+
+        random.seed(seed)
+        get_ig_service()
+        retryer = mock_ig_service_cls.call_args[1]["retryer"]
+
+        attempts, sleeps, recovered = self._run_on_fake_clock(retryer, window=60.0)
+        assert recovered is not None and 60.0 <= recovered <= 90.0
+        # Every wait keeps its fixed half: no burst of rejected requests.
+        assert all(s >= min(2 ** (n - 1), 10.0) for n, s in enumerate(sleeps, 1))
+        assert len(attempts) <= 12
+
+    @pytest.mark.parametrize("seed", range(20))
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_backoff_stops_by_max_retry_time(
+        self, mock_ig_service_cls: MagicMock, mock_config: MagicMock, seed: int
+    ) -> None:
+        import random
+
+        from tradingo.sampling.ig import get_ig_service
+
+        random.seed(seed)
+        get_ig_service()
+        retryer = mock_ig_service_cls.call_args[1]["retryer"]
+
+        attempts, _, recovered = self._run_on_fake_clock(retryer, window=1e9)
+        assert recovered is None
+        assert attempts[-1] <= 90.0
+        assert 7 <= len(attempts) <= 12
+
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_backoff_only_retries_allowance(
+        self, mock_ig_service_cls: MagicMock, mock_config: MagicMock
+    ) -> None:
+        from tradingo.sampling.ig import get_ig_service
+
+        get_ig_service(max_wait=0)
+        retryer = mock_ig_service_cls.call_args[1]["retryer"]
+        calls = MagicMock(side_effect=ValueError("bad credentials"))
+
+        with pytest.raises(ValueError):
+            retryer(calls)
+        assert calls.call_count == 1
+
+
+class TestIGProfiles:
+    """IGTradingConfig.for_profile reads one credential set per profile."""
+
+    ENV = {
+        "IG_SERVICE_USERNAME": "demo-user",
+        "IG_SERVICE_PASSWORD": "demo-pass",
+        "IG_SERVICE_API_KEY": "demo-key",
+        "IG_SERVICE_ACC_TYPE": "DEMO",
+        "IG_PROD_USERNAME": "prod-user",
+        "IG_PROD_PASSWORD": "prod-pass",
+        "IG_PROD_API_KEY": "prod-key",
+        "IG_PROD_ACC_TYPE": "LIVE",
+        "IG_PROD_ACC_NUMBER": "ABC12",
+    }
+
+    def test_demo_is_default_and_reads_ig_service(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from tradingo.settings import IGTradingConfig
+
+        for k, v in self.ENV.items():
+            monkeypatch.setenv(k, v)
+
+        config = IGTradingConfig.for_profile()
+        assert (config.username, config.acc_type) == ("demo-user", "DEMO")
+        assert config.acc_number is None
+
+    def test_prod_reads_ig_prod(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from tradingo.settings import IGTradingConfig
+
+        for k, v in self.ENV.items():
+            monkeypatch.setenv(k, v)
+
+        config = IGTradingConfig.for_profile("prod")
+        assert (config.username, config.api_key) == ("prod-user", "prod-key")
+        assert (config.acc_type, config.acc_number) == ("LIVE", "ABC12")
+
+    def test_missing_profile_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from tradingo.settings import EnvProviderError, IGTradingConfig
+
+        for k, v in self.ENV.items():
+            monkeypatch.setenv(k, v)
+
+        with pytest.raises(EnvProviderError):
+            IGTradingConfig.for_profile("staging")
+
+    @pytest.mark.parametrize("profile", ["", "service"])
+    def test_invalid_profile(self, profile: str) -> None:
+        from tradingo.settings import ig_profile_prefix
+
+        with pytest.raises(ValueError):
+            ig_profile_prefix(profile)
 
 
 class TestSampleInstrument:
@@ -822,15 +1022,22 @@ class TestIgCreateUniverse:
             ),
         )
 
-        def read_side_effect(symbol: str, date_range: Any = None) -> MagicMock:
+        def read_side_effect(
+            symbol: str | ReadRequest,
+            date_range: Any = None,
+        ) -> MagicMock:
             mock_item = MagicMock()
             if ".bid" in symbol:
                 mock_item.data = bid_data
             else:
                 mock_item.data = ask_data
+            if isinstance(symbol, ReadRequest):
+                symbol = symbol.symbol
+            mock_item.symbol = symbol
             return mock_item
 
         mock_lib.read.side_effect = read_side_effect
+        mock_lib.read_batch.side_effect = lambda s: [read_side_effect(i) for i in s]
 
         instruments = pd.DataFrame(
             {"name": ["FTSE 100"]},
@@ -846,8 +1053,147 @@ class TestIgCreateUniverse:
         )
 
         assert len(result) == 12  # 4 bid + 4 ask + 4 mid
-        assert mock_lib.read.call_count == 2  # bid and ask
+        assert mock_lib.read_batch.call_count == 1  # bid and ask
+
+
+class TestMeasureIgPriceScales:
+    """Measure IG price / source price for dukascopy and yfinance mappings."""
+
+    def test_measure_ig_price_scales(self) -> None:
+        from tradingo.sampling.instruments import measure_ig_price_scales
+
+        def market(epic: str, bid: float | None, offer: float | None) -> Any:
+            return {
+                "instrument": {"epic": epic, "name": epic},
+                "snapshot": {"bid": bid, "offer": offer, "marketStatus": "TRADEABLE"},
+            }
+
+        service = MagicMock()
+        service.fetch_markets_by_epics.return_value = [
+            market("CS.D.USDJPY.TODAY.IP", 15840.0, 15841.0),
+            market("CS.D.USDCAD.TODAY.IP", 13972.0, 13973.0),
+            market("CC.D.VIX.USS.IP", None, None),
+        ]
+        prices = pd.Series({"USD/JPY": 158.42, "USD/CAD": 1.39716, "VOL": 17.6})
+
+        result = measure_ig_price_scales(
+            prices,
+            {
+                "USD/JPY": "CS.D.USDJPY.TODAY.IP",
+                "USD/CAD": "CS.D.USDCAD.TODAY.IP",
+                "VOL": "CC.D.VIX.USS.IP",
+                "XXX": "NOT.A.MARKET",
+            },
+            account_id="SB1",
+            service=service,
+        )
+
+        service.switch_account.assert_called_once_with("SB1", False)
+        # raw ratio, not rounded
+        assert result.loc["USD/JPY", "price_scale"] == pytest.approx(15840.5 / 158.42)
+        assert result.loc["USD/CAD", "price_scale"] == pytest.approx(13972.5 / 1.39716)
+        assert pd.isna(result.loc["VOL", "price_scale"])  # closed market
+        assert "XXX" not in result.index
 
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+class TestDukascopySampleInstrument:
+    """``tradingo.sampling.dukascopy.sample_instrument`` against a fake API."""
+
+    START = pd.Timestamp("2026-11-23 10:00:00", tz="utc")
+    END = pd.Timestamp("2026-11-23 10:01:00", tz="utc")
+
+    @staticmethod
+    def _ms(ts: str) -> int:
+        return int(pd.Timestamp(ts, tz="utc").timestamp() * 1000)
+
+    def _row(self, ts: str, price: float = 1.1) -> list[float]:
+        return [self._ms(ts), price, price, price, price, 10.0]
+
+    def _patch(self, monkeypatch: pytest.MonkeyPatch, pages: list[Any]) -> list[int]:
+        import dukascopy_python
+
+        cursors: list[int] = []
+        responses = iter(pages)
+
+        def fake_fetch(**kwargs: Any) -> Any:
+            cursors.append(kwargs["last_update"])
+            return next(responses)
+
+        monkeypatch.setattr(dukascopy_python, "_fetch", fake_fetch)
+        monkeypatch.setattr("time.sleep", lambda _: None)
+        return cursors
+
+    def _sample(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        from tradingo.sampling.dukascopy import sample_instrument
+
+        return sample_instrument("EUR/USD", self.START, self.END, "10SEC")
+
+    def test_rate_limit_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from tradingo.sampling.dukascopy import DukascopyAPIError
+
+        error = {"error": "Too Many Requests (Rate limited)."}
+        cursors = self._patch(monkeypatch, [error])
+        with pytest.raises(DukascopyAPIError, match="Rate limited"):
+            self._sample()
+        assert len(cursors) == 1  # not retried
+
+    def test_window_ending_short_keeps_bars(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The provider has bars up to 10:00:20 only; the next page is {}.
+        page = [self._row("2026-11-23 10:00:10"), self._row("2026-11-23 10:00:20")]
+        self._patch(monkeypatch, [page, {}, page, {}])
+        bid, ask = self._sample()
+        assert list(bid.index) == [
+            pd.Timestamp("2026-11-23 10:00:10", tz="utc"),
+            pd.Timestamp("2026-11-23 10:00:20", tz="utc"),
+        ]
+        assert list(bid.columns[:4]) == ["Open", "High", "Low", "Close"]
+        assert ask.equals(bid)
+
+    def test_pages_forward_and_stops_past_end(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        first = [self._row("2026-11-23 10:00:00"), self._row("2026-11-23 10:00:30")]
+        # The next page repeats the cursor row, then runs past the end.
+        second = [self._row("2026-11-23 10:00:30"), self._row("2026-11-23 10:01:00")]
+        second.append(self._row("2026-11-23 10:01:10"))
+        cursors = self._patch(monkeypatch, [first, second, first, second])
+        bid, _ = self._sample()
+        assert [t.strftime("%H:%M:%S") for t in bid.index] == [
+            "10:00:00",
+            "10:00:30",
+            "10:01:00",
+        ]
+        assert cursors[:2] == [
+            self._ms("2026-11-23 10:00"),
+            self._ms("2026-11-23 10:00:30"),
+        ]
+
+    def test_no_data_is_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch, [{}, []])
+        bid, ask = self._sample()
+        assert bid.empty and ask.empty
+        assert isinstance(bid.index, pd.DatetimeIndex) and str(bid.index.tz) == "UTC"
+        assert all(pd.api.types.is_float_dtype(t) for t in bid.dtypes)
+
+    def test_network_error_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import dukascopy_python
+
+        page = [self._row("2026-11-23 10:00:10")]
+        calls = iter([ConnectionError("reset"), page, {}, page, {}])
+
+        def flaky(**kwargs: Any) -> Any:
+            out = next(calls)
+            if isinstance(out, Exception):
+                raise out
+            return out
+
+        monkeypatch.setattr(dukascopy_python, "_fetch", flaky)
+        monkeypatch.setattr("time.sleep", lambda _: None)
+        bid, _ = self._sample()
+        assert len(bid) == 1

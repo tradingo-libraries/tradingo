@@ -6,63 +6,72 @@ from libc.math cimport isnan, signbit
 import numpy as np
 
 
-cdef sign(float x):
+cdef inline double sign(double x):
     if signbit(x):
         return -1
     return 1
 
 
+cdef inline double mark(double price, double avg_open_price, double position):
+    # mark-to-market of the position held after the bar's trade
+    if position == 0.0:
+        return 0.0
+    return (price - avg_open_price) * position
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cpdef compute_backtest(
-    float[:] trades,
-    float[:] bid,
-    float[:] ask,
-    float[:] stop_limit,
-    float[:] stop_loss,
-    float[:] dividends,
+    double[:] trades,
+    double[:] bid,
+    double[:] ask,
+    double[:] stop_limit,
+    double[:] stop_loss,
+    double[:] dividends,
 ):
 
     cdef size_t num_days = trades.shape[0]
     cdef size_t idx, idx_prev
  
-    cdef float[:] unrealised_pnl = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] realised_pnl = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] total_pnl = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] net_investment = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] net_position = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] net_exposure = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] avg_open_price = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
-    cdef float[:] stop_trade = cvarray(shape=(num_days,), itemsize=sizeof(float), format="f")
+    cdef double[:] unrealised_pnl = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] realised_pnl = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] total_pnl = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] net_investment = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] net_position = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] net_exposure = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] avg_open_price = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
+    cdef double[:] stop_trade = cvarray(shape=(num_days,), itemsize=sizeof(double), format="d")
 
-    unrealised_pnl[0] = 0
     realised_pnl[0] = 0
-    total_pnl[0] = 0
     net_investment[0] = 0
     net_position[0] = trades[0]
     if trades[0] != 0.0:
         avg_open_price[0] = bid[0] if trades[0] < 0 else ask[0]
     else:
         avg_open_price[0] = 0.0
-    net_exposure[0] = trades[0] * avg_open_price[0]
+    unrealised_pnl[0] = mark((bid[0] + ask[0]) / 2, avg_open_price[0], trades[0])
+    total_pnl[0] = unrealised_pnl[0]
+    net_exposure[0] = trades[0] * (bid[0] + ask[0]) / 2
     stop_trade[0] = 0
 
     # transient output variables
-    cdef float m_net_position = 0
-    cdef float m_avg_open_price = 0
-    cdef float m_unrealised_pnl = 0
-    cdef float m_total_pnl = 0
-    cdef float m_realised_pnl = 0
-    cdef float m_net_investment = 0
-    cdef float m_loss_trade = 0
-    cdef float m_net_exposure = 0
+    cdef double m_net_position = 0
+    cdef double m_avg_open_price = 0
+    cdef double m_unrealised_pnl = 0
+    cdef double m_total_pnl = 0
+    cdef double m_realised_pnl = 0
+    cdef double m_net_investment = 0
+    cdef double m_loss_trade = 0
+    cdef double m_net_exposure = 0
 
     # loop variables
-    cdef float price
-    cdef float trade_quantity
-    cdef float trade_price
-    cdef float c_stop_limit
-    cdef float c_stop_loss
+    cdef double price
+    cdef double trade_quantity
+    cdef double trade_price
+    cdef double c_stop_limit
+    cdef double c_stop_loss
+    cdef double closed
+    cdef double dividend
 
     for idx in range(1, num_days):
 
@@ -90,35 +99,32 @@ cpdef compute_backtest(
             trade_quantity += m_loss_trade
 
         dividend = dividends[idx]
-        m_unrealised_pnl = (price - avg_open_price[idx_prev]) * m_net_position 
 
         m_realised_pnl = realised_pnl[idx_prev]
         m_avg_open_price = avg_open_price[idx_prev] if m_net_position != 0 else 0.0
 
         if trade_quantity != 0 and not isnan(trade_quantity):
 
-            trade_price = ask[idx] if trade_price > 0 else bid[idx]
+            trade_price = ask[idx] if trade_quantity > 0 else bid[idx]
 
             # net investment
             m_net_investment = max(
                 m_net_investment, abs(m_net_position * m_avg_open_price)
             )
-            # realized pnl
-            if abs(m_net_position + trade_quantity) < abs(m_net_position):
+            if m_net_position != 0 and sign(trade_quantity) != sign(m_net_position):
+                # realized pnl on the part of the position that is closed
+                closed = min(abs(trade_quantity), abs(m_net_position))
                 m_realised_pnl += (
-                    (trade_price - m_avg_open_price) * abs(trade_quantity) * sign(m_net_position)
+                    (trade_price - m_avg_open_price) * closed * sign(m_net_position)
                 )
-
-            # avg open price
-            if abs(m_net_position + trade_quantity) > abs(m_net_position):
+                # close-and-open: the remainder opens at the trade price
+                if abs(trade_quantity) > abs(m_net_position):
+                    m_avg_open_price = trade_price
+            else:
+                # avg open price
                 m_avg_open_price = (
                     (m_avg_open_price * m_net_position) + (trade_price * trade_quantity)
                 ) / (m_net_position + trade_quantity)
-            else:
-                # Check if it is close-and-open
-                if trade_quantity > abs(m_net_position):
-                    m_avg_open_price = trade_price
-
 
 
         if dividend != 0 and not isnan(dividend):
@@ -126,8 +132,7 @@ cpdef compute_backtest(
 
         # total pnl
         m_net_position += trade_quantity
-        if m_net_position == 0.0:
-            m_unrealised_pnl = 0.0
+        m_unrealised_pnl = mark(price, m_avg_open_price, m_net_position)
 
         m_total_pnl = m_realised_pnl + m_unrealised_pnl
 

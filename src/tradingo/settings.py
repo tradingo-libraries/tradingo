@@ -4,7 +4,9 @@ import dataclasses
 import json
 import os
 import pathlib
+import types
 import typing
+import warnings
 from importlib import import_module
 from typing import Any, MutableMapping, Optional, Self
 
@@ -38,6 +40,17 @@ def get_cls(
     if isinstance(cls, str):
         module, name = cls.rsplit(".", maxsplit=1)
         cls = getattr(import_module(module), name)
+
+    origin = typing.get_origin(cls)
+    if origin is typing.Union or origin is types.UnionType:
+        args = typing.get_args(cls)
+        non_none = [a for a in args if a is not type(None)]
+        if len(args) != 2 or len(non_none) != 1:
+            raise EnvProviderError(
+                f"Unhandled union type '{cls}': only Optional[...] unions are supported"
+            )
+        return get_cls(non_none[0])
+
     if cls is int:
         return int
     if cls is float:
@@ -123,6 +136,7 @@ class EnvProvider:
         cls,
         env: MutableMapping[str, str],
         app_prefix: str,
+        raise_unused: bool = False,
     ) -> Any:
         out = {}
         for k, v in env.items():
@@ -133,9 +147,15 @@ class EnvProvider:
             try:
                 field = cls.__dataclass_fields__[k__]
             except KeyError:
-                raise EnvProviderError(
-                    f"Unused config field '{k__}' with value '{v}' for prefix {app_prefix}"
-                )
+                if raise_unused:
+                    raise EnvProviderError(
+                        f"Unused config field '{k__}' with value '{v}' for prefix {app_prefix}"
+                    )
+                else:
+                    warnings.warn(
+                        f"Unused config field '{k__}' with value '{v}' for prefix {app_prefix}"
+                    )
+                continue
             v_ = type_shed(
                 field,
                 v,
@@ -175,8 +195,8 @@ class EnvProvider:
         app_prefix: str | None = None,
         env: MutableMapping[str, Any] | None = None,
         override_default_env: bool = True,
+        raise_unused: bool = False,
     ) -> Self:
-
         try:
             app_prefix = app_prefix or getattr(cls, "app_prefix")
         except AttributeError as ex:
@@ -190,7 +210,7 @@ class EnvProvider:
 
         env = env or dict(os.environ)
 
-        resolved_args = cls._resolve_args(env, app_prefix)
+        resolved_args = cls._resolve_args(env, app_prefix, raise_unused=raise_unused)
 
         default_env = cls._resolve_args(os.environ, app_prefix)
 
@@ -236,7 +256,36 @@ class IGTradingConfig(EnvProvider):
     username: str
     api_key: str
     acc_type: str
+    acc_number: str | None = None
     app_prefix = "IG_SERVICE"
+
+    @classmethod
+    def for_profile(
+        cls,
+        profile: str = "demo",
+        env: MutableMapping[str, Any] | None = None,
+    ) -> "IGTradingConfig":
+        """Credentials for a named IG profile.
+
+        The default ``demo`` profile is the ``IG_SERVICE_*`` variables; any other
+        profile ``<name>`` reads ``IG_<NAME>_*``, e.g. ``IG_PROD_USERNAME``.
+        """
+        return cls.from_env(app_prefix=ig_profile_prefix(profile), env=env)
+
+
+DEFAULT_IG_PROFILE = "demo"
+
+
+def ig_profile_prefix(profile: str) -> str:
+    """Environment prefix of an IG credential profile: demo -> IG_SERVICE."""
+    profile = profile.strip().lower()
+    if not profile:
+        raise ValueError("IG profile must not be empty")
+    if profile == DEFAULT_IG_PROFILE:
+        return "IG_SERVICE"
+    if profile == "service":
+        raise ValueError("'service' is the demo profile's prefix; use 'demo'")
+    return f"IG_{profile.upper()}"
 
 
 @dataclasses.dataclass
@@ -259,6 +308,11 @@ class TradingoConfig(EnvProvider):
     arctic_uri: str
     templates: pathlib.Path = pathlib.Path(templates.__file__).parent
     include_instruments: bool = False
+
+    celery_result_backend: str = "redis://:@localhost:6379/1"
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_queue: str = "tradingo"
+    execution_plan_redis_url: str = ""
     app_prefix = "TP"
 
 

@@ -1,6 +1,7 @@
 """static instruments data accessors."""
 
 import logging
+import math
 from typing import Any
 
 import pandas as pd
@@ -8,6 +9,7 @@ from yfinance import Ticker
 
 from tradingo.sampling.ig import get_ig_service
 from tradingo.sampling.yf import currency_to_symbol
+from tradingo.settings import DEFAULT_IG_PROFILE
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ def download_instruments(
     file: str | None = None,
     tickers: list[str] | str | None = None,
     epics: list[str] | None = None,
+    ig_profile: str = DEFAULT_IG_PROFILE,
 ) -> pd.DataFrame:
     if file:
         return pd.read_csv(
@@ -56,7 +59,8 @@ def download_instruments(
         )
 
     if epics:
-        service = get_ig_service()
+        # One request per epic from this process: keep the rate limiter on.
+        service = get_ig_service(use_rate_limiter=True, profile=ig_profile)
 
         return (
             pd.DataFrame(
@@ -67,3 +71,64 @@ def download_instruments(
         )
 
     raise ValueError(file)
+
+
+def measure_ig_price_scales(
+    source_prices: pd.Series,
+    epics: dict[str, str],
+    account_id: str | None = None,
+    service: Any = None,
+    ig_profile: str = DEFAULT_IG_PROFILE,
+) -> pd.DataFrame:
+    """Measure ``price_scale`` (IG price / source price) for each mapping.
+
+    Compares IG's current mid to the latest source price, so run it while
+    both markets are open. Prices are only quoted for the account type the
+    session is on: pass the spread-bet ``account_id`` when the preferred
+    account is CFD.
+
+    Example (in-cluster, e.g. via the MCP ``run_python`` tool)::
+
+        mid = api.prices_5min.dukascopy.mid.close().ffill().iloc[-1]
+        measure_ig_price_scales(mid, {"USD/JPY": "CS.D.USDJPY.TODAY.IP"},
+                                account_id="<spread-bet account>")
+
+    :param source_prices: latest source price, indexed by source symbol.
+    :param epics: source symbol -> IG epic.
+    :return: frame indexed by source symbol with epic, IG mid, source price,
+        ``price_scale`` (the raw ratio) and market status.
+    """
+    service = service or get_ig_service(profile=ig_profile)
+    if account_id:
+        service.switch_account(account_id, False)
+
+    markets: dict[str, dict[str, Any]] = {}
+    unique = list(dict.fromkeys(epics.values()))
+    for i in range(0, len(unique), 50):
+        for market in service.fetch_markets_by_epics(
+            ",".join(unique[i : i + 50]), detailed=True
+        ):
+            markets[market["instrument"]["epic"]] = market
+
+    rows = []
+    for source, epic in epics.items():
+        market = markets.get(epic)
+        if market is None:
+            logger.warning("No IG market for %s (%s)", source, epic)
+            continue
+        snapshot = market["snapshot"]
+        bid, offer = snapshot.get("bid"), snapshot.get("offer")
+        ig_mid = (bid + offer) / 2 if bid and offer else math.nan
+        src = float(source_prices.get(source, math.nan))
+        rows.append(
+            {
+                "source": source,
+                "epic": epic,
+                "name": market["instrument"].get("name"),
+                "status": snapshot.get("marketStatus"),
+                "ig_mid": ig_mid,
+                "source_price": src,
+                "price_scale": ig_mid / src if src else math.nan,
+            }
+        )
+    return pd.DataFrame(rows).set_index("source")

@@ -1,10 +1,11 @@
-from typing import cast
+from collections.abc import Iterator
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 import pytest
 from arcticdb import Arctic, LibraryOptions
-from arcticdb.exceptions import NoSuchVersionException
+from arcticdb.exceptions import NoSuchVersionException, StreamDescriptorMismatch
 
 from tradingo.symbols import (
     Symbol,
@@ -150,6 +151,31 @@ def test_symbol_parse_with_query_params() -> None:
 def test_symbol_parse_with_as_of() -> None:
     symbol = Symbol.parse("my-lib/symbol?as_of=123", {})
     assert symbol.kwargs == {"as_of": 123}
+
+
+def test_symbol_parse_with_metadata_true() -> None:
+    symbol = Symbol.parse("my-lib/symbol?metadata=true", {})
+    assert symbol.kwargs == {"metadata": True}
+
+
+def test_symbol_parse_with_metadata_false() -> None:
+    symbol = Symbol.parse("my-lib/symbol?metadata=false", {})
+    assert symbol.kwargs == {"metadata": False}
+
+
+def test_symbol_parse_with_negative_as_of() -> None:
+    symbol = Symbol.parse("my-lib/symbol?as_of=-1", {})
+    assert symbol.kwargs == {"as_of": -1}
+
+
+def test_symbol_parse_with_optional_true() -> None:
+    symbol = Symbol.parse("my-lib/symbol?optional=true", {})
+    assert symbol.kwargs == {"optional": True}
+
+
+def test_symbol_parse_with_optional_false() -> None:
+    symbol = Symbol.parse("my-lib/symbol?optional=false", {})
+    assert symbol.kwargs == {"optional": False}
 
 
 def test_symbol_parse_missing_param_raises() -> None:
@@ -307,6 +333,39 @@ def test_symbol_provider_passes_dates_to_function(arctic: Arctic) -> None:
     assert result[2] == end
 
 
+def test_symbol_provider_metadata_query_param(arctic: Arctic) -> None:
+    lib = arctic.get_library(name="my-lib", create_if_missing=True)
+    data = pd.DataFrame(
+        {"A": [1.0]},
+        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+    )
+    lib.write("meta-sym", data, metadata={"run": 1, "reasoning": "bullish"})
+
+    @symbol_provider(prev_meta="my-lib/meta-sym?metadata=true")  # type: ignore[type-var]
+    def provider(prev_meta: dict[str, Any]) -> dict[str, Any]:
+        return prev_meta
+
+    result = provider(arctic=arctic)  # type: ignore[call-arg]
+    assert result == {"run": 1, "reasoning": "bullish"}
+
+
+def test_symbol_provider_metadata_with_as_of(arctic: Arctic) -> None:
+    lib = arctic.get_library(name="my-lib", create_if_missing=True)
+    data = pd.DataFrame(
+        {"A": [1.0]},
+        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+    )
+    lib.write("versioned-meta", data, metadata={"run": 1})
+    lib.write("versioned-meta", data, metadata={"run": 2})
+
+    @symbol_provider(prev_meta="my-lib/versioned-meta?as_of=0&metadata=true")  # type: ignore[type-var]
+    def provider(prev_meta: dict[str, Any]) -> dict[str, Any]:
+        return prev_meta
+
+    result = provider(arctic=arctic)  # type: ignore[call-arg]
+    assert result == {"run": 1}
+
+
 def test_symbol_provider_with_columns_query_param(arctic: Arctic) -> None:
     lib = arctic.get_library(name="my-lib", create_if_missing=True)
     data = pd.DataFrame(
@@ -321,6 +380,45 @@ def test_symbol_provider_with_columns_query_param(arctic: Arctic) -> None:
 
     result = provider(arctic=arctic)  # type: ignore
     assert list(result.columns) == ["A", "B"]
+
+
+def test_symbol_provider_optional_returns_none_when_missing(arctic: Arctic) -> None:
+    @symbol_provider(prev_positions="my-lib/nonexistent?optional=true")  # type: ignore[type-var]
+    def provider(prev_positions: pd.DataFrame | None = None) -> pd.DataFrame | None:
+        return prev_positions
+
+    result = provider(arctic=arctic)
+    assert result is None
+
+
+def test_symbol_provider_optional_returns_data_when_present(arctic: Arctic) -> None:
+    lib = arctic.get_library("my-lib", create_if_missing=True)
+    data = pd.DataFrame(
+        {"A": [1.0]},
+        index=pd.date_range("2026-01-01", periods=1, tz="utc"),
+    )
+    lib.write("optional-sym", data)
+
+    @symbol_provider(input_1="my-lib/optional-sym?optional=true")  # type: ignore[type-var]
+    def provider(input_1: pd.DataFrame | None = None) -> pd.DataFrame | None:
+        return input_1
+
+    result = provider(arctic=arctic)
+    assert result is not None
+    pd.testing.assert_frame_equal(result, data, check_freq=False)
+
+
+def test_symbol_provider_optional_with_metadata_returns_none_when_missing(
+    arctic: Arctic,
+) -> None:
+    """Mirrors the agent.yaml first-run case: ?as_of=-1&metadata=true&optional=true."""
+
+    @symbol_provider(prev_meta="my-lib/nonexistent?as_of=-1&metadata=true&optional=true")  # type: ignore[type-var]
+    def provider(prev_meta: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        return prev_meta
+
+    result = provider(arctic=arctic)
+    assert result is None
 
 
 # =============================================================================
@@ -446,6 +544,31 @@ def test_symbol_publisher_with_template(arctic: Arctic) -> None:
     assert "sym2" in arctic.get_library("lib2").list_symbols()
 
 
+def test_symbol_publisher_generator_publishes_each_batch(arctic: Arctic) -> None:
+    def frame(start: str, value: float) -> pd.DataFrame:
+        return pd.DataFrame(
+            {"A": [value] * 2}, index=pd.date_range(start, periods=2, freq="D")
+        )
+
+    @symbol_publisher(template="batch-lib/{0}")  # type: ignore
+    def publisher() -> Iterator[tuple[tuple[pd.DataFrame, tuple[str]], ...]]:
+        yield (frame("2026-01-01", 1.0), ("sym",)), (frame("2026-01-01", 5.0), ("x",))
+        yield ((frame("2026-01-03", 2.0), ("sym",)),)
+
+    publisher(arctic=arctic, dry_run=False)
+    publisher(arctic=arctic, dry_run=False, clean=True)
+
+    lib = arctic.get_library("batch-lib")
+    result = cast(pd.DataFrame, lib.read("sym").data)
+    # clean deletes before the first batch only, so both batches survive.
+    assert result["A"].tolist() == [1.0, 1.0, 2.0, 2.0]
+    assert cast(pd.DataFrame, lib.read("x").data)["A"].tolist() == [5.0, 5.0]
+
+    dry = publisher(arctic=arctic, dry_run=True)
+    assert dry is not None
+    assert dry[("batch-lib/sym", "A")].tolist() == [1.0, 1.0, 2.0, 2.0]
+
+
 def test_symbol_publisher_write_pickle(arctic: Arctic) -> None:
     @symbol_publisher("my-lib/pickled", write_pickle=True)
     def publisher() -> pd.DataFrame:
@@ -520,6 +643,50 @@ def test_symbol_publisher_skips_empty_dataframe(arctic: Arctic) -> None:
     publisher(arctic=arctic, dry_run=False)
     lib = arctic.get_library("my-lib", create_if_missing=True)
     assert "empty-symbol" not in lib.list_symbols()
+
+
+def test_symbol_publisher_dynamic_metadata(arctic: Arctic) -> None:
+    @symbol_publisher("my-lib/meta-symbol")  # type: ignore[type-var]
+    def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
+        df = pd.DataFrame(
+            {"A": [1.0]},
+            index=pd.date_range("2026-01-01", periods=1),
+        )
+        return df, {"reasoning": "bullish", "tokens_in": 100}
+
+    publisher(arctic=arctic, dry_run=False)
+    item = arctic.get_library("my-lib").read("meta-symbol")
+    assert item.metadata == {"reasoning": "bullish", "tokens_in": 100}
+
+
+def test_symbol_publisher_dynamic_metadata_merges_static(arctic: Arctic) -> None:
+    @symbol_publisher("my-lib/merge-meta", metadata={"static_key": "static_val"})  # type: ignore[type-var]
+    def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
+        df = pd.DataFrame(
+            {"A": [1.0]},
+            index=pd.date_range("2026-01-01", periods=1),
+        )
+        return df, {"dynamic_key": "dynamic_val"}
+
+    publisher(arctic=arctic, dry_run=False)
+    item = arctic.get_library("my-lib").read("merge-meta")
+    assert item.metadata == {"static_key": "static_val", "dynamic_key": "dynamic_val"}
+
+
+def test_symbol_publisher_dynamic_metadata_dry_run_excludes_dict(
+    arctic: Arctic,
+) -> None:
+    @symbol_publisher("my-lib/dry-meta")  # type: ignore[type-var]
+    def publisher() -> tuple[pd.DataFrame, dict[str, Any]]:
+        df = pd.DataFrame(
+            {"A": [1.0]},
+            index=pd.date_range("2026-01-01", periods=1),
+        )
+        return df, {"reasoning": "test"}
+
+    result = publisher(arctic=arctic, dry_run=True)
+    assert isinstance(result, pd.DataFrame)
+    assert ("my-lib/dry-meta", "A") in result.columns
 
 
 def test_symbol_publisher_rejects_positional_args(arctic: Arctic) -> None:
@@ -648,3 +815,263 @@ def test_provider_and_publisher_passes_arctic_to_function(arctic: Arctic) -> Non
 
     func(arctic=arctic, dry_run=False)  # type: ignore
     assert "output-sym" in lib.list_symbols()
+
+
+def test_coerce_to_schema_columns_and_index(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from tradingo.symbols import _coerce_columns, _coerce_index
+
+    idx = pd.date_range("2024-01-01", periods=3, freq="D")
+    df = pd.DataFrame({"b": 1.0, "z": 2.0}, index=idx)
+
+    with caplog.at_level("WARNING"):
+        out = _coerce_columns(df, ["a", "b"], "sym")
+    assert list(out.columns) == ["a", "b"]
+    assert out["a"].isna().all()
+    assert "adding missing" in caplog.text and "dropping" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        out = _coerce_index(df, "DateTime", True, "sym")
+    assert isinstance(out.index, pd.DatetimeIndex)
+    assert str(out.index.tz) == "UTC"
+    assert out.index.name == "DateTime"
+    assert "tz-naive" in caplog.text
+
+    out = _coerce_index(df.tz_localize("US/Eastern"), None, True, "sym")
+    assert isinstance(out.index, pd.DatetimeIndex)
+    assert str(out.index.tz) == "UTC"
+
+
+def test_coerce_types(caplog: pytest.LogCaptureFixture) -> None:
+    from tradingo.symbols import _coerce_types
+
+    df = pd.DataFrame(
+        {
+            "f": [1, 2],
+            "s": pd.Series([1, None], dtype=object),
+            "b": [1, 0],
+            "keep": [1, 2],
+        },
+    )
+    with caplog.at_level("WARNING"):
+        out = _coerce_types(
+            df, {"f": "FLOAT64", "s": "UTF_DYNAMIC64", "b": "BOOL8"}, "sym"
+        )
+    assert out["f"].dtype == np.float64
+    assert out["b"].dtype == bool
+    assert out["s"].tolist()[0] == "1" and pd.isna(out["s"].tolist()[1])
+    assert out["keep"].dtype == df["keep"].dtype
+    assert "casting column 'f'" in caplog.text
+
+
+def test_symbol_publisher_coerce_types_float_to_int(
+    arctic: Arctic, caplog: pytest.LogCaptureFixture
+) -> None:
+    index = pd.date_range("2026-01-01", periods=4, tz="UTC")
+
+    rows: dict[str, Any] = {}
+
+    @symbol_publisher("my-lib/ints", coerce_types=True)
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame({"A": rows["values"]}, index=rows["index"])
+
+    rows.update(values=[1, 2], index=index[:2])
+    publisher(arctic=arctic, dry_run=False)
+    lib = arctic.get_library("my-lib")
+    assert cast(pd.DataFrame, lib.read("ints").data)["A"].dtype == np.int64
+
+    with caplog.at_level("WARNING"):
+        rows.update(values=[3.0, 4.0], index=index[2:])
+        publisher(arctic=arctic, dry_run=False)
+
+    result = cast(pd.DataFrame, arctic.get_library("my-lib").read("ints").data)
+    assert result["A"].dtype == np.int64
+    assert result["A"].tolist() == [1, 2, 3, 4]
+    assert "casting column 'A' from float64 to int64" in caplog.text
+
+
+def _stored_with_float_strings(arctic: Arctic, sym: str) -> pd.DatetimeIndex:
+    """A log first written when its string column was all NaN (float64)."""
+    index = pd.date_range("2026-01-01", periods=4, tz="UTC", name="DateTime")
+    arctic.get_library("my-lib", create_if_missing=True).write(
+        sym,
+        pd.DataFrame(
+            {
+                "dealId": [np.nan, np.nan],
+                "epic": ["X", "nan"],
+                "size": [1.0, 2.0],
+                "old": [1, 2],
+            },
+            index=index[:2],
+        ),
+    )
+    return index
+
+
+def test_symbol_publisher_migrate_schema(
+    arctic: Arctic, caplog: pytest.LogCaptureFixture
+) -> None:
+    index = _stored_with_float_strings(arctic, "migrate")
+
+    @symbol_publisher("my-lib/migrate", migrate_schema=True)
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "dealId": pd.Series(["D1", None], dtype=object, index=index[2:]),
+                "epic": pd.Series(["Y", None], dtype=object, index=index[2:]),
+                "size": [3.0, np.nan],
+                "level": [10.0, np.nan],
+            },
+            index=index[2:],
+        )
+
+    with caplog.at_level("WARNING"):
+        publisher(arctic=arctic, dry_run=False)
+
+    lib = arctic.get_library("my-lib")
+    result = cast(pd.DataFrame, lib.read("migrate").data)
+    assert list(result.columns) == ["dealId", "epic", "size", "level"]
+    assert result["dealId"].tolist() == [None, None, "D1", None]
+    assert result["epic"].tolist() == ["X", None, "Y", None]
+    assert result["size"].tolist()[:3] == [1.0, 2.0, 3.0]
+    assert result["level"].isna().tolist() == [True, True, False, True]
+    assert "migrating 2 rows (dropping columns ['old'])" in caplog.text
+    # the pre-migration version is kept
+    assert len(lib.list_versions("migrate")) == 3
+
+
+def test_symbol_publisher_schema_mismatch_raises_without_migrate(
+    arctic: Arctic,
+) -> None:
+    index = _stored_with_float_strings(arctic, "no-migrate")
+
+    @symbol_publisher("my-lib/no-migrate")
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "dealId": pd.Series(["D1"], dtype=object),
+                "size": [3.0],
+                "old": [3],
+            },
+        ).set_axis(index[2:3])
+
+    with pytest.raises(StreamDescriptorMismatch):
+        publisher(arctic=arctic, dry_run=False)
+
+
+def test_symbol_publisher_migrate_schema_union_keeps_all_columns(
+    arctic: Arctic,
+) -> None:
+    """A universe whose epics change keeps the old epics' history."""
+    index = pd.date_range("2026-01-01", periods=5, tz="UTC", name="DateTime")
+    frames = iter(
+        [
+            pd.DataFrame(
+                {"KA.SPY": [1.0, 2.0], "SMH": [0.0, 1.0], "note": ["a", "b"]},
+                index=index[:2],
+            ),
+            # epic swapped, string column absent
+            pd.DataFrame({"SI.SPY": [5.0, 0.0], "SMH": [3.0, 3.0]}, index=index[2:4]),
+            # no new columns: a plain update, no migration
+            pd.DataFrame({"SI.SPY": [7.0], "SMH": [4.0]}, index=index[4:]),
+        ]
+    )
+
+    @symbol_publisher("my-lib/union", migrate_schema="union")
+    def publisher() -> pd.DataFrame:
+        return next(frames)
+
+    for _ in range(3):
+        publisher(arctic=arctic, dry_run=False)
+
+    lib = arctic.get_library("my-lib")
+    result = cast(pd.DataFrame, lib.read("union").data)
+    assert list(result.columns) == ["KA.SPY", "SMH", "note", "SI.SPY"]
+    assert result["KA.SPY"].tolist()[:2] == [1.0, 2.0]
+    assert result["KA.SPY"].isna().tolist() == [False, False, True, True, True]
+    assert result["SMH"].tolist() == [0.0, 1.0, 3.0, 3.0, 4.0]
+    assert result["note"].tolist() == ["a", "b", None, None, None]
+    assert result["SI.SPY"].tolist()[2:] == [5.0, 0.0, 7.0]
+    # write, migration rewrite + update, then a single update
+    assert len(lib.list_versions("union")) == 4
+
+
+def test_symbol_publisher_migrate_schema_union_new_symbol(arctic: Arctic) -> None:
+    index = pd.date_range("2026-01-01", periods=2, tz="UTC", name="DateTime")
+
+    @symbol_publisher("my-lib/union-new", migrate_schema="union")
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame({"A": [1.0, 2.0]}, index=index)
+
+    publisher(arctic=arctic, dry_run=False)
+
+    result = cast(pd.DataFrame, arctic.get_library("my-lib").read("union-new").data)
+    assert result["A"].tolist() == [1.0, 2.0]
+
+
+def test_symbol_publisher_dynamic_schema_creates_dynamic_library(
+    arctic: Arctic,
+) -> None:
+    index = pd.date_range("2026-01-01", periods=4, tz="UTC", name="DateTime")
+    frames = iter(
+        [
+            pd.DataFrame({"a": [1.0, 2.0]}, index=index[:2]),
+            # a new column needs dynamic schema
+            pd.DataFrame({"a": [3.0, 4.0], "b": [5.0, 6.0]}, index=index[2:]),
+        ]
+    )
+
+    @symbol_publisher("dyn-lib/sym", dynamic_schema=True)
+    def publisher() -> pd.DataFrame:
+        return next(frames)
+
+    publisher(arctic=arctic, dry_run=False)
+    publisher(arctic=arctic, dry_run=False)
+
+    lib = arctic.get_library("dyn-lib")
+    assert lib.options().dynamic_schema
+    result = cast(pd.DataFrame, lib.read("sym").data)
+    assert list(result.columns) == ["a", "b"]
+    assert result["a"].tolist() == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_symbol_publisher_dynamic_schema_overrides_library_options(
+    arctic: Arctic,
+) -> None:
+    options = LibraryOptions(dynamic_schema=False, rows_per_segment=1000)
+
+    @symbol_publisher("dyn-lib-opts/sym", library_options=options, dynamic_schema=True)
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame(
+            {"a": [1.0]},
+            index=pd.DatetimeIndex(["2026-01-01"], tz="UTC", name="DateTime"),
+        )
+
+    publisher(arctic=arctic, dry_run=False)
+
+    created = arctic.get_library("dyn-lib-opts").options()
+    assert created.dynamic_schema
+    assert created.rows_per_segment == 1000
+    # the caller's options are not mutated
+    assert not options.dynamic_schema
+
+
+def test_symbol_publisher_dynamic_schema_warns_on_static_library(
+    arctic: Arctic, caplog: pytest.LogCaptureFixture
+) -> None:
+    arctic.create_library("static-lib")
+
+    @symbol_publisher("static-lib/sym", dynamic_schema=True)
+    def publisher() -> pd.DataFrame:
+        return pd.DataFrame(
+            {"a": [1.0]},
+            index=pd.DatetimeIndex(["2026-01-01"], tz="UTC", name="DateTime"),
+        )
+
+    with caplog.at_level("WARNING"):
+        publisher(arctic=arctic, dry_run=False)
+
+    assert not arctic.get_library("static-lib").options().dynamic_schema
+    assert "library static-lib was created with" in caplog.text
