@@ -424,6 +424,79 @@ class TestGetIgService:
             retryer(calls)
         assert calls.call_count == 3
 
+    @staticmethod
+    def _run_on_fake_clock(
+        retryer: Any, window: float
+    ) -> tuple[list[float], list[float], float | None]:
+        """Run ``retryer`` on a fake clock against IG answering
+        ``ApiExceededException`` for the first ``window`` seconds.
+
+        Returns (attempt times, sleeps, time of the successful attempt or None).
+        """
+        from tradingo.ig_rest import ApiExceededException
+
+        clock = [0.0]
+        attempts: list[float] = []
+        sleeps: list[float] = []
+
+        def sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            clock[0] += seconds
+
+        def request() -> float:
+            attempts.append(clock[0])
+            if clock[0] < window:
+                raise ApiExceededException()
+            return clock[0]
+
+        with patch("time.monotonic", lambda: clock[0]):
+            try:
+                return attempts, sleeps, retryer.copy(sleep=sleep)(request)
+            except ApiExceededException:
+                return attempts, sleeps, None
+
+    @pytest.mark.parametrize("seed", range(20))
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_backoff_outlasts_the_allowance_minute(
+        self, mock_ig_service_cls: MagicMock, mock_config: MagicMock, seed: int
+    ) -> None:
+        # IG's allowances are a rolling minute. On 2026-11-26 the demo key was
+        # refused for ~40s after each quarter-hour, and a 6-attempt budget (~13s)
+        # gave up inside it: every trade task failed at login.
+        import random
+
+        from tradingo.sampling.ig import get_ig_service
+
+        random.seed(seed)
+        get_ig_service()
+        retryer = mock_ig_service_cls.call_args[1]["retryer"]
+
+        attempts, sleeps, recovered = self._run_on_fake_clock(retryer, window=60.0)
+        assert recovered is not None and 60.0 <= recovered <= 90.0
+        # Every wait keeps its fixed half: no burst of rejected requests.
+        assert all(s >= min(2 ** (n - 1), 10.0) for n, s in enumerate(sleeps, 1))
+        assert len(attempts) <= 12
+
+    @pytest.mark.parametrize("seed", range(20))
+    @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
+    @patch("tradingo.sampling.ig.IGService")
+    def test_get_ig_service_backoff_stops_by_max_retry_time(
+        self, mock_ig_service_cls: MagicMock, mock_config: MagicMock, seed: int
+    ) -> None:
+        import random
+
+        from tradingo.sampling.ig import get_ig_service
+
+        random.seed(seed)
+        get_ig_service()
+        retryer = mock_ig_service_cls.call_args[1]["retryer"]
+
+        attempts, _, recovered = self._run_on_fake_clock(retryer, window=1e9)
+        assert recovered is None
+        assert attempts[-1] <= 90.0
+        assert 7 <= len(attempts) <= 12
+
     @patch("tradingo.sampling.ig.IGTradingConfig.from_env")
     @patch("tradingo.sampling.ig.IGService")
     def test_get_ig_service_backoff_only_retries_allowance(

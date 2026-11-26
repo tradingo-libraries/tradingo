@@ -12,6 +12,8 @@ from tenacity import (
     Retrying,
     retry_if_exception_type,
     stop_after_attempt,
+    stop_before_delay,
+    wait_exponential,
     wait_random_exponential,
 )
 
@@ -44,8 +46,9 @@ def get_ig_service(
     acc_number: str | None = None,
     use_rate_limiter: bool = False,
     profile: str = DEFAULT_IG_PROFILE,
-    max_attempts: int = 6,
-    max_wait: float = 60.0,
+    max_retry_time: float = 90.0,
+    max_wait: float = 20.0,
+    max_attempts: int = 12,
 ) -> IGService:
     """Logged-in IG session.
 
@@ -58,27 +61,36 @@ def get_ig_service(
         each other. Off by default: DAG tasks make a handful of requests each and the
         retryer below backs off on ``ApiExceededException``. Turn it on for bulk loops
         that make many requests from one process.
-    :param max_attempts: requests (login included) are tried this many times on
-        ``ApiExceededException`` before it is raised.
-    :param max_wait: cap in seconds on one backoff. IG allowances are per minute, so
-        waiting longer than that buys nothing.
+    :param max_retry_time: seconds a request (login included) keeps retrying on
+        ``ApiExceededException``; no retry is started that would end after it, and
+        the ``ApiExceededException`` itself is then raised. IG's allowances are a
+        rolling minute, so this must outlast 60s: a shorter budget gives up while
+        the window is still full and turns a rate limit into a failed task.
+    :param max_wait: cap in seconds on one backoff.
+    :param max_attempts: hard bound on tries, a backstop to ``max_retry_time``.
 
-    Backoff is full-jitter exponential (uniform in ``[0, min(max_wait, 2**n)]``), so
-    parallel tasks that hit the allowance together don't log in again in lockstep.
-    With the defaults a request gives up after ~1-2 minutes, rather than retrying
-    forever with an unbounded wait.
+    Backoff is exponential with "equal jitter": half of ``min(max_wait, 2**n)`` is
+    fixed, the other half random. The fixed half keeps the retries from spending
+    the allowance they are waiting for (a near-zero full-jitter wait is one more
+    rejected request inside the same window), the random half stops parallel tasks
+    that hit the allowance together from retrying in lockstep. With the defaults
+    the waits are 1-2, 2-4, 4-8, 8-16, then 10-20s, so a request is tried 7-12
+    times over at most 90s.
     """
     config = IGTradingConfig.for_profile(profile)
 
     retryer = Retrying(
-        wait=wait_random_exponential(multiplier=1, max=max_wait),
-        stop=stop_after_attempt(max_attempts),
+        wait=wait_exponential(multiplier=1, max=max_wait / 2)
+        + wait_random_exponential(multiplier=1, max=max_wait / 2),
+        stop=stop_before_delay(max_retry_time) | stop_after_attempt(max_attempts),
         retry=retry_if_exception_type(ApiExceededException),
         before_sleep=lambda state: logger.warning(
-            "IG API allowance exceeded (profile=%s, attempt %s/%s), retrying in %.1fs",
+            "IG API allowance exceeded (profile=%s, attempt %s, %.0fs/%.0fs),"
+            " retrying in %.1fs",
             profile,
             state.attempt_number,
-            max_attempts,
+            state.seconds_since_start or 0.0,
+            max_retry_time,
             state.next_action.sleep if state.next_action else 0.0,
         ),
         reraise=True,
