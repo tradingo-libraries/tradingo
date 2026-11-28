@@ -1055,6 +1055,38 @@ class TestIgCreateUniverse:
         assert len(result) == 12  # 4 bid + 4 ask + 4 mid
         assert mock_lib.read_batch.call_count == 1  # bid and ask
 
+    @pytest.mark.parametrize("name", ["DateTime", "timestamp"])
+    def test_create_universe_keeps_index_name_with_missing_member(
+        self, name: str
+    ) -> None:
+        """A missing member's placeholder must not drop the members' index name."""
+        from arcticdb import Arctic
+
+        from tradingo.sampling.ig import create_universe
+
+        lib = Arctic("mem://ig-universe").get_library(
+            f"raw-{name}", create_if_missing=True
+        )
+        index = pd.date_range(
+            "2026-11-26", periods=3, freq="15min", tz="UTC", name=name
+        )
+        bars = pd.DataFrame(
+            {"Open": 1.0, "High": 1.0, "Low": 1.0, "Close": 1.0}, index=index
+        )
+        lib.write("PRESENT.bid", bars)
+        lib.write("PRESENT.ask", bars)
+        instruments = pd.DataFrame(
+            index=pd.Index(["PRESENT", "MISSING"], name="Symbol")
+        )
+
+        result = create_universe.__wrapped__(  # type: ignore
+            lib, instruments, index[-1], index[0], permit_missing=True
+        )
+
+        for frame in result:
+            assert frame.index.name == name
+            assert list(frame.columns) == ["PRESENT", "MISSING"]
+
 
 class TestMeasureIgPriceScales:
     """Measure IG price / source price for dukascopy and yfinance mappings."""

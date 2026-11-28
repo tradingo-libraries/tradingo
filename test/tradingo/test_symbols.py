@@ -942,6 +942,37 @@ def test_symbol_publisher_migrate_schema(
     assert len(lib.list_versions("migrate")) == 3
 
 
+def test_symbol_publisher_migrate_schema_index_name(
+    arctic: Arctic, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unnamed stored index is renamed once, then updates go straight through."""
+    index = pd.date_range("2026-01-01", periods=4, tz="UTC", name="DateTime")
+    lib = arctic.get_library("my-lib", create_if_missing=True)
+    lib.write(
+        "index-name", pd.DataFrame({"a": [1.0, 2.0]}, index=index[:2].rename(None))
+    )
+
+    def publish(rows: slice) -> None:
+        @symbol_publisher("my-lib/index-name", migrate_schema=True)
+        def publisher() -> pd.DataFrame:
+            return pd.DataFrame({"a": [3.0] * len(index[rows])}, index=index[rows])
+
+        publisher(arctic=arctic, dry_run=False)
+
+    with caplog.at_level("WARNING"):
+        publish(slice(2, 3))
+    assert "migrating 2 rows" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        publish(slice(3, 4))
+    assert "migrating" not in caplog.text
+
+    result = cast(pd.DataFrame, arctic.get_library("my-lib").read("index-name").data)
+    assert result.index.name == "DateTime"
+    assert result["a"].tolist() == [1.0, 2.0, 3.0, 3.0]
+
+
 def test_symbol_publisher_schema_mismatch_raises_without_migrate(
     arctic: Arctic,
 ) -> None:

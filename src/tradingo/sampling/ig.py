@@ -245,6 +245,14 @@ def create_universe(
         axis=1,
         keys=instruments.index.to_list(),
     ).reorder_levels([1, 2, 0], axis=1)
+    # pd.concat keeps an index name only if every frame shares it, so a missing
+    # member's placeholder would leave the panel unnamed and its stored schema
+    # would depend on which members were present. Use the members' own name.
+    names = {
+        item.data.index.name for item in data if not isinstance(item, adb.DataError)
+    }
+    if len(names) == 1:
+        result.index.name = names.pop()
     return (
         pd.DataFrame(result["bid"]["Open"]),
         pd.DataFrame(result["bid"]["High"]),
