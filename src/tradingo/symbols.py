@@ -264,7 +264,7 @@ def _union_with_stored(
 
 
 def _conform_to(stored: pd.DataFrame, data: pd.DataFrame) -> pd.DataFrame:
-    """Reshape ``stored`` to the columns and dtypes of ``data``.
+    """Reshape ``stored`` to the index name, columns and dtypes of ``data``.
 
     Missing columns are null, columns ``data`` doesn't have are dropped. Object
     columns hold ``str`` or ``None``; the strings ``"nan"`` / ``"None"`` (what
@@ -272,6 +272,10 @@ def _conform_to(stored: pd.DataFrame, data: pd.DataFrame) -> pd.DataFrame:
     cast numerically with unparseable values as NaN.
     """
     conformed = stored.reindex(columns=data.columns)
+    if conformed.index.nlevels == 1 and data.index.nlevels == 1:
+        # The index name is part of the schema: keep the published one, or an
+        # update after the migration is rejected again.
+        conformed.index = conformed.index.rename(data.index.name)
     for column in data.columns:
         dtype = data[column].dtype
         values = conformed[column]
